@@ -1,7 +1,7 @@
 /**
  * Overview / Dashboard Page Component
  * Minimal, focused internal dashboard for clothing store management.
- * Formats: 4 KPI Cards -> Sales Trend (Left) + Top Selling Products (Right) -> Recent Purchase History (Bottom Table)
+ * Formats: 4 KPI Cards -> Sales Trend (Left) + Top Selling Products (Right) -> Recent Sales History (Bottom Table)
  */
 import { store } from '../../data/mockData.js';
 import { createMetricCard } from '../../components/shared/MetricCard.js';
@@ -21,7 +21,7 @@ export function renderOverview(onNavigate) {
   headerDiv.innerHTML = `
     <div>
       <h2 class="section-heading">Store Overview</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Key store metrics, sales trend, top performing products, and recent stock intake.</p>
+      <p style="font-size: 0.85rem; color: var(--text-secondary);">Key store metrics, sales trend, top performing products, and recent customer sales.</p>
     </div>
   `;
   container.appendChild(headerDiv);
@@ -30,7 +30,6 @@ export function renderOverview(onNavigate) {
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'kpi-grid';
 
-  // Card 1: Total Revenue
   let totalRevAmt = data.sales.reduce((sum, s) => sum + s.totalAmount, 0) + 271708; // Realistic sample revenue ₹2,84,500
   kpiGrid.appendChild(createMetricCard({
     label: 'Total Revenue',
@@ -39,7 +38,6 @@ export function renderOverview(onNavigate) {
     icon: 'dollar-sign'
   }));
 
-  // Card 2: Total Products
   kpiGrid.appendChild(createMetricCard({
     label: 'Total Products',
     value: `${metrics.totalProducts}`,
@@ -47,7 +45,6 @@ export function renderOverview(onNavigate) {
     icon: 'package'
   }));
 
-  // Card 3: Low Stock
   kpiGrid.appendChild(createMetricCard({
     label: 'Low Stock',
     value: `${metrics.lowStockCount || 6}`,
@@ -56,7 +53,6 @@ export function renderOverview(onNavigate) {
     variant: 'warning'
   }));
 
-  // Card 4: Out of Stock
   kpiGrid.appendChild(createMetricCard({
     label: 'Out of Stock',
     value: `${metrics.outOfStockCount || 2}`,
@@ -72,8 +68,8 @@ export function renderOverview(onNavigate) {
   grid2Col.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; width: 100%; align-items: stretch;';
   if (window.innerWidth <= 1024) grid2Col.style.gridTemplateColumns = '1fr';
 
-  // SECTION 2: SALES TREND (Left Side - High Polish UI)
-  let activePeriod = '30 Days';
+  // SECTION 2: SALES TREND (Default Period: 1W)
+  let activePeriod = '1W';
   const salesTrendCard = document.createElement('div');
   salesTrendCard.className = 'card';
   salesTrendCard.style.display = 'flex';
@@ -81,133 +77,193 @@ export function renderOverview(onNavigate) {
   salesTrendCard.style.justifyContent = 'space-between';
 
   const chartDatasets = {
-    '7 Days': {
+    '1W': {
+      periodLabel: '1W',
+      startRevLabel: 'Start of Week',
+      startRevVal: '₹70,000',
+      endRevLabel: 'End of Week',
+      endRevVal: '₹82,450',
+      revDiff: '+₹12,450',
+      revGrowth: '+17.8%',
+      isRevPositive: true,
+      cogs: '₹55,000',
+      profitLabel: 'Profit',
+      profitVal: '+₹27,450',
+      profitMargin: '33.3%',
+      isProfit: true,
+      yMax: '₹85k',
+      yMid: '₹75k',
       labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-      yMax: '₹20k',
-      yMid: '₹10k',
-      total: '₹68,450',
       coords: [
-        { x: 20, y: 130, val: '₹8,500', label: 'Mon' },
-        { x: 95, y: 95, val: '₹12,400', label: 'Tue' },
-        { x: 170, y: 118, val: '₹9,800', label: 'Wed' },
-        { x: 245, y: 75, val: '₹14,900', label: 'Thu' },
-        { x: 320, y: 105, val: '₹11,200', label: 'Fri' },
-        { x: 395, y: 45, val: '₹18,500', label: 'Sat' },
-        { x: 470, y: 65, val: '₹15,150', label: 'Sun' }
+        { x: 20, y: 140, val: '₹70,000', label: 'Mon' },
+        { x: 95, y: 122, val: '₹72,500', label: 'Tue' },
+        { x: 170, y: 98, val: '₹75,800', label: 'Wed' },
+        { x: 245, y: 110, val: '₹74,200', label: 'Thu' },
+        { x: 320, y: 78, val: '₹78,600', label: 'Fri' },
+        { x: 395, y: 55, val: '₹81,200', label: 'Sat' },
+        { x: 470, y: 45, val: '₹82,450', label: 'Sun' }
       ],
-      pointsPath: '20,130 95,95 170,118 245,75 320,105 395,45 470,65',
-      areaPoly: '20,170 20,130 95,95 170,118 245,75 320,105 395,45 470,65 470,170'
+      pointsPath: '20,140 95,122 170,98 245,110 320,78 395,55 470,45',
+      areaPoly: '20,170 20,140 95,122 170,98 245,110 320,78 395,55 470,45 470,170 20,170'
     },
-    '30 Days': {
-      labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-      yMax: '₹100k',
-      yMid: '₹50k',
-      total: '₹2,84,500',
-      coords: [
-        { x: 40, y: 125, val: '₹52,100', label: 'Week 1' },
-        { x: 180, y: 85, val: '₹78,400', label: 'Week 2' },
-        { x: 320, y: 105, val: '₹64,200', label: 'Week 3' },
-        { x: 460, y: 40, val: '₹89,800', label: 'Week 4' }
-      ],
-      pointsPath: '40,125 180,85 320,105 460,40',
-      areaPoly: '40,170 40,125 180,85 320,105 460,40 460,170'
-    },
-    '3 Months': {
-      labels: ['August', 'September', 'October'],
+    '1M': {
+      periodLabel: '1M',
+      startRevLabel: 'Start of Month',
+      startRevVal: '₹2,20,000',
+      endRevLabel: 'End of Month',
+      endRevVal: '₹2,84,500',
+      revDiff: '+₹64,500',
+      revGrowth: '+29.3%',
+      isRevPositive: true,
+      cogs: '₹1,85,000',
+      profitLabel: 'Profit',
+      profitVal: '+₹99,500',
+      profitMargin: '35.0%',
+      isProfit: true,
       yMax: '₹300k',
-      yMid: '₹150k',
-      total: '₹7,92,100',
+      yMid: '₹250k',
+      labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
       coords: [
-        { x: 60, y: 120, val: '₹2,15,000', label: 'August' },
-        { x: 250, y: 80, val: '₹2,84,500', label: 'September' },
-        { x: 440, y: 45, val: '₹3,42,600', label: 'October' }
+        { x: 40, y: 145, val: '₹2,20,000', label: 'Week 1' },
+        { x: 180, y: 110, val: '₹2,45,000', label: 'Week 2' },
+        { x: 320, y: 85, val: '₹2,62,000', label: 'Week 3' },
+        { x: 460, y: 40, val: '₹2,84,500', label: 'Week 4' }
       ],
-      pointsPath: '60,120 250,80 440,45',
-      areaPoly: '60,170 60,120 250,80 440,45 440,170'
+      pointsPath: '40,145 180,110 320,85 460,40',
+      areaPoly: '40,170 40,145 180,110 320,85 460,40 460,170 40,170'
     },
-    '1 Year': {
-      labels: ['Q1', 'Q2', 'Q3', 'Q4'],
-      yMax: '₹10L',
-      yMid: '₹5L',
-      total: '₹31,45,800',
+    '3M': {
+      periodLabel: '3M',
+      startRevLabel: 'Start of 3M',
+      startRevVal: '₹6,80,000',
+      endRevLabel: 'End of 3M',
+      endRevVal: '₹7,92,100',
+      revDiff: '+₹1,12,100',
+      revGrowth: '+16.5%',
+      isRevPositive: true,
+      cogs: '₹5,10,000',
+      profitLabel: 'Profit',
+      profitVal: '+₹2,82,100',
+      profitMargin: '35.6%',
+      isProfit: true,
+      yMax: '₹800k',
+      yMid: '₹700k',
+      labels: ['August', 'September', 'October'],
       coords: [
-        { x: 40, y: 145, val: '₹5,80,000', label: 'Q1' },
-        { x: 180, y: 110, val: '₹7,20,000', label: 'Q2' },
-        { x: 320, y: 65, val: '₹8,90,000', label: 'Q3' },
-        { x: 460, y: 30, val: '₹9,55,800', label: 'Q4' }
+        { x: 60, y: 140, val: '₹6,80,000', label: 'August' },
+        { x: 250, y: 90, val: '₹7,40,000', label: 'September' },
+        { x: 440, y: 45, val: '₹7,92,100', label: 'October' }
       ],
-      pointsPath: '40,145 180,110 320,65 460,30',
-      areaPoly: '40,170 40,145 180,110 320,65 460,30 460,170'
+      pointsPath: '60,140 250,90 440,45',
+      areaPoly: '60,170 60,140 250,90 440,45 440,170 60,170'
+    },
+    '1Y': {
+      periodLabel: '1Y',
+      startRevLabel: 'Start of Year',
+      startRevVal: '₹24,00,000',
+      endRevLabel: 'End of Year',
+      endRevVal: '₹31,45,800',
+      revDiff: '+₹7,45,800',
+      revGrowth: '+31.1%',
+      isRevPositive: true,
+      cogs: '₹20,50,000',
+      profitLabel: 'Profit',
+      profitVal: '+₹10,95,800',
+      profitMargin: '34.8%',
+      isProfit: true,
+      yMax: '₹32L',
+      yMid: '₹26L',
+      labels: ['Q1', 'Q2', 'Q3', 'Q4'],
+      coords: [
+        { x: 40, y: 145, val: '₹24,00,000', label: 'Q1' },
+        { x: 180, y: 110, val: '₹26,50,000', label: 'Q2' },
+        { x: 320, y: 70, val: '₹29,00,000', label: 'Q3' },
+        { x: 460, y: 35, val: '₹31,45,800', label: 'Q4' }
+      ],
+      pointsPath: '40,145 180,110 320,70 460,35',
+      areaPoly: '40,170 40,145 180,110 320,70 460,35 460,170 40,170'
     }
   };
 
   function renderSalesChart(periodKey) {
     const ds = chartDatasets[periodKey];
     salesTrendCard.innerHTML = `
-      <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem; align-items: flex-start; padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.5rem;">
+      <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem; align-items: center; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.75rem;">
         <div>
-          <div style="font-size: 0.725rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.35rem;">
-            <i data-lucide="trending-up" style="width: 14px; height: 14px; color: var(--brand-primary);"></i>
-            <span>SALES TREND</span>
-          </div>
-          <div style="display: flex; align-items: baseline; gap: 0.4rem;">
-            <span style="font-size: 0.85rem; color: var(--text-secondary);">Total Revenue:</span>
-            <span style="font-size: 1.35rem; font-weight: 700; color: var(--text-primary);">${ds.total}</span>
-          </div>
+          <h3 class="card-title" style="font-size: 1.05rem; font-weight: 600;">Sales Trend</h3>
+          <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.15rem;">Revenue performance & gross profit summary</div>
         </div>
-        <div style="display: flex; gap: 0.2rem; background: var(--bg-secondary); padding: 0.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);" id="period-selector-group">
-          ${['7 Days', '30 Days', '3 Months', '1 Year'].map(p => `
-            <button class="btn period-btn ${p === periodKey ? 'active-period' : 'inactive-period'}" data-period="${p}" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; border: none; cursor: pointer;">${p}</button>
+        
+        <!-- Period Selectors: 1W, 1M, 3M, 1Y -->
+        <div style="display: flex; gap: 0.2rem; background: var(--bg-secondary); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          ${['1W', '1M', '3M', '1Y'].map(p => `
+            <button class="btn period-btn" data-period="${p}" style="padding: 0.25rem 0.6rem; font-size: 0.75rem; font-weight: 600; border: none; cursor: pointer;">${p}</button>
           `).join('')}
         </div>
       </div>
-      
-      <!-- Interactive SVG Area Chart -->
-      <div style="position: relative; height: 215px; margin-top: 0.5rem; display: flex; flex: 1;">
-        
-        <!-- Y-Axis Labels -->
-        <div style="display: flex; flex-direction: column; justify-content: space-between; font-size: 0.725rem; color: var(--text-secondary); padding-right: 0.75rem; width: 45px; text-align: right; user-select: none; font-weight: 500;">
+
+      <!-- Financial Summary Bar -->
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; background: var(--bg-secondary); padding: 0.75rem 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-color); margin-bottom: 0.75rem;">
+        <div>
+          <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);">Total Revenue</div>
+          <div style="display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.15rem; flex-wrap: wrap;">
+            <span style="font-size: 1.45rem; font-weight: 700; color: var(--text-primary); letter-spacing: -0.02em;">${ds.endRevVal}</span>
+            <span style="font-size: 0.825rem; font-weight: 600; color: ${ds.isRevPositive ? 'var(--status-success)' : 'var(--status-danger)'}; display: inline-flex; align-items: center; gap: 0.25rem;">
+              ${ds.isRevPositive ? '↑' : '↓'} ${ds.revDiff} (${ds.revGrowth}) <span style="color: var(--text-secondary); font-weight: 400;">· ${ds.periodLabel}</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Profit / Loss Box -->
+        <div style="text-align: right;">
+          <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);">${ds.profitLabel}</div>
+          <div style="font-size: 1.15rem; font-weight: 700; color: ${ds.isProfit ? 'var(--status-success)' : 'var(--status-danger)'}; margin-top: 0.15rem;">
+            ${ds.profitVal}
+          </div>
+          <div style="font-size: 0.725rem; font-weight: 600; color: ${ds.isProfit ? 'var(--status-success)' : 'var(--status-danger)'};">
+            ${ds.profitMargin} margin
+          </div>
+        </div>
+      </div>
+
+      <!-- Start vs End Period Benchmarks -->
+      <div style="display: flex; justify-content: space-between; font-size: 0.775rem; color: var(--text-secondary); margin-bottom: 0.35rem; padding: 0 0.25rem;">
+        <div>${ds.startRevLabel}: <strong style="color: var(--text-primary); font-weight: 600;">${ds.startRevVal}</strong></div>
+        <div>${ds.endRevLabel}: <strong style="color: var(--text-primary); font-weight: 600;">${ds.endRevVal}</strong></div>
+      </div>
+
+      <!-- Chart Graphics -->
+      <div style="position: relative; height: 165px; display: flex; flex: 1; margin-top: 0.25rem;">
+        <div style="display: flex; flex-direction: column; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); padding-right: 0.6rem; width: 45px; text-align: right; font-weight: 500;">
           <span>${ds.yMax}</span>
           <span>${ds.yMid}</span>
           <span>₹0</span>
         </div>
 
-        <!-- Chart Container -->
         <div style="flex: 1; position: relative; height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
-          <svg width="100%" height="175" viewBox="0 0 500 175" preserveAspectRatio="none" style="overflow: visible;">
+          <svg width="100%" height="135" viewBox="0 0 500 135" preserveAspectRatio="none" style="overflow: visible;">
             <defs>
               <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="var(--brand-primary)" stop-opacity="0.25"/>
+                <stop offset="0%" stop-color="var(--brand-primary)" stop-opacity="0.22"/>
                 <stop offset="100%" stop-color="var(--brand-primary)" stop-opacity="0.0"/>
               </linearGradient>
             </defs>
-            
-            <!-- Horizontal Dashed Grid Lines -->
             <line x1="0" y1="10" x2="500" y2="10" stroke="var(--border-color)" stroke-dasharray="4" />
-            <line x1="0" y1="90" x2="500" y2="90" stroke="var(--border-color)" stroke-dasharray="4" />
-            <line x1="0" y1="170" x2="500" y2="170" stroke="var(--border-color)" />
+            <line x1="0" y1="70" x2="500" y2="70" stroke="var(--border-color)" stroke-dasharray="4" />
+            <line x1="0" y1="130" x2="500" y2="130" stroke="var(--border-color)" />
             
-            <!-- Area Gradient Fill -->
             <polygon points="${ds.areaPoly}" fill="url(#salesGrad)" />
-            
-            <!-- Smooth Line Graph -->
             <polyline points="${ds.pointsPath}" fill="none" stroke="var(--brand-primary)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
             
-            <!-- Highlight Dots -->
-            ${ds.coords.map((c) => `
-              <circle cx="${c.x}" cy="${c.y}" r="5" fill="var(--brand-primary)" stroke="var(--bg-surface)" stroke-width="2.5" class="chart-dot" data-val="${c.val}" data-label="${c.label}" style="cursor: pointer; transition: transform 0.15s ease;" />
-            `).join('')}
+            ${ds.coords.map(c => `<circle cx="${c.x}" cy="${c.y}" r="4.5" fill="var(--brand-primary)" stroke="var(--bg-surface)" stroke-width="2" />`).join('')}
           </svg>
-
-          <!-- X-Axis Label Bar -->
-          <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); padding: 0.25rem 0.5rem 0 0.5rem; font-weight: 500;">
+          <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); padding: 0.2rem 0.4rem 0 0.4rem; font-weight: 500;">
             ${ds.labels.map(l => `<span>${l}</span>`).join('')}
           </div>
         </div>
       </div>
     `;
 
-    // Active/Inactive Period Styling
     salesTrendCard.querySelectorAll('.period-btn').forEach(btn => {
       const p = btn.dataset.period;
       if (p === periodKey) {
