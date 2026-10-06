@@ -30,51 +30,56 @@ export function renderOverview(onNavigate) {
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'kpi-grid';
 
-  let totalRevAmt = data.sales.reduce((sum, s) => sum + s.totalAmount, 0) + 271708; // Realistic sample revenue ₹2,84,500
+  const lowCount = metrics.lowStockCount;
+  const outCount = metrics.outOfStockCount;
+  const totalStockUnits = metrics.totalStock;
+  const totalRevenue = data.sales.reduce((sum, s) => sum + s.totalAmount, 0);
+
   kpiGrid.appendChild(createMetricCard({
     label: 'Total Revenue',
-    value: `${data.storeInfo.currency}${totalRevAmt.toLocaleString()}`,
-    subtext: `<span style="color: var(--status-success); font-weight: 600;">↑ 8.4%</span> <span style="color: var(--text-secondary);">from last month</span>`,
-    icon: 'dollar-sign'
+    value: `₹${totalRevenue.toLocaleString('en-IN')}`,
+    subtext: `<span style="color: var(--status-success); font-weight: 600;">↑ +18.4%</span> <span style="color: var(--text-secondary);">across ${data.sales.length} sales orders</span>`,
+    icon: 'dollar-sign',
+    onClick: () => onNavigate('sales')
   }));
 
   kpiGrid.appendChild(createMetricCard({
     label: 'Total Products',
-    value: `${metrics.totalProducts}`,
-    subtext: `<span style="color: var(--text-secondary);">12 added this month</span>`,
-    icon: 'package'
+    value: `${totalStockUnits} Units`,
+    subtext: `<span style="color: var(--text-secondary);">Across ${data.products.length} catalog products</span>`,
+    icon: 'package',
+    onClick: () => onNavigate('products')
   }));
 
   kpiGrid.appendChild(createMetricCard({
     label: 'Low Stock',
-    value: `${metrics.lowStockCount || 6}`,
-    subtext: `<span style="color: var(--status-warning-text); font-weight: 600;">6 need restocking</span>`,
+    value: `${lowCount} Items`,
+    subtext: `<span style="color: var(--status-warning-text); font-weight: 600;">${lowCount} items</span> <span style="color: var(--text-secondary);">below min threshold</span>`,
     icon: 'alert-triangle',
-    variant: 'warning'
+    variant: 'warning',
+    onClick: () => onNavigate('inventory', { status: 'LOW' })
   }));
 
   kpiGrid.appendChild(createMetricCard({
     label: 'Out of Stock',
-    value: `${metrics.outOfStockCount || 2}`,
-    subtext: `<span style="color: var(--status-danger-text); font-weight: 600;">2 more than last month</span>`,
+    value: `${outCount} Items`,
+    subtext: `<span style="color: var(--status-danger-text); font-weight: 600;">${outCount} items</span> <span style="color: var(--text-secondary);">require immediate PO</span>`,
     icon: 'alert-circle',
-    variant: 'danger'
+    variant: 'danger',
+    onClick: () => onNavigate('inventory', { status: 'OUT' })
   }));
 
   container.appendChild(kpiGrid);
 
   // 3. Section 2 & 3: TWO-COLUMN ROW (Sales Trend on Left, Top Selling Products on Right)
   const grid2Col = document.createElement('div');
-  grid2Col.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; width: 100%; align-items: stretch;';
+  grid2Col.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; width: 100%; align-items: start;';
   if (window.innerWidth <= 1024) grid2Col.style.gridTemplateColumns = '1fr';
 
-  // SECTION 2: SALES TREND (Default Period: 1W)
+  // SECTION 2: SALES TREND (Unstretched, Perfectly Aligned Mon to Sun SVG Graph)
   let activePeriod = '1W';
   const salesTrendCard = document.createElement('div');
   salesTrendCard.className = 'card';
-  salesTrendCard.style.display = 'flex';
-  salesTrendCard.style.flexDirection = 'column';
-  salesTrendCard.style.justifyContent = 'space-between';
 
   const chartDatasets = {
     '1W': {
@@ -95,16 +100,16 @@ export function renderOverview(onNavigate) {
       yMid: '₹75k',
       labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
       coords: [
-        { x: 20, y: 140, val: '₹70,000', label: 'Mon' },
-        { x: 95, y: 122, val: '₹72,500', label: 'Tue' },
-        { x: 170, y: 98, val: '₹75,800', label: 'Wed' },
-        { x: 245, y: 110, val: '₹74,200', label: 'Thu' },
-        { x: 320, y: 78, val: '₹78,600', label: 'Fri' },
-        { x: 395, y: 55, val: '₹81,200', label: 'Sat' },
-        { x: 470, y: 45, val: '₹82,450', label: 'Sun' }
+        { x: 25, y: 101, val: '₹70,000', label: 'Mon' },
+        { x: 100, y: 87, val: '₹72,500', label: 'Tue' },
+        { x: 175, y: 68, val: '₹75,800', label: 'Wed' },
+        { x: 250, y: 77, val: '₹74,200', label: 'Thu' },
+        { x: 325, y: 52, val: '₹78,600', label: 'Fri' },
+        { x: 400, y: 37, val: '₹81,200', label: 'Sat' },
+        { x: 475, y: 30, val: '₹82,450', label: 'Sun' }
       ],
-      pointsPath: '20,140 95,122 170,98 245,110 320,78 395,55 470,45',
-      areaPoly: '20,170 20,140 95,122 170,98 245,110 320,78 395,55 470,45 470,170 20,170'
+      pointsPath: '25,101 100,87 175,68 250,77 325,52 400,37 475,30',
+      areaPoly: '25,130 25,101 100,87 175,68 250,77 325,52 400,37 475,30 475,130 25,130'
     },
     '1M': {
       periodLabel: '1M',
@@ -124,13 +129,13 @@ export function renderOverview(onNavigate) {
       yMid: '₹250k',
       labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
       coords: [
-        { x: 40, y: 145, val: '₹2,20,000', label: 'Week 1' },
-        { x: 180, y: 110, val: '₹2,45,000', label: 'Week 2' },
-        { x: 320, y: 85, val: '₹2,62,000', label: 'Week 3' },
-        { x: 460, y: 40, val: '₹2,84,500', label: 'Week 4' }
+        { x: 40, y: 100, val: '₹2,20,000', label: 'Week 1' },
+        { x: 185, y: 75, val: '₹2,45,000', label: 'Week 2' },
+        { x: 330, y: 58, val: '₹2,62,000', label: 'Week 3' },
+        { x: 460, y: 32, val: '₹2,84,500', label: 'Week 4' }
       ],
-      pointsPath: '40,145 180,110 320,85 460,40',
-      areaPoly: '40,170 40,145 180,110 320,85 460,40 460,170 40,170'
+      pointsPath: '40,100 185,75 330,58 460,32',
+      areaPoly: '40,130 40,100 185,75 330,58 460,32 460,130 40,130'
     },
     '3M': {
       periodLabel: '3M',
@@ -150,12 +155,12 @@ export function renderOverview(onNavigate) {
       yMid: '₹700k',
       labels: ['August', 'September', 'October'],
       coords: [
-        { x: 60, y: 140, val: '₹6,80,000', label: 'August' },
-        { x: 250, y: 90, val: '₹7,40,000', label: 'September' },
-        { x: 440, y: 45, val: '₹7,92,100', label: 'October' }
+        { x: 50, y: 75, val: '₹6,80,000', label: 'August' },
+        { x: 250, y: 52, val: '₹7,40,000', label: 'September' },
+        { x: 450, y: 22, val: '₹7,92,100', label: 'October' }
       ],
-      pointsPath: '60,140 250,90 440,45',
-      areaPoly: '60,170 60,140 250,90 440,45 440,170 60,170'
+      pointsPath: '50,75 250,52 450,22',
+      areaPoly: '50,130 50,75 250,52 450,22 450,130 50,130'
     },
     '1Y': {
       periodLabel: '1Y',
@@ -175,13 +180,13 @@ export function renderOverview(onNavigate) {
       yMid: '₹26L',
       labels: ['Q1', 'Q2', 'Q3', 'Q4'],
       coords: [
-        { x: 40, y: 145, val: '₹24,00,000', label: 'Q1' },
-        { x: 180, y: 110, val: '₹26,50,000', label: 'Q2' },
-        { x: 320, y: 70, val: '₹29,00,000', label: 'Q3' },
-        { x: 460, y: 35, val: '₹31,45,800', label: 'Q4' }
+        { x: 40, y: 80, val: '₹24,00,000', label: 'Q1' },
+        { x: 185, y: 65, val: '₹26,50,000', label: 'Q2' },
+        { x: 330, y: 45, val: '₹29,00,000', label: 'Q3' },
+        { x: 460, y: 22, val: '₹31,45,800', label: 'Q4' }
       ],
-      pointsPath: '40,145 180,110 320,70 460,35',
-      areaPoly: '40,170 40,145 180,110 320,70 460,35 460,170 40,170'
+      pointsPath: '40,80 185,65 330,45 460,22',
+      areaPoly: '40,130 40,80 185,65 330,45 460,22 460,130 40,130'
     }
   };
 
@@ -227,39 +232,41 @@ export function renderOverview(onNavigate) {
       </div>
 
       <!-- Start vs End Period Benchmarks -->
-      <div style="display: flex; justify-content: space-between; font-size: 0.775rem; color: var(--text-secondary); margin-bottom: 0.35rem; padding: 0 0.25rem;">
+      <div style="display: flex; justify-content: space-between; font-size: 0.775rem; color: var(--text-secondary); margin-bottom: 0.5rem; padding: 0 0.25rem;">
         <div>${ds.startRevLabel}: <strong style="color: var(--text-primary); font-weight: 600;">${ds.startRevVal}</strong></div>
         <div>${ds.endRevLabel}: <strong style="color: var(--text-primary); font-weight: 600;">${ds.endRevVal}</strong></div>
       </div>
 
-      <!-- Chart Graphics -->
-      <div style="position: relative; height: 165px; display: flex; flex: 1; margin-top: 0.25rem;">
-        <div style="display: flex; flex-direction: column; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); padding-right: 0.6rem; width: 45px; text-align: right; font-weight: 500;">
+      <!-- Perfectly Aligned SVG Chart Canvas -->
+      <div style="position: relative; height: 160px; display: flex; align-items: stretch; margin-top: 0.25rem;">
+        <div style="display: flex; flex-direction: column; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); padding-right: 0.6rem; width: 45px; text-align: right; font-weight: 500; height: 130px;">
           <span>${ds.yMax}</span>
           <span>${ds.yMid}</span>
           <span>₹0</span>
         </div>
 
-        <div style="flex: 1; position: relative; height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
-          <svg width="100%" height="135" viewBox="0 0 500 135" preserveAspectRatio="none" style="overflow: visible;">
+        <div style="flex: 1; position: relative; display: flex; flex-direction: column;">
+          <svg width="100%" height="155" viewBox="0 0 500 155" style="overflow: visible;">
             <defs>
               <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="var(--brand-primary)" stop-opacity="0.22"/>
                 <stop offset="100%" stop-color="var(--brand-primary)" stop-opacity="0.0"/>
               </linearGradient>
             </defs>
-            <line x1="0" y1="10" x2="500" y2="10" stroke="var(--border-color)" stroke-dasharray="4" />
-            <line x1="0" y1="70" x2="500" y2="70" stroke="var(--border-color)" stroke-dasharray="4" />
-            <line x1="0" y1="130" x2="500" y2="130" stroke="var(--border-color)" />
+            <line x1="0" y1="15" x2="500" y2="15" stroke="var(--border-color)" stroke-dasharray="4" vector-effect="non-scaling-stroke" />
+            <line x1="0" y1="72" x2="500" y2="72" stroke="var(--border-color)" stroke-dasharray="4" vector-effect="non-scaling-stroke" />
+            <line x1="0" y1="130" x2="500" y2="130" stroke="var(--border-color)" vector-effect="non-scaling-stroke" />
             
             <polygon points="${ds.areaPoly}" fill="url(#salesGrad)" />
-            <polyline points="${ds.pointsPath}" fill="none" stroke="var(--brand-primary)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <polyline points="${ds.pointsPath}" fill="none" stroke="var(--brand-primary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
             
-            ${ds.coords.map(c => `<circle cx="${c.x}" cy="${c.y}" r="4.5" fill="var(--brand-primary)" stroke="var(--bg-surface)" stroke-width="2" />`).join('')}
+            ${ds.coords.map(c => `
+              <circle cx="${c.x}" cy="${c.y}" r="5" fill="var(--brand-primary)" stroke="var(--bg-surface)" stroke-width="2.5">
+                <title>${c.label}: ${c.val}</title>
+              </circle>
+              <text x="${c.x}" y="152" text-anchor="middle" fill="var(--text-secondary)" font-size="12" font-weight="500">${c.label}</text>
+            `).join('')}
           </svg>
-          <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); padding: 0.2rem 0.4rem 0 0.4rem; font-weight: 500;">
-            ${ds.labels.map(l => `<span>${l}</span>`).join('')}
-          </div>
         </div>
       </div>
     `;
@@ -296,6 +303,20 @@ export function renderOverview(onNavigate) {
   topSellingCard.style.flexDirection = 'column';
   topSellingCard.style.justifyContent = 'space-between';
 
+  const topSellingMap = {};
+  data.sales.forEach(s => {
+    s.items.forEach(item => {
+      if (!topSellingMap[item.product]) {
+        topSellingMap[item.product] = { name: item.product, units: 0, revenue: 0 };
+      }
+      topSellingMap[item.product].units += item.qty;
+      topSellingMap[item.product].revenue += item.amount;
+    });
+  });
+  const topSellingList = Object.values(topSellingMap)
+    .sort((a, b) => b.units - a.units)
+    .slice(0, 5);
+
   topSellingCard.innerHTML = `
     <div>
       <div class="card-header" style="margin-bottom: 0.75rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color);">
@@ -307,65 +328,29 @@ export function renderOverview(onNavigate) {
       </div>
       
       <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-        <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 0.55rem; border-bottom: 1px solid var(--border-color);">
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <span style="font-weight: 700; font-size: 0.85rem; color: var(--brand-primary); background: var(--brand-soft); width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">01</span>
-            <div>
-              <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">Classic Oxford Shirt</div>
-              <div style="font-size: 0.75rem; color: var(--text-secondary);">84 sold</div>
+        ${topSellingList.map((p, idx) => `
+          <div class="top-selling-item" data-product-name="${p.name}" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); transition: background-color 0.15s ease; ${idx < topSellingList.length - 1 ? 'border-bottom: 1px solid var(--border-color);' : ''}">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+              <span style="font-weight: 700; font-size: 0.85rem; color: ${idx === 0 ? 'var(--brand-primary)' : 'var(--text-secondary)'}; background: ${idx === 0 ? 'var(--brand-soft)' : 'var(--bg-secondary)'}; width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">0${idx + 1}</span>
+              <div>
+                <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">${p.name}</div>
+                <div style="font-size: 0.75rem; color: var(--text-secondary);">${p.units} sold</div>
+              </div>
             </div>
+            <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">₹${p.revenue.toLocaleString('en-IN')}</div>
           </div>
-          <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">₹83,916</div>
-        </div>
-
-        <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 0.55rem; border-bottom: 1px solid var(--border-color);">
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-secondary); background: var(--bg-secondary); width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">02</span>
-            <div>
-              <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">Premium Cotton T-Shirt</div>
-              <div style="font-size: 0.75rem; color: var(--text-secondary);">72 sold</div>
-            </div>
-          </div>
-          <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">₹64,728</div>
-        </div>
-
-        <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 0.55rem; border-bottom: 1px solid var(--border-color);">
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-secondary); background: var(--bg-secondary); width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">03</span>
-            <div>
-              <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">Slim Fit Denim</div>
-              <div style="font-size: 0.75rem; color: var(--text-secondary);">58 sold</div>
-            </div>
-          </div>
-          <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">₹84,622</div>
-        </div>
-
-        <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 0.55rem; border-bottom: 1px solid var(--border-color);">
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-secondary); background: var(--bg-secondary); width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">04</span>
-            <div>
-              <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">Regular Fit Trousers</div>
-              <div style="font-size: 0.75rem; color: var(--text-secondary);">46 sold</div>
-            </div>
-          </div>
-          <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">₹55,154</div>
-        </div>
-
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-secondary); background: var(--bg-secondary); width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">05</span>
-            <div>
-              <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">Essential Hoodie</div>
-              <div style="font-size: 0.75rem; color: var(--text-secondary);">32 sold</div>
-            </div>
-          </div>
-          <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">₹31,968</div>
-        </div>
+        `).join('')}
       </div>
     </div>
   `;
 
-  topSellingCard.querySelector('.view-all-products-btn').addEventListener('click', () => onNavigate('products'));
+  topSellingCard.querySelectorAll('.top-selling-item').forEach(item => {
+    item.addEventListener('click', () => {
+      onNavigate('products', { openProduct: item.dataset.productName });
+    });
+  });
+
+  topSellingCard.querySelector('.view-all-products-btn').addEventListener('click', () => onNavigate('sales'));
   grid2Col.appendChild(topSellingCard);
 
   container.appendChild(grid2Col);
@@ -389,24 +374,22 @@ export function renderOverview(onNavigate) {
       <table class="admin-table">
         <thead>
           <tr>
-            <th>Bill Number</th>
             <th>Customer</th>
-            <th>Items</th>
-            <th>Payment Method</th>
-            <th>Amount</th>
             <th>Date & Time</th>
+            <th>Items</th>
+            <th>Amount</th>
+            <th>Payment Method</th>
             <th>Status</th>
           </tr>
         </thead>
         <tbody>
           ${salesList.map(s => `
             <tr>
-              <td style="font-family: monospace; font-weight: 600;">${s.id}</td>
-              <td style="font-weight: 500;">${s.customer}</td>
-              <td style="color: var(--text-secondary);">${s.itemCount} item${s.itemCount > 1 ? 's' : ''}</td>
-              <td>${createBadge({ label: s.paymentMethod, variant: 'secondary' }).outerHTML}</td>
-              <td style="font-weight: 600; color: var(--text-primary);">₹${s.totalAmount.toLocaleString()}</td>
+              <td style="font-weight: 600; color: var(--brand-primary);">${s.customer}</td>
               <td style="color: var(--text-secondary); font-size: 0.8rem;">${s.date}</td>
+              <td style="color: var(--text-secondary);">${s.itemCount} item${s.itemCount > 1 ? 's' : ''}</td>
+              <td style="font-weight: 600; color: var(--text-primary);">₹${s.totalAmount.toLocaleString()}</td>
+              <td>${createBadge({ label: s.paymentMethod, variant: 'secondary' }).outerHTML}</td>
               <td>${createBadge({ label: s.status, variant: 'success' }).outerHTML}</td>
             </tr>
           `).join('')}

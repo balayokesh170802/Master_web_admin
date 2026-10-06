@@ -1,9 +1,9 @@
 /**
  * Metric Card Component for Top KPIs
  */
-export function createMetricCard({ label, value, subtext = null, icon = null, variant = 'default' }) {
+export function createMetricCard({ label, value, subtext = null, icon = null, variant = 'default', onClick = null }) {
   const card = document.createElement('div');
-  card.className = 'metric-card';
+  card.className = `metric-card ${onClick ? 'metric-card-clickable' : ''}`;
   
   let borderColor = 'var(--border-color)';
   if (variant === 'danger') borderColor = 'var(--status-danger-border)';
@@ -26,5 +26,9 @@ export function createMetricCard({ label, value, subtext = null, icon = null, va
     ${subtext ? `<div class="metric-footer">${subtext}</div>` : ''}
   `;
   
+  if (onClick) {
+    card.addEventListener('click', onClick);
+  }
+
   return card;
 }

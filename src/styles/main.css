@@ -192,6 +192,18 @@ body {
   gap: 0.35rem;
 }
 
+.metric-card-clickable {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  user-select: none;
+}
+
+.metric-card-clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--brand-primary);
+}
+
 .metric-header {
   display: flex;
   align-items: center;
