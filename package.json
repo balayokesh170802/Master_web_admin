@@ -1,0 +1,20 @@
+{
+  "name": "master-web-admin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Internal clothing store web admin management system MVP",
+  "type": "module",
+  "scripts": {
+    "start": "python -m http.server 3000",
+    "dev": "python -m http.server 3000"
+  },
+  "keywords": [
+    "clothing-store",
+    "inventory-management",
+    "admin-dashboard",
+    "stock-in",
+    "sales-reports"
+  ],
+  "author": "Master Web Admin",
+  "license": "ISC"
+}
