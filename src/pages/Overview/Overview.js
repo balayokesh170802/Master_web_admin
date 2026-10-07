@@ -385,7 +385,7 @@ export function renderOverview(onNavigate) {
         <tbody>
           ${salesList.map(s => `
             <tr>
-              <td style="font-weight: 600; color: var(--brand-primary);">${s.customer}</td>
+              <td style="font-weight: 600; color: var(--text-primary);">${s.customer}</td>
               <td style="color: var(--text-secondary); font-size: 0.8rem;">${s.date}</td>
               <td style="color: var(--text-secondary);">${s.itemCount} item${s.itemCount > 1 ? 's' : ''}</td>
               <td style="font-weight: 600; color: var(--text-primary);">₹${s.totalAmount.toLocaleString()}</td>
