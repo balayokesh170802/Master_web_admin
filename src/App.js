@@ -1,3 +1,454 @@
+function renderAddProductPage(onNavigate = null) {
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  // 1. Breadcrumb Header (Products / Add Product)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
+
+  const breadcrumb = createBreadcrumb([
+    { label: 'Products', target: 'products' },
+    { label: 'Add Product' }
+  ], onNavigate);
+
+  headerDiv.appendChild(breadcrumb);
+  container.appendChild(headerDiv);
+
+  // 2. Main Form Card
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+
+  const catOptions = store.data.categories.length > 0 ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
+  const brandOptions = store.data.brands.length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+  const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+
+  let hasSizes = true;
+  let selectedSizes = new Set(['S', 'M', 'L', 'XL']);
+  let sizeStockMap = { 'S': 5, 'M': 10, 'L': 8, 'XL': 3 };
+  let sizeDamagedMap = { 'S': 0, 'M': 0, 'L': 0, 'XL': 0 };
+
+  const formContainer = document.createElement('div');
+  formContainer.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+
+  formContainer.innerHTML = `
+    <!-- Basic Information -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Basic Information</h4>
+      
+      <div class="form-group">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Product Name *</label>
+        <input type="text" class="form-input" id="new-prod-name" placeholder="e.g. Linen Casual Shirt">
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Category *</label>
+          <select class="form-select" id="new-prod-cat">
+            ${catOptions.map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Brand</label>
+          <select class="form-select" id="new-prod-brand">
+            ${brandOptions.map(b => `<option value="${b}">${b}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Status</label>
+          <select class="form-select" id="new-prod-status">
+            <option value="Active" selected>Active</option>
+            <option value="Inactive">Inactive</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pricing -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Pricing</h4>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Price (₹) *</label>
+          <input type="number" class="form-input" id="new-prod-cost" placeholder="e.g. 500" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Selling Price (₹) *</label>
+          <input type="number" class="form-input" id="new-prod-price" placeholder="e.g. 1299" min="0">
+        </div>
+      </div>
+    </div>
+
+    <!-- Product Sizes & Initial Stock -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem; background: var(--bg-secondary); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+      <div>
+        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">Product Sizes & Initial Stock</h4>
+        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">Add the available sizes and enter the opening stock for each size.</p>
+      </div>
+
+      <!-- Question: Does this product have sizes? [Yes] [No] -->
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
+        <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Does this product have sizes?</span>
+        <div style="display: flex; gap: 0.35rem; background: var(--bg-surface); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <button type="button" class="btn btn-sm" id="has-sizes-yes" style="padding: 0.25rem 0.85rem; font-weight: 600;">Yes</button>
+          <button type="button" class="btn btn-sm" id="has-sizes-no" style="padding: 0.25rem 0.85rem; font-weight: 600;">No</button>
+        </div>
+      </div>
+
+      <!-- Size-Based Section -->
+      <div id="size-based-section" style="display: flex; flex-direction: column; gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Select Available Sizes:</label>
+          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;" id="size-chips-box">
+            ${allSizes.map(s => `
+              <button type="button" class="size-chip-btn" data-size="${s}" style="padding: 0.35rem 0.75rem; font-size: 0.825rem; font-weight: 600; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s ease;">
+                ${s}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Generated Size Stock Table -->
+        <div class="table-responsive" style="background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <table class="admin-table" style="font-size: 0.85rem;">
+            <thead>
+              <tr>
+                <th style="width: 30%;">Size</th>
+                <th style="width: 35%;">Available Stock (Units)</th>
+                <th style="width: 35%;">Damaged Stock (Units)</th>
+              </tr>
+            </thead>
+            <tbody id="size-stock-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Non-Size Product Section -->
+      <div id="no-size-section" style="display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Initial Available Stock *</label>
+          <input type="number" class="form-input" id="single-stock-input" value="25" min="0" placeholder="e.g. 25">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Initial Damaged Stock</label>
+          <input type="number" class="form-input" id="single-damaged-input" value="0" min="0" placeholder="e.g. 0" style="color: var(--status-danger);">
+        </div>
+      </div>
+
+      <!-- Total Initial Stock Display -->
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.9rem;">
+        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: center;">
+          <div>
+            <span style="font-weight: 600; color: var(--text-secondary);">Total Available Stock: </span>
+            <span style="font-size: 1.15rem; font-weight: 700; color: var(--brand-primary);" id="total-stock-display">0 units</span>
+          </div>
+          <div>
+            <span style="font-weight: 600; color: var(--text-secondary);">Total Damaged Stock: </span>
+            <span style="font-size: 1.15rem; font-weight: 700; color: var(--status-danger);" id="total-damaged-display">0 units</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Description -->
+    <div class="form-group">
+      <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Description</label>
+      <textarea class="form-textarea" id="new-prod-desc" rows="3" placeholder="Enter product description (optional)"></textarea>
+    </div>
+
+    <!-- Action Buttons Bar -->
+    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+      <button type="button" class="btn btn-secondary" id="cancel-add-prod-btn">Cancel</button>
+      <button type="button" class="btn btn-primary" id="save-add-prod-btn" style="padding: 0.55rem 1.25rem; font-weight: 600;">Create Product</button>
+    </div>
+  `;
+
+  mainCard.appendChild(formContainer);
+  container.appendChild(mainCard);
+
+  // Interactive Logic
+  function updateToggleButtons() {
+    const yesBtn = formContainer.querySelector('#has-sizes-yes');
+    const noBtn = formContainer.querySelector('#has-sizes-no');
+    const sizeSection = formContainer.querySelector('#size-based-section');
+    const noSizeSection = formContainer.querySelector('#no-size-section');
+
+    if (hasSizes) {
+      yesBtn.style.backgroundColor = 'var(--brand-primary)';
+      yesBtn.style.color = '#ffffff';
+      yesBtn.style.borderColor = 'var(--brand-primary)';
+      noBtn.style.backgroundColor = 'transparent';
+      noBtn.style.color = 'var(--text-secondary)';
+      noBtn.style.borderColor = 'transparent';
+
+      sizeSection.style.display = 'flex';
+      noSizeSection.style.display = 'none';
+    } else {
+      noBtn.style.backgroundColor = 'var(--brand-primary)';
+      noBtn.style.color = '#ffffff';
+      noBtn.style.borderColor = 'var(--brand-primary)';
+      yesBtn.style.backgroundColor = 'transparent';
+      yesBtn.style.color = 'var(--text-secondary)';
+      yesBtn.style.borderColor = 'transparent';
+
+      sizeSection.style.display = 'none';
+      noSizeSection.style.display = 'flex';
+    }
+    renderSizeStockTable();
+  }
+
+  function renderSizeChips() {
+    formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
+      const s = btn.dataset.size;
+      if (selectedSizes.has(s)) {
+        btn.style.backgroundColor = 'var(--brand-primary)';
+        btn.style.color = '#ffffff';
+        btn.style.borderColor = 'var(--brand-primary)';
+      } else {
+        btn.style.backgroundColor = 'var(--bg-surface)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderColor = 'var(--border-color)';
+      }
+    });
+  }
+
+  function renderSizeStockTable() {
+    const tbody = formContainer.querySelector('#size-stock-tbody');
+
+    if (hasSizes) {
+      tbody.innerHTML = '';
+      if (selectedSizes.size === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--status-warning-text); padding: 1rem;">Please select at least one size above.</td></tr>`;
+        recalcTotal();
+        return;
+      }
+
+      Array.from(selectedSizes).forEach(sz => {
+        const qty = sizeStockMap[sz] !== undefined ? sizeStockMap[sz] : 5;
+        const dmg = sizeDamagedMap[sz] !== undefined ? sizeDamagedMap[sz] : 0;
+        sizeStockMap[sz] = qty;
+        sizeDamagedMap[sz] = dmg;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="font-weight: 600; color: var(--text-primary);">${sz}</td>
+          <td>
+            <input type="number" class="form-input size-stock-input" data-size="${sz}" value="${qty}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600;">
+          </td>
+          <td>
+            <input type="number" class="form-input size-damaged-input" data-size="${sz}" value="${dmg}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600; color: var(--status-danger);">
+          </td>
+        `;
+
+        tr.querySelector('.size-stock-input').addEventListener('input', (e) => {
+          const parsed = parseInt(e.target.value, 10);
+          sizeStockMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+          recalcTotal();
+        });
+
+        tr.querySelector('.size-damaged-input').addEventListener('input', (e) => {
+          const parsed = parseInt(e.target.value, 10);
+          sizeDamagedMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+          recalcTotal();
+        });
+
+        tbody.appendChild(tr);
+      });
+      recalcTotal();
+    } else {
+      recalcTotal();
+    }
+  }
+
+  function recalcTotal() {
+    const totalDisplay = formContainer.querySelector('#total-stock-display');
+    const totalDamagedDisplay = formContainer.querySelector('#total-damaged-display');
+
+    if (hasSizes) {
+      let totalStock = 0;
+      let totalDamaged = 0;
+      selectedSizes.forEach(sz => {
+        totalStock += (sizeStockMap[sz] || 0);
+        totalDamaged += (sizeDamagedMap[sz] || 0);
+      });
+      if (totalDisplay) totalDisplay.textContent = `${totalStock} units`;
+      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${totalDamaged} units`;
+    } else {
+      const singleInput = formContainer.querySelector('#single-stock-input');
+      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
+      const parsedStock = singleInput ? parseInt(singleInput.value, 10) : 0;
+      const parsedDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
+      const stockQty = isNaN(parsedStock) || parsedStock < 0 ? 0 : parsedStock;
+      const dmgQty = isNaN(parsedDmg) || parsedDmg < 0 ? 0 : parsedDmg;
+      if (totalDisplay) totalDisplay.textContent = `${stockQty} units`;
+      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${dmgQty} units`;
+    }
+  }
+
+  formContainer.querySelector('#has-sizes-yes').addEventListener('click', () => { hasSizes = true; updateToggleButtons(); });
+  formContainer.querySelector('#has-sizes-no').addEventListener('click', () => { hasSizes = false; updateToggleButtons(); });
+
+  formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = btn.dataset.size;
+      if (selectedSizes.has(s)) {
+        selectedSizes.delete(s);
+      } else {
+        selectedSizes.add(s);
+        if (sizeStockMap[s] === undefined) sizeStockMap[s] = 5;
+      }
+      renderSizeChips();
+      renderSizeStockTable();
+    });
+  });
+
+  formContainer.querySelector('#single-stock-input').addEventListener('input', () => recalcTotal());
+  const singleDmgEl = formContainer.querySelector('#single-damaged-input');
+  if (singleDmgEl) singleDmgEl.addEventListener('input', () => recalcTotal());
+  formContainer.querySelector('#cancel-add-prod-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('products');
+  });
+
+  formContainer.querySelector('#save-add-prod-btn').addEventListener('click', () => {
+    const name = formContainer.querySelector('#new-prod-name').value.trim();
+    const category = formContainer.querySelector('#new-prod-cat').value;
+    const brand = formContainer.querySelector('#new-prod-brand').value;
+    const costStr = formContainer.querySelector('#new-prod-cost').value;
+    const priceStr = formContainer.querySelector('#new-prod-price').value;
+    const status = formContainer.querySelector('#new-prod-status').value;
+    const desc = formContainer.querySelector('#new-prod-desc').value.trim();
+
+    if (!name) {
+      toast.show({ message: 'Product Name is required', type: 'danger' });
+      return;
+    }
+    if (!costStr || isNaN(costStr) || parseFloat(costStr) <= 0) {
+      toast.show({ message: 'Valid Purchase Price is required', type: 'danger' });
+      return;
+    }
+    if (!priceStr || isNaN(priceStr) || parseFloat(priceStr) <= 0) {
+      toast.show({ message: 'Valid Selling Price is required', type: 'danger' });
+      return;
+    }
+
+    const purchasePrice = parseFloat(costStr);
+    const sellingPrice = parseFloat(priceStr);
+
+    if (sellingPrice < purchasePrice) {
+      const confirmLoss = confirm(`Warning: Selling Price (₹${sellingPrice}) is lower than Purchase Price (₹${purchasePrice}). Do you still want to save?`);
+      if (!confirmLoss) return;
+    }
+
+    let variants = [];
+    let totalInitialStock = 0;
+    const prefix = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) || 'PRD';
+
+    if (hasSizes) {
+      if (selectedSizes.size === 0) {
+        toast.show({ message: 'Please select at least one size for size-based product', type: 'danger' });
+        return;
+      }
+
+      let hasInvalidStock = false;
+      Array.from(selectedSizes).forEach(sz => {
+        const stockVal = sizeStockMap[sz];
+        if (stockVal === undefined || isNaN(stockVal) || stockVal < 0) {
+          hasInvalidStock = true;
+        }
+      });
+
+      if (hasInvalidStock) {
+        toast.show({ message: 'Initial stock values must be valid whole numbers (0 or greater)', type: 'danger' });
+        return;
+      }
+
+      let totalInitialDamaged = 0;
+      variants = Array.from(selectedSizes).map(sz => {
+        const st = sizeStockMap[sz] || 0;
+        const dmg = sizeDamagedMap[sz] || 0;
+        totalInitialStock += st;
+        totalInitialDamaged += dmg;
+
+        if (dmg > 0 && Array.isArray(store.data.damagedStockRegister)) {
+          store.data.damagedStockRegister.unshift({
+            id: `DMG-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+            product: name,
+            sku: `${prefix}-${sz}`,
+            size: sz,
+            qty: dmg,
+            reason: "Initial Stock Audit - Damaged Intake",
+            date: new Date().toISOString().split('T')[0]
+          });
+        }
+
+        return {
+          sku: `${prefix}-${sz}`,
+          size: sz,
+          stock: st,
+          damaged: dmg,
+          daysInStock: 0
+        };
+      });
+    } else {
+      const singleVal = parseInt(formContainer.querySelector('#single-stock-input').value, 10);
+      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
+      const singleDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
+      if (isNaN(singleVal) || singleVal < 0) {
+        toast.show({ message: 'Initial stock must be a valid whole number (0 or greater)', type: 'danger' });
+        return;
+      }
+      const dmgVal = isNaN(singleDmg) || singleDmg < 0 ? 0 : singleDmg;
+      totalInitialStock = singleVal;
+
+      if (dmgVal > 0 && Array.isArray(store.data.damagedStockRegister)) {
+        store.data.damagedStockRegister.unshift({
+          id: `DMG-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          product: name,
+          sku: `${prefix}-STD`,
+          size: 'Standard',
+          qty: dmgVal,
+          reason: "Initial Stock Audit - Damaged Intake",
+          date: new Date().toISOString().split('T')[0]
+        });
+      }
+
+      variants = [
+        {
+          sku: `${prefix}-STD`,
+          size: 'Standard',
+          stock: singleVal,
+          damaged: dmgVal,
+          daysInStock: 0
+        }
+      ];
+    }
+
+    const newProduct = {
+      id: `PROD-${Date.now().toString().slice(-4)}`,
+      name: name,
+      category: category,
+      brand: brand,
+      description: desc,
+      purchasePrice: purchasePrice,
+      sellingPrice: sellingPrice,
+      minStock: 10,
+      supplier: "Apex Apparel Ltd",
+      status: status,
+      variants: variants
+    };
+
+    store.addProduct(newProduct);
+    toast.show({ message: `Successfully created product "${name}" with total initial stock of ${totalInitialStock} units`, type: 'success' });
+    if (onNavigate) onNavigate('products');
+  });
+
+  updateToggleButtons();
+  renderSizeChips();
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
 /**
  * Master Web Admin — Unified Application Script
  * Compatible with file:// protocol (double-clicking index.html directly) AND http:// localhost dev servers.
@@ -21,8 +472,7 @@ const initialData = {
   categories: ["Shirts", "T-Shirts", "Jeans", "Trousers", "Hoodies"],
   brands: ["ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
   sizes: ["S", "M", "L", "XL"],
-  colors: ["Black", "White", "Navy", "Beige", "Olive"],
-
+  
   suppliers: [
     { id: "SUP-01", name: "Apex Apparel Ltd", contact: "Rajesh Kumar (+91 98111 22334)", city: "Tirupur" },
     { id: "SUP-02", name: "SilkRoute Fabrics", contact: "Anita Sharma (+91 98222 33445)", city: "Surat" },
@@ -1595,6 +2045,14 @@ class StoreManager {
     this.save();
   }
 
+  updateProduct(id, updatedData) {
+    const idx = this.data.products.findIndex(p => p.id === id);
+    if (idx !== -1) {
+      this.data.products[idx] = { ...this.data.products[idx], ...updatedData };
+      this.save();
+    }
+  }
+
   adjustStock(sku, newStock, reason) {
     for (let p of this.data.products) {
       let v = p.variants.find(v => v.sku === sku);
@@ -1779,9 +2237,20 @@ function openProductDetailsModal(productInput) {
   const productSales = store.data.sales.filter(s => s.items.some(i => i.product === product.name));
 
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%;';
+  modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
 
-  modalEl.innerHTML = `
+  const modalBreadcrumb = createBreadcrumb([
+    { label: 'Products', target: 'products' },
+    { label: 'Product Details' }
+  ], (target, params) => {
+    modal.closeModal();
+    if (window.appInstance) window.appInstance.navigateTo(target, params);
+  });
+  modalEl.appendChild(modalBreadcrumb);
+
+  const innerContent = document.createElement('div');
+  innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
+  innerContent.innerHTML = `
     <!-- Top Metadata Header -->
     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color);">
       <div>
@@ -1832,7 +2301,6 @@ function openProductDetailsModal(productInput) {
         <table class="admin-table" style="font-size: 0.825rem;">
           <thead>
             <tr>
-              <th>Color</th>
               <th>Size</th>
               <th>Available Stock</th>
               <th>Damaged</th>
@@ -1842,8 +2310,7 @@ function openProductDetailsModal(productInput) {
           <tbody>
             ${product.variants.map(v => `
               <tr>
-                <td>${v.color}</td>
-                <td>${v.size}</td>
+                <td style="font-weight: 600;">${v.size === 'Standard' ? 'No Size (Standard)' : v.size}</td>
                 <td style="font-weight: 600; color: ${v.stock === 0 ? 'var(--status-danger)' : (v.stock <= product.minStock ? 'var(--status-warning)' : 'var(--text-primary)')};">${v.stock} units</td>
                 <td>${v.damaged > 0 ? `<span class="badge badge-danger">${v.damaged}</span>` : '0'}</td>
                 <td style="color: var(--text-secondary);">${v.daysInStock || 0} days</td>
@@ -1863,10 +2330,21 @@ function openSaleDetailsModal(sale) {
   const modalEl = document.createElement('div');
   modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
 
+  const modalBreadcrumb = createBreadcrumb([
+    { label: 'Sales', target: 'sales' },
+    { label: 'Sale Details' }
+  ], (target, params) => {
+    modal.closeModal();
+    if (window.appInstance) window.appInstance.navigateTo(target, params);
+  });
+  modalEl.appendChild(modalBreadcrumb);
+
   const subtotal = sale.items.reduce((sum, i) => sum + (i.price * i.qty), 0);
   const totalDiscount = sale.items.reduce((sum, i) => sum + (i.discount || 0), 0);
 
-  modalEl.innerHTML = `
+  const innerContent = document.createElement('div');
+  innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
+  innerContent.innerHTML = `
     <div style="background: var(--bg-secondary); padding: 0.85rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; font-size: 0.85rem;">
       <div>
         <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Customer</div>
@@ -1937,6 +2415,66 @@ function openSaleDetailsModal(sale) {
   const printBtn = createButton({ text: 'Print Receipt', icon: 'printer', variant: 'secondary', onClick: () => window.print() });
   const closeBtn = createButton({ text: 'Close', variant: 'secondary', onClick: () => modal.closeModal() });
   const modal = createModal({ title: `Sale Details — ${sale.customer}`, bodyElement: modalEl, footerButtons: [printBtn, closeBtn] });
+}
+
+
+function createBreadcrumb(items = [], onNavigate = null) {
+  const container = document.createElement('div');
+  container.className = 'content-header-nav';
+  container.style.cssText = 'display: flex; align-items: center; gap: 0.25rem; font-size: 0.875rem; font-weight: 500; line-height: 1.4;';
+
+  // Single top-level page: render compact page context label in active accent color
+  if (items.length === 1) {
+    const span = document.createElement('span');
+    span.className = 'page-context-label';
+    span.style.cssText = 'font-size: 0.875rem; font-weight: 500; color: var(--brand-primary); line-height: 1.4; margin: 0; letter-spacing: 0.01em;';
+    span.textContent = items[0].label;
+    container.appendChild(span);
+    return container;
+  }
+
+  // Child / Detail page: render hierarchical parent / child breadcrumb
+  const nav = document.createElement('nav');
+  nav.setAttribute('aria-label', 'Breadcrumb');
+  nav.style.cssText = 'display: flex; align-items: center; gap: 0.25rem; font-size: 0.875rem; font-weight: 500; line-height: 1.4;';
+
+  items.forEach((item, index) => {
+    const isLast = index === items.length - 1;
+
+    if (index > 0) {
+      const sep = document.createElement('span');
+      sep.style.cssText = 'color: var(--text-tertiary); margin: 0 0.3rem; user-select: none; font-size: 0.825rem; opacity: 0.7;';
+      sep.textContent = '/';
+      nav.appendChild(sep);
+    }
+
+    if (isLast) {
+      const span = document.createElement('span');
+      span.style.cssText = 'color: var(--brand-primary); font-weight: 600; font-size: 0.875rem;';
+      span.textContent = item.label;
+      nav.appendChild(span);
+    } else {
+      const link = document.createElement('a');
+      link.href = '#';
+      link.style.cssText = 'color: var(--text-secondary); text-decoration: none; transition: color 0.15s ease; cursor: pointer; font-weight: 500; font-size: 0.875rem;';
+      link.textContent = item.label;
+      link.addEventListener('mouseenter', () => { link.style.color = 'var(--brand-primary)'; });
+      link.addEventListener('mouseleave', () => { link.style.color = 'var(--text-secondary)'; });
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const targetPage = item.target || item.page;
+        if (onNavigate) {
+          onNavigate(targetPage, item.params || {});
+        } else if (window.appInstance && window.appInstance.navigateTo) {
+          window.appInstance.navigateTo(targetPage, item.params || {});
+        }
+      });
+      nav.appendChild(link);
+    }
+  });
+
+  container.appendChild(nav);
+  return container;
 }
 
 
@@ -2036,12 +2574,9 @@ function renderOverview(onNavigate) {
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.innerHTML = `
-    <div>
-      <h2 class="section-heading">Store Overview</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Key store metrics, sales trend, top performing products, and recent stock intake.</p>
-    </div>
-  `;
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Overview' }
+  ], onNavigate));
   container.appendChild(headerDiv);
 
   // 4 KPI Cards
@@ -2425,7 +2960,7 @@ function renderOverview(onNavigate) {
 }
 
 // INVENTORY PAGE
-function renderInventory(params = {}) {
+function renderInventory(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -2437,13 +2972,27 @@ function renderInventory(params = {}) {
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.innerHTML = `
-    <div>
-      <h2 class="section-heading">Stock Inventory & Movements</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Track real-time sellable stock, damaged stock isolation, and inventory audit logs.</p>
-    </div>
-    <div id="inv-header-actions"></div>
-  `;
+
+  let invBreadcrumbItems = [
+    { label: 'Inventory' }
+  ];
+  if (params && params.status === 'LOW') {
+    invBreadcrumbItems = [
+      { label: 'Inventory', target: 'inventory' },
+      { label: 'Low Stock' }
+    ];
+  } else if (params && params.status === 'OUT') {
+    invBreadcrumbItems = [
+      { label: 'Inventory', target: 'inventory' },
+      { label: 'Out of Stock' }
+    ];
+  }
+
+  headerDiv.appendChild(createBreadcrumb(invBreadcrumbItems, onNavigate));
+
+  const invActions = document.createElement('div');
+  invActions.id = 'inv-header-actions';
+  headerDiv.appendChild(invActions);
 
   const adjustBtn = createButton({
     text: 'Stock Audit / Adjust',
@@ -2477,103 +3026,60 @@ function renderInventory(params = {}) {
   `;
   container.appendChild(summaryBar);
 
-  const tabsDiv = document.createElement('div');
-  tabsDiv.className = 'tab-list';
-  tabsDiv.innerHTML = `
-    <button class="tab-button ${activeTab === 'inventory' ? 'active' : ''}" id="tab-btn-inv">Current Inventory Table</button>
-    <button class="tab-button ${activeTab === 'movements' ? 'active' : ''}" id="tab-btn-mov">Stock Movement Log</button>
-  `;
-  container.appendChild(tabsDiv);
-
   const mainCard = document.createElement('div');
   mainCard.className = 'card';
   container.appendChild(mainCard);
 
   function renderTabContent() {
     mainCard.innerHTML = '';
-    if (activeTab === 'inventory') {
-      const filterBar = document.createElement('div');
-      filterBar.className = 'filter-bar';
-      filterBar.style.marginBottom = '1.25rem';
-      filterBar.innerHTML = `
-        <div class="search-box">
-          <i data-lucide="search" class="search-icon" style="width: 16px; height: 16px;"></i>
-          <input type="text" class="form-input" id="inv-search-input" placeholder="Search by Product name, Color, Category..." value="${searchQuery}">
-        </div>
-        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-          <select class="form-select" id="inv-category-select" style="width: 160px;">
-            <option value="ALL">All Categories</option>
-            ${store.data.categories.map(c => `<option value="${c}" ${selectedCategory === c ? 'selected' : ''}>${c}</option>`).join('')}
-          </select>
-          <select class="form-select" id="inv-status-select" style="width: 160px;">
-            <option value="ALL">All Statuses</option>
-            <option value="NORMAL" ${selectedStatus === 'NORMAL' ? 'selected' : ''}>Normal</option>
-            <option value="LOW" ${selectedStatus === 'LOW' ? 'selected' : ''}>Low Stock</option>
-            <option value="OUT" ${selectedStatus === 'OUT' ? 'selected' : ''}>Out of Stock</option>
-          </select>
-        </div>
-      `;
+    const filterBar = document.createElement('div');
+    filterBar.className = 'filter-bar';
+    filterBar.style.marginBottom = '1.25rem';
+    filterBar.innerHTML = `
+      <div class="search-box">
+        <i data-lucide="search" class="search-icon" style="width: 16px; height: 16px;"></i>
+        <input type="text" class="form-input" id="inv-search-input" placeholder="Search by Product name, Size, Category..." value="${searchQuery}">
+      </div>
+      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <select class="form-select" id="inv-category-select" style="width: 160px;">
+          <option value="ALL">All Categories</option>
+          ${store.data.categories.map(c => `<option value="${c}" ${selectedCategory === c ? 'selected' : ''}>${c}</option>`).join('')}
+        </select>
+        <select class="form-select" id="inv-status-select" style="width: 160px;">
+          <option value="ALL">All Statuses</option>
+          <option value="NORMAL" ${selectedStatus === 'NORMAL' ? 'selected' : ''}>Normal</option>
+          <option value="LOW" ${selectedStatus === 'LOW' ? 'selected' : ''}>Low Stock</option>
+          <option value="OUT" ${selectedStatus === 'OUT' ? 'selected' : ''}>Out of Stock</option>
+        </select>
+      </div>
+    `;
 
-      filterBar.querySelector('#inv-search-input').addEventListener('input', (e) => { searchQuery = e.target.value; renderTableRows(); });
-      filterBar.querySelector('#inv-category-select').addEventListener('change', (e) => { selectedCategory = e.target.value; renderTableRows(); });
-      filterBar.querySelector('#inv-status-select').addEventListener('change', (e) => { selectedStatus = e.target.value; renderTableRows(); });
+    filterBar.querySelector('#inv-search-input').addEventListener('input', (e) => { searchQuery = e.target.value; renderTableRows(); });
+    filterBar.querySelector('#inv-category-select').addEventListener('change', (e) => { selectedCategory = e.target.value; renderTableRows(); });
+    filterBar.querySelector('#inv-status-select').addEventListener('change', (e) => { selectedStatus = e.target.value; renderTableRows(); });
 
-      mainCard.appendChild(filterBar);
+    mainCard.appendChild(filterBar);
 
-      const tableResp = document.createElement('div');
-      tableResp.className = 'table-responsive';
-      tableResp.innerHTML = `
-        <table class="admin-table">
-          <thead>
-            <tr>
-              <th>Product Name</th>
-              <th>Category</th>
-              <th>Size / Color</th>
-              <th>Available Stock</th>
-              <th>Damaged</th>
-              <th>Min Stock</th>
-              <th>Stock Value</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="inventory-tbody"></tbody>
-        </table>
-      `;
-      mainCard.appendChild(tableResp);
-      renderTableRows();
-    } else {
-      mainCard.innerHTML = `
-        <div style="margin-bottom: 1rem;">
-          <h3 class="card-title">Stock Movement History</h3>
-          <p style="font-size: 0.78rem; color: var(--text-secondary);">Audit log of all stock increases, sales deductions, damages, and manual adjustments.</p>
-        </div>
-        <div class="table-responsive">
-          <table class="admin-table">
-            <thead>
-              <tr>
-                <th>Date & Time</th>
-                <th>Movement Type</th>
-                <th>Product</th>
-                <th>Quantity</th>
-                <th>User</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${store.data.stockMovements.map(m => `
-                <tr>
-                  <td style="color: var(--text-secondary);">${m.date}</td>
-                  <td>${createBadge({ label: m.type, variant: m.type === 'Stock In' ? 'success' : (m.type === 'Sale' ? 'info' : 'danger') }).outerHTML}</td>
-                  <td style="font-weight: 500;">${m.product}</td>
-                  <td style="font-weight: 600; color: ${m.quantity > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${m.quantity > 0 ? `+${m.quantity}` : m.quantity}</td>
-                  <td style="color: var(--text-secondary);">${m.user}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      `;
-    }
+    const tableResp = document.createElement('div');
+    tableResp.className = 'table-responsive';
+    tableResp.innerHTML = `
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Product Name</th>
+            <th>Category</th>
+            <th>Size</th>
+            <th>Available Stock</th>
+            <th>Damaged</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="inventory-tbody"></tbody>
+      </table>
+    `;
+    mainCard.appendChild(tableResp);
+    renderTableRows();
 
     if (window.lucide) window.lucide.createIcons();
   }
@@ -2587,7 +3093,7 @@ function renderInventory(params = {}) {
     store.data.products.forEach(p => {
       p.variants.forEach(v => {
         const q = searchQuery.toLowerCase();
-        const matchesSearch = !q || p.name.toLowerCase().includes(q) || v.sku.toLowerCase().includes(q) || v.color.toLowerCase().includes(q);
+        const matchesSearch = !q || p.name.toLowerCase().includes(q) || v.sku.toLowerCase().includes(q) ;
         const matchesCat = selectedCategory === 'ALL' || p.category === selectedCategory;
         let statusKey = v.stock === 0 ? 'OUT' : (v.stock <= p.minStock ? 'LOW' : 'NORMAL');
         const matchesStatus = selectedStatus === 'ALL' || selectedStatus === statusKey;
@@ -2597,7 +3103,7 @@ function renderInventory(params = {}) {
     });
 
     if (rows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No inventory records match the selected filters.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No inventory records match the selected filters.</td></tr>`;
       return;
     }
 
@@ -2608,19 +3114,17 @@ function renderInventory(params = {}) {
 
       tr.innerHTML = `
         <td>
-          <div style="font-weight: 600;">${product.name}</div>
-          <div style="font-size: 0.725rem; color: var(--text-secondary);">${product.brand}</div>
+          <div style="font-weight: 600; font-size: 0.925rem; color: var(--text-primary);">${product.name}</div>
         </td>
         <td>${createBadge({ label: product.category, variant: 'secondary' }).outerHTML}</td>
-        <td>${variant.color} / ${variant.size}</td>
+        <td><span style="font-weight: 500;">${variant.size === 'Standard' ? 'Standard' : variant.size}</span></td>
         <td><span style="font-weight: 600; color: ${variant.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${variant.stock} units</span></td>
         <td>${variant.damaged > 0 ? `<span class="badge badge-danger">${variant.damaged} damaged</span>` : '<span style="color: var(--text-tertiary);">0</span>'}</td>
-        <td style="color: var(--text-secondary);">${product.minStock}</td>
-        <td>₹${(variant.stock * product.purchasePrice).toLocaleString()}</td>
         <td>${createBadge({ label: badgeLabel, variant: badgeVariant }).outerHTML}</td>
         <td>
-          <button class="btn btn-ghost btn-sm quick-adj-btn" data-sku="${variant.sku}" style="padding: 0.25rem 0.5rem;">
-            <i data-lucide="edit-2" style="width: 14px; height: 14px;"></i> Adjust
+          <button type="button" class="btn btn-secondary btn-sm quick-adj-btn" data-sku="${variant.sku}" style="padding: 0.3rem 0.65rem; font-size: 0.8rem; gap: 0.35rem; display: inline-flex; align-items: center;">
+            <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i>
+            <span>Edit</span>
           </button>
         </td>
       `;
@@ -2633,61 +3137,594 @@ function renderInventory(params = {}) {
   }
 
   function openStockAdjustModal(defaultSku = '', defaultStock = 0) {
+    let selectedSKU = defaultSku;
+    let targetProd = null;
+    let targetVariant = null;
+
+    if (selectedSKU) {
+      for (let p of store.data.products) {
+        let v = p.variants.find(x => x.sku === selectedSKU);
+        if (v) {
+          targetProd = p;
+          targetVariant = v;
+          break;
+        }
+      }
+    }
+
+    if (!targetVariant && store.data.products.length > 0) {
+      targetProd = store.data.products[0];
+      targetVariant = targetProd.variants[0];
+      selectedSKU = targetVariant ? targetVariant.sku : '';
+    }
+
+    const currentStock = targetVariant ? targetVariant.stock : 0;
+    const prodVariantName = targetProd && targetVariant
+      ? `${targetProd.name} — ${targetVariant.size === 'Standard' ? 'Standard' : targetVariant.size}`
+      : 'Unknown Product';
+
     const formHtml = `
-      <div class="form-group">
-        <label class="form-label">Select Product Variant</label>
-        <select class="form-select" id="adj-sku-select">
-          ${store.data.products.flatMap(p => p.variants.map(v => `<option value="${v.sku}" ${v.sku === defaultSku ? 'selected' : ''}>${p.name} (${v.color}/${v.size}) [Current: ${v.stock}]</option>`)).join('')}
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">New Usable Available Stock Quantity</label>
-        <input type="number" class="form-input" id="adj-new-stock" value="${defaultStock}" min="0">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Audit / Adjustment Reason</label>
-        <select class="form-select" id="adj-reason-select">
-          <option value="Physical Stock Audit Correction">Physical Stock Audit Correction</option>
-          <option value="Stock Damaged In Store">Stock Damaged In Store</option>
-          <option value="Sample / Display Unit">Sample / Display Unit</option>
-        </select>
+      <div style="display: flex; flex-direction: column; gap: 1.15rem;">
+        <!-- Product Variant (Read-Only) -->
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Product Variant</label>
+          <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); padding: 0.55rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+            ${prodVariantName}
+          </div>
+        </div>
+
+        <!-- Current Stock (Read-Only) -->
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Current Stock</label>
+          <div style="font-size: 1.1rem; font-weight: 700; color: var(--brand-primary); padding: 0.45rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: inline-block;">
+            ${currentStock} units
+          </div>
+        </div>
+
+        <!-- Adjustment Type -->
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Adjustment Type *</label>
+          <select class="form-select" id="adj-type-select">
+            <option value="REMOVE" selected>Remove Stock</option>
+            <option value="ADD">Add Stock</option>
+          </select>
+        </div>
+
+        <!-- Quantity -->
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Quantity *</label>
+          <input type="number" class="form-input" id="adj-qty-input" value="1" min="1" placeholder="e.g. 2" style="font-weight: 600;">
+        </div>
+
+        <!-- Reason -->
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Reason *</label>
+          <select class="form-select" id="adj-reason-select">
+            <option value="Stock Correction">Stock Correction</option>
+            <option value="Damaged Stock" selected>Damaged Stock</option>
+            <option value="Sample / Display">Sample / Display</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+
+        <!-- Optional Notes for Other -->
+        <div class="form-group" id="adj-notes-container" style="display: none;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Adjustment Notes</label>
+          <input type="text" class="form-input" id="adj-notes-input" placeholder="Enter reason...">
+        </div>
+
+        <!-- New Calculated Stock Display -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 0.85rem; border-top: 1px solid var(--border-color); font-size: 0.95rem;">
+          <span style="font-weight: 600; color: var(--text-secondary);">New Stock:</span>
+          <span style="font-size: 1.25rem; font-weight: 700; color: var(--brand-primary);" id="adj-new-calculated-stock">
+            ${Math.max(0, currentStock - 1)} units
+          </span>
+        </div>
       </div>
     `;
 
     const bodyEl = document.createElement('div');
     bodyEl.innerHTML = formHtml;
 
+    const typeSelect = bodyEl.querySelector('#adj-type-select');
+    const qtyInput = bodyEl.querySelector('#adj-qty-input');
+    const reasonSelect = bodyEl.querySelector('#adj-reason-select');
+    const notesContainer = bodyEl.querySelector('#adj-notes-container');
+    const calcDisplay = bodyEl.querySelector('#adj-new-calculated-stock');
+
+    function updateCalculation() {
+      const isAdd = typeSelect.value === 'ADD';
+      const parsedQty = parseInt(qtyInput.value, 10);
+      const qty = isNaN(parsedQty) || parsedQty < 1 ? 0 : parsedQty;
+
+      let calcResult = isAdd ? (currentStock + qty) : (currentStock - qty);
+      if (calcResult < 0) calcResult = 0;
+
+      calcDisplay.textContent = `${calcResult} units`;
+    }
+
+    typeSelect.addEventListener('change', updateCalculation);
+    qtyInput.addEventListener('input', updateCalculation);
+
+    reasonSelect.addEventListener('change', () => {
+      if (reasonSelect.value === 'Other') {
+        notesContainer.style.display = 'block';
+      } else {
+        notesContainer.style.display = 'none';
+      }
+    });
+
+    updateCalculation();
+
     const cancelBtn = createButton({ text: 'Cancel', variant: 'secondary', onClick: () => modal.closeModal() });
     const saveBtn = createButton({
       text: 'Save Adjustment',
       variant: 'primary',
       onClick: () => {
-        const sku = bodyEl.querySelector('#adj-sku-select').value;
-        const newStock = parseInt(bodyEl.querySelector('#adj-new-stock').value, 10);
-        const reason = bodyEl.querySelector('#adj-reason-select').value;
-        if (isNaN(newStock) || newStock < 0) {
-          toast.show({ message: 'Please enter a valid stock quantity', type: 'danger' });
+        const isAdd = typeSelect.value === 'ADD';
+        const parsedQty = parseInt(qtyInput.value, 10);
+
+        if (isNaN(parsedQty) || parsedQty <= 0) {
+          toast.show({ message: 'Quantity must be a positive whole number greater than 0', type: 'danger' });
           return;
         }
-        store.adjustStock(sku, newStock, reason);
-        toast.show({ message: `Updated stock to ${newStock} units`, type: 'success' });
+
+        if (!isAdd && parsedQty > currentStock) {
+          toast.show({ message: `Cannot remove ${parsedQty} units. Maximum available stock to remove is ${currentStock} units`, type: 'danger' });
+          return;
+        }
+
+        let reasonText = reasonSelect.value;
+        if (reasonText === 'Other') {
+          const notesVal = bodyEl.querySelector('#adj-notes-input').value.trim();
+          reasonText = notesVal ? `Other: ${notesVal}` : 'Other';
+        }
+
+        const finalNewStock = isAdd ? (currentStock + parsedQty) : (currentStock - parsedQty);
+
+        store.adjustStock(selectedSKU, finalNewStock, reasonText);
+        toast.show({ message: `Successfully updated stock to ${finalNewStock} units`, type: 'success' });
         modal.closeModal();
         renderTabContent();
       }
     });
 
-    const modal = createModal({ title: 'Manual Stock Audit / Adjustment', bodyElement: bodyEl, footerButtons: [cancelBtn, saveBtn] });
+    const modal = createModal({ title: 'Manual Stock Adjustment', bodyElement: bodyEl, footerButtons: [cancelBtn, saveBtn] });
   }
 
-  tabsDiv.querySelector('#tab-btn-inv').addEventListener('click', () => { activeTab = 'inventory'; renderTabContent(); });
-  tabsDiv.querySelector('#tab-btn-mov').addEventListener('click', () => { activeTab = 'movements'; renderTabContent(); });
+
 
   renderTabContent();
   return container;
 }
 
+
+// EDIT PRODUCT PAGE
+function renderEditProductPage(productToEdit, onNavigate = null) {
+  if (!productToEdit) {
+    if (onNavigate) onNavigate('products');
+    return document.createElement('div');
+  }
+
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  // 1. Breadcrumb Header (Products / Edit Product)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
+
+  const breadcrumb = createBreadcrumb([
+    { label: 'Products', target: 'products' },
+    { label: 'Edit Product' }
+  ], onNavigate);
+
+  headerDiv.appendChild(breadcrumb);
+  container.appendChild(headerDiv);
+
+  // 2. Main Form Card
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+
+  const catOptions = store.data.categories.length > 0 ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
+  const brandOptions = store.data.brands.length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+  const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+
+  let existingVariants = productToEdit.variants || [];
+  let hasSizes = existingVariants.some(v => v.size !== 'Standard' && v.size !== '');
+  let selectedSizes = new Set(hasSizes ? existingVariants.map(v => v.size) : ['S', 'M', 'L', 'XL']);
+
+  let sizeStockMap = {};
+  let sizeDamagedMap = {};
+
+  existingVariants.forEach(v => {
+    sizeStockMap[v.size] = v.stock !== undefined ? v.stock : 0;
+    sizeDamagedMap[v.size] = v.damaged !== undefined ? v.damaged : 0;
+  });
+
+  const formContainer = document.createElement('div');
+  formContainer.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+
+  formContainer.innerHTML = `
+    <!-- Basic Information -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Edit Product</h4>
+
+      <div class="form-group">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Product Name *</label>
+        <input type="text" class="form-input" id="edit-prod-name" value="${productToEdit.name || ''}" placeholder="e.g. Linen Casual Shirt">
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Category *</label>
+          <select class="form-select" id="edit-prod-cat">
+            ${catOptions.map(c => `<option value="${c}" ${c === productToEdit.category ? 'selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Brand</label>
+          <select class="form-select" id="edit-prod-brand">
+            ${brandOptions.map(b => `<option value="${b}" ${b === productToEdit.brand ? 'selected' : ''}>${b}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Status</label>
+          <select class="form-select" id="edit-prod-status">
+            <option value="Active" ${productToEdit.status === 'Active' ? 'selected' : ''}>Active</option>
+            <option value="Inactive" ${productToEdit.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pricing -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Pricing</h4>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Price (₹) *</label>
+          <input type="number" class="form-input" id="edit-prod-cost" value="${productToEdit.purchasePrice || 0}" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Selling Price (₹) *</label>
+          <input type="number" class="form-input" id="edit-prod-price" value="${productToEdit.sellingPrice || 0}" min="0">
+        </div>
+      </div>
+    </div>
+
+    <!-- Product Sizes & Existing Inventory -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem; background: var(--bg-secondary); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+      <div>
+        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">Product Sizes & Inventory Quantities</h4>
+        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">Manage available sizes. Existing stock counts are preserved.</p>
+      </div>
+
+      <!-- Question: Does this product have sizes? [Yes] [No] -->
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
+        <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Does this product have sizes?</span>
+        <div style="display: flex; gap: 0.35rem; background: var(--bg-surface); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <button type="button" class="btn btn-sm" id="has-sizes-yes" style="padding: 0.25rem 0.85rem; font-weight: 600;">Yes</button>
+          <button type="button" class="btn btn-sm" id="has-sizes-no" style="padding: 0.25rem 0.85rem; font-weight: 600;">No</button>
+        </div>
+      </div>
+
+      <!-- Size-Based Section -->
+      <div id="size-based-section" style="display: flex; flex-direction: column; gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Select Available Sizes:</label>
+          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;" id="size-chips-box">
+            ${allSizes.map(s => `
+              <button type="button" class="size-chip-btn" data-size="${s}" style="padding: 0.35rem 0.75rem; font-size: 0.825rem; font-weight: 600; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s ease;">
+                ${s}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Generated Size Stock Table -->
+        <div class="table-responsive" style="background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <table class="admin-table" style="font-size: 0.85rem;">
+            <thead>
+              <tr>
+                <th style="width: 30%;">Size</th>
+                <th style="width: 35%;">Available Stock (Units)</th>
+                <th style="width: 35%;">Damaged Stock (Units)</th>
+              </tr>
+            </thead>
+            <tbody id="size-stock-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Non-Size Product Section -->
+      <div id="no-size-section" style="display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Available Stock *</label>
+          <input type="number" class="form-input" id="single-stock-input" value="${hasSizes ? 0 : (existingVariants[0]?.stock || 0)}" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Damaged Stock</label>
+          <input type="number" class="form-input" id="single-damaged-input" value="${hasSizes ? 0 : (existingVariants[0]?.damaged || 0)}" min="0" style="color: var(--status-danger);">
+        </div>
+      </div>
+
+      <!-- Total Stock Display -->
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.9rem;">
+        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: center;">
+          <div>
+            <span style="font-weight: 600; color: var(--text-secondary);">Total Available Stock: </span>
+            <span style="font-size: 1.15rem; font-weight: 700; color: var(--brand-primary);" id="total-stock-display">0 units</span>
+          </div>
+          <div>
+            <span style="font-weight: 600; color: var(--text-secondary);">Total Damaged Stock: </span>
+            <span style="font-size: 1.15rem; font-weight: 700; color: var(--status-danger);" id="total-damaged-display">0 units</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Description -->
+    <div class="form-group">
+      <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Description</label>
+      <textarea class="form-textarea" id="edit-prod-desc" rows="3" placeholder="Enter product description (optional)">${productToEdit.description || ''}</textarea>
+    </div>
+
+    <!-- Action Buttons Bar -->
+    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+      <button type="button" class="btn btn-secondary" id="cancel-edit-prod-btn">Cancel</button>
+      <button type="button" class="btn btn-primary" id="save-edit-prod-btn" style="padding: 0.55rem 1.25rem; font-weight: 600;">Save Changes</button>
+    </div>
+  `;
+
+  mainCard.appendChild(formContainer);
+  container.appendChild(mainCard);
+
+  // Interactive Logic
+  function updateToggleButtons() {
+    const yesBtn = formContainer.querySelector('#has-sizes-yes');
+    const noBtn = formContainer.querySelector('#has-sizes-no');
+    const sizeSection = formContainer.querySelector('#size-based-section');
+    const noSizeSection = formContainer.querySelector('#no-size-section');
+
+    if (hasSizes) {
+      yesBtn.style.backgroundColor = 'var(--brand-primary)';
+      yesBtn.style.color = '#ffffff';
+      yesBtn.style.borderColor = 'var(--brand-primary)';
+      noBtn.style.backgroundColor = 'transparent';
+      noBtn.style.color = 'var(--text-secondary)';
+      noBtn.style.borderColor = 'transparent';
+
+      sizeSection.style.display = 'flex';
+      noSizeSection.style.display = 'none';
+    } else {
+      noBtn.style.backgroundColor = 'var(--brand-primary)';
+      noBtn.style.color = '#ffffff';
+      noBtn.style.borderColor = 'var(--brand-primary)';
+      yesBtn.style.backgroundColor = 'transparent';
+      yesBtn.style.color = 'var(--text-secondary)';
+      yesBtn.style.borderColor = 'transparent';
+
+      sizeSection.style.display = 'none';
+      noSizeSection.style.display = 'grid';
+    }
+    renderSizeChips();
+    renderSizeStockTable();
+  }
+
+  function renderSizeChips() {
+    formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
+      const s = btn.dataset.size;
+      if (selectedSizes.has(s)) {
+        btn.style.backgroundColor = 'var(--brand-primary)';
+        btn.style.color = '#ffffff';
+        btn.style.borderColor = 'var(--brand-primary)';
+      } else {
+        btn.style.backgroundColor = 'var(--bg-surface)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderColor = 'var(--border-color)';
+      }
+    });
+  }
+
+  function renderSizeStockTable() {
+    const tbody = formContainer.querySelector('#size-stock-tbody');
+
+    if (hasSizes) {
+      tbody.innerHTML = '';
+      if (selectedSizes.size === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--status-warning-text); padding: 1rem;">Please select at least one size above.</td></tr>`;
+        recalcTotal();
+        return;
+      }
+
+      Array.from(selectedSizes).forEach(sz => {
+        const existingV = existingVariants.find(v => v.size === sz);
+        const qty = sizeStockMap[sz] !== undefined ? sizeStockMap[sz] : (existingV ? existingV.stock : 0);
+        const dmg = sizeDamagedMap[sz] !== undefined ? sizeDamagedMap[sz] : (existingV ? existingV.damaged : 0);
+        sizeStockMap[sz] = qty;
+        sizeDamagedMap[sz] = dmg;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="font-weight: 600; color: var(--text-primary);">${sz}</td>
+          <td>
+            <input type="number" class="form-input size-stock-input" data-size="${sz}" value="${qty}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600;">
+          </td>
+          <td>
+            <input type="number" class="form-input size-damaged-input" data-size="${sz}" value="${dmg}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600; color: var(--status-danger);">
+          </td>
+        `;
+
+        tr.querySelector('.size-stock-input').addEventListener('input', (e) => {
+          const parsed = parseInt(e.target.value, 10);
+          sizeStockMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+          recalcTotal();
+        });
+
+        tr.querySelector('.size-damaged-input').addEventListener('input', (e) => {
+          const parsed = parseInt(e.target.value, 10);
+          sizeDamagedMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+          recalcTotal();
+        });
+
+        tbody.appendChild(tr);
+      });
+      recalcTotal();
+    } else {
+      recalcTotal();
+    }
+  }
+
+  function recalcTotal() {
+    const totalDisplay = formContainer.querySelector('#total-stock-display');
+    const totalDamagedDisplay = formContainer.querySelector('#total-damaged-display');
+
+    if (hasSizes) {
+      let totalStock = 0;
+      let totalDamaged = 0;
+      selectedSizes.forEach(sz => {
+        totalStock += (sizeStockMap[sz] || 0);
+        totalDamaged += (sizeDamagedMap[sz] || 0);
+      });
+      if (totalDisplay) totalDisplay.textContent = `${totalStock} units`;
+      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${totalDamaged} units`;
+    } else {
+      const singleInput = formContainer.querySelector('#single-stock-input');
+      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
+      const parsedStock = singleInput ? parseInt(singleInput.value, 10) : 0;
+      const parsedDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
+      const stockQty = isNaN(parsedStock) || parsedStock < 0 ? 0 : parsedStock;
+      const dmgQty = isNaN(parsedDmg) || parsedDmg < 0 ? 0 : parsedDmg;
+      if (totalDisplay) totalDisplay.textContent = `${stockQty} units`;
+      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${dmgQty} units`;
+    }
+  }
+
+  formContainer.querySelector('#has-sizes-yes').addEventListener('click', () => { hasSizes = true; updateToggleButtons(); });
+  formContainer.querySelector('#has-sizes-no').addEventListener('click', () => { hasSizes = false; updateToggleButtons(); });
+
+  formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = btn.dataset.size;
+      if (selectedSizes.has(s)) {
+        selectedSizes.delete(s);
+      } else {
+        selectedSizes.add(s);
+        if (sizeStockMap[s] === undefined) {
+          const existingV = existingVariants.find(v => v.size === s);
+          sizeStockMap[s] = existingV ? existingV.stock : 0;
+        }
+      }
+      renderSizeChips();
+      renderSizeStockTable();
+    });
+  });
+
+  formContainer.querySelector('#single-stock-input').addEventListener('input', () => recalcTotal());
+  const singleDmgEl = formContainer.querySelector('#single-damaged-input');
+  if (singleDmgEl) singleDmgEl.addEventListener('input', () => recalcTotal());
+
+  formContainer.querySelector('#cancel-edit-prod-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('products');
+  });
+
+  formContainer.querySelector('#save-edit-prod-btn').addEventListener('click', () => {
+    const name = formContainer.querySelector('#edit-prod-name').value.trim();
+    const category = formContainer.querySelector('#edit-prod-cat').value;
+    const brand = formContainer.querySelector('#edit-prod-brand').value;
+    const costStr = formContainer.querySelector('#edit-prod-cost').value;
+    const priceStr = formContainer.querySelector('#edit-prod-price').value;
+    const status = formContainer.querySelector('#edit-prod-status').value;
+    const desc = formContainer.querySelector('#edit-prod-desc').value.trim();
+
+    if (!name) {
+      toast.show({ message: 'Product Name is required', type: 'danger' });
+      return;
+    }
+    if (!costStr || isNaN(costStr) || parseFloat(costStr) <= 0) {
+      toast.show({ message: 'Valid Purchase Price is required', type: 'danger' });
+      return;
+    }
+    if (!priceStr || isNaN(priceStr) || parseFloat(priceStr) <= 0) {
+      toast.show({ message: 'Valid Selling Price is required', type: 'danger' });
+      return;
+    }
+
+    const purchasePrice = parseFloat(costStr);
+    const sellingPrice = parseFloat(priceStr);
+
+    let updatedVariants = [];
+    const prefix = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) || 'PRD';
+
+    if (hasSizes) {
+      if (selectedSizes.size === 0) {
+        toast.show({ message: 'Please select at least one size', type: 'danger' });
+        return;
+      }
+
+      updatedVariants = Array.from(selectedSizes).map(sz => {
+        const existingV = existingVariants.find(v => v.size === sz);
+        const st = sizeStockMap[sz] !== undefined ? sizeStockMap[sz] : (existingV ? existingV.stock : 0);
+        const dmg = sizeDamagedMap[sz] !== undefined ? sizeDamagedMap[sz] : (existingV ? existingV.damaged : 0);
+
+        return {
+          sku: existingV ? existingV.sku : `${prefix}-${sz}`,
+          size: sz,
+          stock: st,
+          damaged: dmg,
+          daysInStock: existingV ? (existingV.daysInStock || 0) : 0
+        };
+      });
+    } else {
+      const singleInput = formContainer.querySelector('#single-stock-input');
+      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
+      const existingV = existingVariants[0];
+
+      const st = singleInput ? parseInt(singleInput.value, 10) : (existingV ? existingV.stock : 0);
+      const dmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : (existingV ? existingV.damaged : 0);
+
+      updatedVariants = [
+        {
+          sku: existingV ? existingV.sku : `${prefix}-STD`,
+          size: 'Standard',
+          stock: isNaN(st) || st < 0 ? 0 : st,
+          damaged: isNaN(dmg) || dmg < 0 ? 0 : dmg,
+          daysInStock: existingV ? (existingV.daysInStock || 0) : 0
+        }
+      ];
+    }
+
+    const updatedData = {
+      name: name,
+      category: category,
+      brand: brand,
+      description: desc,
+      purchasePrice: purchasePrice,
+      sellingPrice: sellingPrice,
+      status: status,
+      variants: updatedVariants
+    };
+
+    store.updateProduct(productToEdit.id, updatedData);
+    toast.show({ message: `Successfully updated product "${name}"`, type: 'success' });
+    if (onNavigate) onNavigate('products');
+  });
+
+  updateToggleButtons();
+  return container;
+}
+
 // PRODUCTS PAGE
-function renderProducts(params = {}) {
+function renderProducts(params = {}, onNavigate = null) {
+  if (params && (params.action === 'add' || params.view === 'add')) {
+    return renderAddProductPage(onNavigate);
+  }
+  if (params && (params.action === 'edit' || params.view === 'edit')) {
+    const prodToEdit = params.product || store.data.products.find(x => x.id === params.productId);
+    return renderEditProductPage(prodToEdit, onNavigate);
+  }
+
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -2697,15 +3734,24 @@ function renderProducts(params = {}) {
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.innerHTML = `
-    <div>
-      <h2 class="section-heading">Product Catalog & Variants</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Manage products, pricing, minimum reorder thresholds, and size/color variants.</p>
-    </div>
-    <div id="prod-header-actions"></div>
-  `;
 
-  const addProductBtn = createButton({ text: 'Add New Product', icon: 'plus', variant: 'primary', size: 'sm', onClick: () => openAddProductModal() });
+  let prodBreadcrumbItems = [
+    { label: 'Products' }
+  ];
+  if (params && params.openProduct) {
+    prodBreadcrumbItems = [
+      { label: 'Products', target: 'products' },
+      { label: 'Product Details' }
+    ];
+  }
+
+  headerDiv.appendChild(createBreadcrumb(prodBreadcrumbItems, onNavigate));
+
+  const prodActions = document.createElement('div');
+  prodActions.id = 'prod-header-actions';
+  headerDiv.appendChild(prodActions);
+
+  const addProductBtn = createButton({ text: 'Add New Product', icon: 'plus', variant: 'primary', size: 'sm', onClick: () => { if (onNavigate) onNavigate('products', { action: 'add' }); } });
   headerDiv.querySelector('#prod-header-actions').appendChild(addProductBtn);
   container.appendChild(headerDiv);
 
@@ -2746,15 +3792,13 @@ function renderProducts(params = {}) {
       <thead>
         <tr>
           <th>Product Name</th>
-          <th>Category</th>
           <th>Brand</th>
           <th>Purchase Price</th>
           <th>Selling Price</th>
-          <th>Margin</th>
           <th>Variants Count</th>
           <th>Total Stock</th>
-          <th>Min Level</th>
           <th>Status</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="products-tbody"></tbody>
@@ -2776,7 +3820,7 @@ function renderProducts(params = {}) {
     });
 
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No products found in catalog.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No products found in catalog.</td></tr>`;
       return;
     }
 
@@ -2789,6 +3833,7 @@ function renderProducts(params = {}) {
     filtered.forEach(p => {
       const totalStock = p.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
       const margin = Math.round(((p.sellingPrice - p.purchasePrice) / p.sellingPrice) * 100);
+      const statusVariant = p.status === 'Active' ? 'success' : 'secondary';
 
       const tr = document.createElement('tr');
       tr.style.cursor = 'pointer';
@@ -2797,150 +3842,36 @@ function renderProducts(params = {}) {
       });
       tr.innerHTML = `
         <td>
-          <div style="font-weight: 600; font-size: 0.925rem; color: var(--brand-primary);">${p.name}</div>
+          <div style="font-weight: 600; font-size: 0.925rem; color: var(--text-primary); transition: color 0.15s ease;">${p.name}</div>
         </td>
-        <td>${createBadge({ label: p.category, variant: 'secondary' }).outerHTML}</td>
         <td style="color: var(--text-secondary);">${p.brand}</td>
         <td>₹${p.purchasePrice}</td>
         <td style="font-weight: 600;">₹${p.sellingPrice}</td>
-        <td><span style="color: var(--status-success); font-weight: 600;">${margin}%</span></td>
         <td><span style="font-weight: 500;">${p.variants.length} Variants</span></td>
         <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${totalStock} units</td>
-        <td style="color: var(--text-secondary);">${p.minStock}</td>
-        <td>${createBadge({ label: p.status, variant: 'success' }).outerHTML}</td>
+        <td>${createBadge({ label: p.status, variant: statusVariant }).outerHTML}</td>
+        <td>
+          <button type="button" class="btn btn-secondary btn-sm edit-prod-btn" data-prod-id="${p.id}" style="padding: 0.3rem 0.65rem; font-size: 0.8rem; gap: 0.35rem; display: inline-flex; align-items: center;">
+            <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i>
+            <span>Edit</span>
+          </button>
+        </td>
       `;
+
+      const editBtn = tr.querySelector('.edit-prod-btn');
+      if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (onNavigate) {
+            onNavigate('products', { action: 'edit', productId: p.id, product: p });
+          }
+        });
+      }
+
       tbody.appendChild(tr);
     });
 
     if (window.lucide) window.lucide.createIcons();
-  }
-
-  function openAddProductModal() {
-    const modalEl = document.createElement('div');
-    modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
-    
-    const catOptions = ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies'];
-    const brandOptions = store.data.brands.length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
-
-    modalEl.innerHTML = `
-      <div style="display: flex; flex-direction: column; gap: 1rem;">
-        <!-- Product Name * -->
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.35rem; display: block;">Product Name *</label>
-          <input type="text" class="form-input" id="new-prod-name" placeholder="e.g. Linen Casual Shirt">
-        </div>
-
-        <!-- Category * & Brand -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-          <div class="form-group">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.35rem; display: block;">Category *</label>
-            <select class="form-select" id="new-prod-cat">
-              ${catOptions.map(c => `<option value="${c}">${c}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.35rem; display: block;">Brand</label>
-            <select class="form-select" id="new-prod-brand">
-              ${brandOptions.map(b => `<option value="${b}">${b}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-
-        <!-- Purchase Price (₹) & Selling Price (₹) -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-          <div class="form-group">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.35rem; display: block;">Purchase Price (₹) *</label>
-            <input type="number" class="form-input" id="new-prod-pprice" placeholder="500" min="0" step="1">
-          </div>
-          <div class="form-group">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.35rem; display: block;">Selling Price (₹) *</label>
-            <input type="number" class="form-input" id="new-prod-sprice" placeholder="1299" min="0" step="1">
-          </div>
-        </div>
-
-        <!-- Status -->
-        <div class="form-group" style="max-width: 48%;">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.35rem; display: block;">Status</label>
-          <select class="form-select" id="new-prod-status">
-            <option value="Active" selected>Active</option>
-            <option value="Inactive">Inactive</option>
-          </select>
-        </div>
-
-        <!-- Description -->
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.35rem; display: block;">Description</label>
-          <textarea class="form-input" id="new-prod-desc" rows="3" placeholder="Enter product description (optional)" style="resize: vertical; font-family: inherit;"></textarea>
-        </div>
-      </div>
-    `;
-
-    const cancelBtn = createButton({ text: 'Cancel', variant: 'secondary', onClick: () => modal.closeModal() });
-    const saveBtn = createButton({
-      text: 'Create Product',
-      variant: 'primary',
-      onClick: () => {
-        const name = modalEl.querySelector('#new-prod-name').value.trim();
-        const category = modalEl.querySelector('#new-prod-cat').value;
-        const brand = modalEl.querySelector('#new-prod-brand').value || 'ClassicFit';
-        const ppriceRaw = modalEl.querySelector('#new-prod-pprice').value;
-        const spriceRaw = modalEl.querySelector('#new-prod-sprice').value;
-        const status = modalEl.querySelector('#new-prod-status').value || 'Active';
-        const description = modalEl.querySelector('#new-prod-desc').value.trim();
-
-        // 1. Validation
-        if (!name) {
-          toast.show({ message: 'Product Name is required.', type: 'danger' });
-          return;
-        }
-
-        if (!category) {
-          toast.show({ message: 'Category is required.', type: 'danger' });
-          return;
-        }
-
-        const pprice = parseFloat(ppriceRaw);
-        if (isNaN(pprice) || pprice <= 0) {
-          toast.show({ message: 'Purchase Price must be a valid positive number.', type: 'danger' });
-          return;
-        }
-
-        const sprice = parseFloat(spriceRaw);
-        if (isNaN(sprice) || sprice <= 0) {
-          toast.show({ message: 'Selling Price must be a valid positive number.', type: 'danger' });
-          return;
-        }
-
-        // Selling Price < Purchase Price warning (does NOT reject form)
-        if (sprice < pprice) {
-          toast.show({ message: 'Warning: Selling price is lower than purchase price. This may result in a loss.', type: 'warning', duration: 4000 });
-        }
-
-        // 2. Add product (NO stock quantity created)
-        const newProd = {
-          id: `PROD-${Date.now().toString().slice(-3)}`,
-          name: name,
-          category: category,
-          brand: brand,
-          description: description,
-          purchasePrice: pprice,
-          sellingPrice: sprice,
-          minStock: 10,
-          supplier: 'Apex Apparel Ltd',
-          status: status,
-          variants: []
-        };
-
-        store.addProduct(newProd);
-
-        // 3. Success notification & modal close
-        toast.show({ message: 'Product created successfully.', type: 'success' });
-        modal.closeModal();
-        renderProductsList();
-      }
-    });
-
-    const modal = createModal({ title: 'Add New Product', bodyElement: modalEl, footerButtons: [cancelBtn, saveBtn] });
   }
 
   renderProductsList();
@@ -2948,18 +3879,15 @@ function renderProducts(params = {}) {
 }
 
 // PURCHASES PAGE
-function renderPurchases() {
+function renderPurchases(onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.innerHTML = `
-    <div>
-      <h2 class="section-heading">Purchases & Stock In</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Receive inventory shipments, run quality checks, and isolate damaged stock.</p>
-    </div>
-  `;
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Purchases' }
+  ], onNavigate));
   container.appendChild(headerDiv);
 
   const mainCard = document.createElement('div');
@@ -2999,7 +3927,7 @@ function renderPurchases() {
 }
 
 // SALES PAGE
-function renderSales(params = {}) {
+function renderSales(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -3009,15 +3937,12 @@ function renderSales(params = {}) {
   let selectedPayment = 'ALL';
   let selectedStatus = 'ALL';
 
-  // 1. Header
+  // 1. Header (Breadcrumb navigation)
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.innerHTML = `
-    <div>
-      <h2 class="section-heading">Sales</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Track completed sales, payments, and inventory deductions.</p>
-    </div>
-  `;
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Sales' }
+  ], onNavigate));
   container.appendChild(headerDiv);
 
   // 2. Summary Cards (Compact 4 Cards Row)
@@ -3217,18 +4142,15 @@ function renderSales(params = {}) {
 }
 
 // CUSTOMERS PAGE
-function renderCustomers() {
+function renderCustomers(onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.innerHTML = `
-    <div>
-      <h2 class="section-heading">Customer Directory</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Manage store customer purchase history and total spend records.</p>
-    </div>
-  `;
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Customers' }
+  ], onNavigate));
   container.appendChild(headerDiv);
 
   const mainCard = document.createElement('div');
@@ -3268,7 +4190,7 @@ function renderCustomers() {
 }
 
 // REPORTS PAGE
-function renderReports() {
+function renderReports(onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -3289,12 +4211,9 @@ function renderReports() {
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.innerHTML = `
-    <div>
-      <h2 class="section-heading">Business Reports & Financial Analytics</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Financial profit breakdown, inventory valuation, and supplier purchase reports.</p>
-    </div>
-  `;
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Reports' }
+  ], onNavigate));
   container.appendChild(headerDiv);
 
   const profitGrid = document.createElement('div');
@@ -3309,7 +4228,7 @@ function renderReports() {
 }
 
 // SETTINGS PAGE
-function renderSettings(onThemeToggle) {
+function renderSettings(onThemeToggle, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -3318,12 +4237,9 @@ function renderSettings(onThemeToggle) {
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.innerHTML = `
-    <div>
-      <h2 class="section-heading">System & Store Settings</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Configure store parameters, catalog metadata, user access roles, and theme settings.</p>
-    </div>
-  `;
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Settings' }
+  ], onNavigate));
   container.appendChild(headerDiv);
 
   const card = document.createElement('div');
@@ -3356,6 +4272,7 @@ function renderSettings(onThemeToggle) {
 // ==========================================
 class MasterWebAdminApp {
   constructor() {
+    window.appInstance = this;
     this.appEl = document.getElementById('app');
     this.activeNavId = 'overview';
     this.navParams = {};
@@ -3441,13 +4358,13 @@ class MasterWebAdminApp {
     let pageView;
     switch (this.activeNavId) {
       case 'overview': pageView = renderOverview(this.navigateTo); break;
-      case 'inventory': pageView = renderInventory(this.navParams); break;
-      case 'products': pageView = renderProducts(this.navParams); break;
-      case 'purchases': pageView = renderPurchases(this.navParams); break;
-      case 'sales': pageView = renderSales(this.navParams); break;
-      case 'customers': pageView = renderCustomers(this.navParams); break;
-      case 'reports': pageView = renderReports(this.navParams); break;
-      case 'settings': pageView = renderSettings(this.toggleTheme); break;
+      case 'inventory': pageView = renderInventory(this.navParams, this.navigateTo); break;
+      case 'products': pageView = renderProducts(this.navParams, this.navigateTo); break;
+      case 'purchases': pageView = renderPurchases(this.navigateTo); break;
+      case 'sales': pageView = renderSales(this.navParams, this.navigateTo); break;
+      case 'customers': pageView = renderCustomers(this.navigateTo); break;
+      case 'reports': pageView = renderReports(this.navigateTo); break;
+      case 'settings': pageView = renderSettings(this.toggleTheme, this.navigateTo); break;
       default: pageView = renderOverview(this.navigateTo);
     }
 

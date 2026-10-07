@@ -21,7 +21,7 @@ export function renderProducts(initialParams = {}) {
   headerDiv.innerHTML = `
     <div>
       <h2 class="section-heading">Product Catalog & Variants</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Manage products, pricing, minimum reorder thresholds, and size/color variant SKUs.</p>
+      <p style="font-size: 0.85rem; color: var(--text-secondary);">Manage products, pricing, minimum reorder thresholds, and size variants.</p>
     </div>
     <div id="prod-header-actions"></div>
   `;
@@ -190,7 +190,7 @@ export function renderProducts(initialParams = {}) {
 
       <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
         <h4 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem;">Variant Matrix Generator</h4>
-        <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.75rem;">Select colors and sizes to generate individual variant SKUs.</p>
+        <p style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.75rem;">Select sizes and initial stock.</p>
         
         <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
           <div style="flex: 1;">
@@ -250,7 +250,7 @@ export function renderProducts(initialParams = {}) {
           selectedSizes.forEach(size => {
             variants.push({
               sku: `${prefix}-${color.substring(0, 3).toUpperCase()}-${size}`,
-              color,
+              
               size,
               stock: 0,
               damaged: 0,

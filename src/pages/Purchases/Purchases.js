@@ -143,7 +143,7 @@ export function renderPurchases(initialParams = {}) {
     const allVariants = store.data.products.flatMap(p => p.variants.map(v => ({
       productName: p.name,
       sku: v.sku,
-      color: v.color,
+      
       size: v.size,
       price: p.purchasePrice
     })));
@@ -175,7 +175,7 @@ export function renderPurchases(initialParams = {}) {
 
         <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
           <select class="form-select" id="add-item-sku-select" style="flex: 1;">
-            ${allVariants.map(v => `<option value="${v.sku}">${v.sku} — ${v.productName} (${v.color}/${v.size})</option>`).join('')}
+            ${allVariants.map(v => `<option value="${v.sku}">${v.sku} — ${v.productName} (${v.size})</option>`).join('')}
           </select>
           <button class="btn btn-secondary btn-sm" id="btn-add-sku-row">Add Item</button>
         </div>

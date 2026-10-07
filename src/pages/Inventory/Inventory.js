@@ -91,7 +91,7 @@ export function renderInventory() {
       filterBar.innerHTML = `
         <div class="search-box">
           <i data-lucide="search" class="search-icon" style="width: 16px; height: 16px;"></i>
-          <input type="text" class="form-input" id="inv-search-input" placeholder="Search by SKU, Product name, Color..." value="${searchQuery}">
+          <input type="text" class="form-input" id="inv-search-input" placeholder="Search by Product name, Size, Category..." value="${searchQuery}">
         </div>
         <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
           <select class="form-select" id="inv-category-select" style="width: 160px;">
@@ -133,7 +133,7 @@ export function renderInventory() {
               <th>Product Name</th>
               <th>SKU</th>
               <th>Category</th>
-              <th>Size / Color</th>
+              <th>Size</th>
               <th>Available Stock</th>
               <th>Damaged</th>
               <th>Min Stock</th>
@@ -211,7 +211,7 @@ export function renderInventory() {
       p.variants.forEach(v => {
         // Apply filters
         const q = searchQuery.toLowerCase();
-        const matchesSearch = !q || p.name.toLowerCase().includes(q) || v.sku.toLowerCase().includes(q) || v.color.toLowerCase().includes(q);
+        const matchesSearch = !q || p.name.toLowerCase().includes(q) || v.sku.toLowerCase().includes(q) ;
         const matchesCat = selectedCategory === 'ALL' || p.category === selectedCategory;
 
         let statusKey = 'NORMAL';
@@ -249,7 +249,7 @@ export function renderInventory() {
         </td>
         <td style="font-family: monospace; font-weight: 500;">${variant.sku}</td>
         <td>${createBadge({ label: product.category, variant: 'secondary' }).outerHTML}</td>
-        <td>${variant.color} / ${variant.size}</td>
+        <td>${variant.size === 'Standard' ? 'No Size (Standard)' : variant.size}</td>
         <td>
           <span style="font-weight: 600; color: ${variant.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">
             ${variant.stock} units
@@ -291,7 +291,7 @@ export function renderInventory() {
       <div class="form-group">
         <label class="form-label">Select Product Variant SKU</label>
         <select class="form-select" id="adj-sku-select">
-          ${store.data.products.flatMap(p => p.variants.map(v => `<option value="${v.sku}" ${v.sku === defaultSku ? 'selected' : ''}>${v.sku} — ${p.name} (${v.color}/${v.size}) [Current: ${v.stock}]</option>`)).join('')}
+          ${store.data.products.flatMap(p => p.variants.map(v => `<option value="${v.sku}" ${v.sku === defaultSku ? 'selected' : ''}>${v.sku} — ${p.name} (${v.size}) [Current: ${v.stock}]</option>`)).join('')}
         </select>
       </div>
       <div class="form-group">

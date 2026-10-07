@@ -18,8 +18,7 @@ const initialData = {
   categories: ["Shirts", "T-Shirts", "Jeans", "Trousers", "Hoodies"],
   brands: ["ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
   sizes: ["S", "M", "L", "XL"],
-  colors: ["Black", "White", "Navy", "Beige", "Olive"],
-
+  
   suppliers: [
     { id: "SUP-01", name: "Apex Apparel Ltd", contact: "Rajesh Kumar (+91 98111 22334)", city: "Tirupur" },
     { id: "SUP-02", name: "SilkRoute Fabrics", contact: "Anita Sharma (+91 98222 33445)", city: "Surat" },
@@ -40,11 +39,11 @@ const initialData = {
       supplier: "Apex Apparel Ltd",
       status: "Active",
       variants: [
-        { sku: "OXF-BLK-S", color: "Black", size: "S", stock: 18, damaged: 1, daysInStock: 25 },
-        { sku: "OXF-BLK-M", color: "Black", size: "M", stock: 4, damaged: 0, daysInStock: 40 },
-        { sku: "OXF-BLK-L", color: "Black", size: "L", stock: 0, damaged: 2, daysInStock: 15 },
-        { sku: "OXF-WHT-M", color: "White", size: "M", stock: 22, damaged: 0, daysInStock: 12 },
-        { sku: "OXF-WHT-L", color: "White", size: "L", stock: 15, damaged: 1, daysInStock: 10 }
+        { sku: "OXF-BLK-S", size: "S", stock: 18, damaged: 1, daysInStock: 25 },
+        { sku: "OXF-BLK-M", size: "M", stock: 4, damaged: 0, daysInStock: 40 },
+        { sku: "OXF-BLK-L", size: "L", stock: 0, damaged: 2, daysInStock: 15 },
+        { sku: "OXF-WHT-M", size: "M", stock: 22, damaged: 0, daysInStock: 12 },
+        { sku: "OXF-WHT-L", size: "L", stock: 15, damaged: 1, daysInStock: 10 }
       ]
     },
     {
@@ -59,10 +58,10 @@ const initialData = {
       supplier: "SilkRoute Fabrics",
       status: "Active",
       variants: [
-        { sku: "TSH-WHT-S", color: "White", size: "S", stock: 35, damaged: 0, daysInStock: 8 },
-        { sku: "TSH-WHT-M", color: "White", size: "M", stock: 28, damaged: 1, daysInStock: 14 },
-        { sku: "TSH-BLK-L", color: "Black", size: "L", stock: 2, damaged: 0, daysInStock: 95 }, // Slow moving
-        { sku: "TSH-NAV-XL", color: "Navy", size: "XL", stock: 0, damaged: 0, daysInStock: 60 }
+        { sku: "TSH-WHT-S", size: "S", stock: 35, damaged: 0, daysInStock: 8 },
+        { sku: "TSH-WHT-M", size: "M", stock: 28, damaged: 1, daysInStock: 14 },
+        { sku: "TSH-BLK-L", size: "L", stock: 2, damaged: 0, daysInStock: 95 }, // Slow moving
+        { sku: "TSH-NAV-XL", size: "XL", stock: 0, damaged: 0, daysInStock: 60 }
       ]
     },
     {
@@ -77,9 +76,9 @@ const initialData = {
       supplier: "Urban Thread Co",
       status: "Active",
       variants: [
-        { sku: "JNS-NAV-M", color: "Navy", size: "M", stock: 14, damaged: 0, daysInStock: 18 },
-        { sku: "JNS-NAV-L", color: "Navy", size: "L", stock: 8, damaged: 1, daysInStock: 22 },
-        { sku: "JNS-BLK-M", color: "Black", size: "M", stock: 3, damaged: 0, daysInStock: 102 } // Slow moving
+        { sku: "JNS-NAV-M", size: "M", stock: 14, damaged: 0, daysInStock: 18 },
+        { sku: "JNS-NAV-L", size: "L", stock: 8, damaged: 1, daysInStock: 22 },
+        { sku: "JNS-BLK-M", size: "M", stock: 3, damaged: 0, daysInStock: 102 } // Slow moving
       ]
     },
     {
@@ -94,9 +93,9 @@ const initialData = {
       supplier: "Apex Apparel Ltd",
       status: "Active",
       variants: [
-        { sku: "TRS-BEI-M", color: "Beige", size: "M", stock: 25, damaged: 0, daysInStock: 16 },
-        { sku: "TRS-BEI-L", color: "Beige", size: "L", stock: 19, damaged: 0, daysInStock: 19 },
-        { sku: "TRS-NAV-S", color: "Navy", size: "S", stock: 5, damaged: 0, daysInStock: 34 }
+        { sku: "TRS-BEI-M", size: "M", stock: 25, damaged: 0, daysInStock: 16 },
+        { sku: "TRS-BEI-L", size: "L", stock: 19, damaged: 0, daysInStock: 19 },
+        { sku: "TRS-NAV-S", size: "S", stock: 5, damaged: 0, daysInStock: 34 }
       ]
     },
     {
@@ -111,8 +110,8 @@ const initialData = {
       supplier: "Urban Thread Co",
       status: "Active",
       variants: [
-        { sku: "HD-OLV-L", color: "Olive", size: "L", stock: 12, damaged: 2, daysInStock: 110 }, // Slow moving
-        { sku: "HD-BLK-M", color: "Black", size: "M", stock: 16, damaged: 0, daysInStock: 14 }
+        { sku: "HD-OLV-L", size: "L", stock: 12, damaged: 2, daysInStock: 110 }, // Slow moving
+        { sku: "HD-BLK-M", size: "M", stock: 16, damaged: 0, daysInStock: 14 }
       ]
     }
   ],
@@ -534,6 +533,22 @@ class StoreManager {
   // Add Product
   addProduct(prod) {
     this.data.products.unshift(prod);
+    if (prod.variants && prod.variants.length > 0) {
+      prod.variants.forEach(v => {
+        if (v.stock > 0) {
+          this.data.stockMovements.unshift({
+            id: `MOV-INIT-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+            date: new Date().toLocaleString(),
+            product: prod.name,
+            sku: v.sku,
+            type: 'Stock In',
+            quantity: v.stock,
+            reference: 'Initial Stock Creation',
+            user: 'Store Owner'
+          });
+        }
+      });
+    }
     this.save();
   }
 

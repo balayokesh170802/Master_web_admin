@@ -1,3 +1,62 @@
+function createBreadcrumb(items = [], onNavigate = null) {
+  const container = document.createElement('div');
+  container.className = 'content-header-nav';
+  container.style.cssText = 'display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; font-weight: 500;';
+
+  // Single top-level page: render clean single title
+  if (items.length === 1) {
+    const title = document.createElement('h2');
+    title.style.cssText = 'font-size: 1.15rem; font-weight: 600; color: var(--text-primary); margin: 0; line-height: 1.3;';
+    title.textContent = items[0].label;
+    container.appendChild(title);
+    return container;
+  }
+
+  // Child / Detail page: render hierarchical parent / child breadcrumb
+  const nav = document.createElement('nav');
+  nav.setAttribute('aria-label', 'Breadcrumb');
+  nav.style.cssText = 'display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; font-weight: 500;';
+
+  items.forEach((item, index) => {
+    const isLast = index === items.length - 1;
+
+    if (index > 0) {
+      const sep = document.createElement('span');
+      sep.style.cssText = 'color: var(--text-tertiary); margin: 0 0.25rem; user-select: none; font-size: 0.825rem;';
+      sep.textContent = '/';
+      nav.appendChild(sep);
+    }
+
+    if (isLast || (!item.target && !item.page)) {
+      const span = document.createElement('span');
+      span.style.cssText = 'color: var(--text-primary); font-weight: 600; font-size: 0.95rem;';
+      span.textContent = item.label;
+      nav.appendChild(span);
+    } else {
+      const link = document.createElement('a');
+      link.href = '#';
+      link.style.cssText = 'color: var(--text-secondary); text-decoration: none; transition: color 0.15s ease; cursor: pointer; font-weight: 500; font-size: 0.9rem;';
+      link.textContent = item.label;
+      link.addEventListener('mouseenter', () => { link.style.color = 'var(--brand-primary)'; });
+      link.addEventListener('mouseleave', () => { link.style.color = 'var(--text-secondary)'; });
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const targetPage = item.target || item.page;
+        if (onNavigate) {
+          onNavigate(targetPage, item.params || {});
+        } else if (window.appInstance && window.appInstance.navigateTo) {
+          window.appInstance.navigateTo(targetPage, item.params || {});
+        }
+      });
+      nav.appendChild(link);
+    }
+  });
+
+  container.appendChild(nav);
+  return container;
+}
+
+
 /**
  * Overview / Dashboard Page Component
  * Minimal, focused internal dashboard for clothing store management.
@@ -15,15 +74,12 @@ export function renderOverview(onNavigate) {
   const metrics = store.getMetrics();
   const data = store.data;
 
-  // 1. Page Header
+  // 1. Page Header (Breadcrumb navigation replacing duplicate heading/subtitle)
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.innerHTML = `
-    <div>
-      <h2 class="section-heading">Store Overview</h2>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">Key store metrics, sales trend, top performing products, and recent customer sales.</p>
-    </div>
-  `;
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Overview' }
+  ], onNavigate));
   container.appendChild(headerDiv);
 
   // 2. Section 1: TOP KPI CARDS (Exactly 4 cards in 1 row on desktop)
