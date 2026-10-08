@@ -1435,7 +1435,7 @@ class StoreManager {
   }
 
   getMetrics() {
-    let totalProducts = this.data.products.length;
+    let totalProducts = (this.data.products || []).length; // Unique product count
     let totalStock = 0;
     let damagedStockCount = 0;
     let stockValue = 0;
@@ -1823,7 +1823,7 @@ function openProductDetailsModal(productInput) {
   modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
 
   const modalBreadcrumb = createBreadcrumb([
-    { label: 'Products', target: 'products' },
+    { label: 'Inventory', target: 'inventory' },
     { label: 'Product Details' }
   ], (target, params) => {
     modal.closeModal();
@@ -2067,7 +2067,6 @@ function createBreadcrumb(items = [], onNavigate = null) {
 const NAV_ITEMS = [
   { id: 'overview', label: 'Overview', icon: 'layout-dashboard' },
   { id: 'inventory', label: 'Inventory', icon: 'boxes' },
-  { id: 'products', label: 'Products', icon: 'shirt' },
   { id: 'purchases', label: 'Purchases / Stock In', icon: 'truck' },
   { id: 'sales', label: 'Sales', icon: 'shopping-cart' },
   { id: 'customers', label: 'Customers', icon: 'users' },
@@ -2156,7 +2155,7 @@ function renderAddProductPage(onNavigate = null) {
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
 
   const breadcrumb = createBreadcrumb([
-    { label: 'Products', target: 'products' },
+    { label: 'Inventory', target: 'inventory' },
     { label: 'Add Product' }
   ], onNavigate);
 
@@ -2455,7 +2454,7 @@ function renderAddProductPage(onNavigate = null) {
   const singleDmgEl = formContainer.querySelector('#single-damaged-input');
   if (singleDmgEl) singleDmgEl.addEventListener('input', () => recalcTotal());
   formContainer.querySelector('#cancel-add-prod-btn').addEventListener('click', () => {
-    if (onNavigate) onNavigate('products');
+    if (onNavigate) onNavigate('inventory');
   });
 
   formContainer.querySelector('#save-add-prod-btn').addEventListener('click', () => {
@@ -2588,7 +2587,7 @@ function renderAddProductPage(onNavigate = null) {
 
     store.addProduct(newProduct);
     toast.show({ message: `Successfully created product "${name}" with total initial stock of ${totalInitialStock} units`, type: 'success' });
-    if (onNavigate) onNavigate('products');
+    if (onNavigate) onNavigate('inventory');
   });
 
   updateToggleButtons();
@@ -2643,7 +2642,7 @@ function renderOverview(onNavigate) {
     value: `${totalStockUnits} Units`,
     subtext: `<span style="color: var(--text-secondary);">Across ${data.products.length} catalog products</span>`,
     icon: 'package',
-    onClick: () => onNavigate('products')
+    onClick: () => onNavigate('inventory')
   }));
 
   kpiGrid.appendChild(createMetricCard({
@@ -3001,17 +3000,16 @@ function renderOverview(onNavigate) {
   return container;
 }
 
-// INVENTORY PAGE
+// INVENTORY PAGE (PRODUCT + STOCK SOURCE OF TRUTH)
 function renderInventory(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
-  const metrics = store.getMetrics();
-  let activeTab = 'inventory';
   let searchQuery = '';
   let selectedCategory = 'ALL';
   let selectedStatus = params.status || 'ALL';
 
+  // 1. Breadcrumb Header
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
 
@@ -3031,461 +3029,12 @@ function renderInventory(params = {}, onNavigate = null) {
   }
 
   headerDiv.appendChild(createBreadcrumb(invBreadcrumbItems, onNavigate));
-
-  const invActions = document.createElement('div');
-  invActions.id = 'inv-header-actions';
-  headerDiv.appendChild(invActions);
-
-  const adjustBtn = createButton({
-    text: 'Stock Audit / Adjust',
-    icon: 'sliders-horizontal',
-    variant: 'secondary',
-    size: 'sm',
-    onClick: () => openStockAdjustModal()
-  });
-  headerDiv.querySelector('#inv-header-actions').appendChild(adjustBtn);
   container.appendChild(headerDiv);
 
-  const summaryBar = document.createElement('div');
-  summaryBar.style.cssText = 'display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;';
-  summaryBar.innerHTML = `
-    <div class="card" style="padding: 0.6rem 1rem; flex: 1; min-width: 140px;">
-      <div style="font-size: 0.75rem; color: var(--text-secondary);">Available Stock</div>
-      <div style="font-size: 1.15rem; font-weight: 600; color: var(--status-success);">${metrics.totalStock} units</div>
-    </div>
-    <div class="card" style="padding: 0.6rem 1rem; flex: 1; min-width: 140px;">
-      <div style="font-size: 0.75rem; color: var(--text-secondary);">Low Stock</div>
-      <div style="font-size: 1.15rem; font-weight: 600; color: var(--status-warning);">${metrics.lowStockCount} items</div>
-    </div>
-    <div class="card" style="padding: 0.6rem 1rem; flex: 1; min-width: 140px;">
-      <div style="font-size: 0.75rem; color: var(--text-secondary);">Out of Stock</div>
-      <div style="font-size: 1.15rem; font-weight: 600; color: var(--status-danger);">${metrics.outOfStockCount} items</div>
-    </div>
-    <div class="card" style="padding: 0.6rem 1rem; flex: 1; min-width: 140px;">
-      <div style="font-size: 0.75rem; color: var(--text-secondary);">Damaged Stock</div>
-      <div style="font-size: 1.15rem; font-weight: 600; color: var(--status-danger);">${metrics.damagedStockCount} units</div>
-    </div>
-  `;
-  container.appendChild(summaryBar);
-
-  const mainCard = document.createElement('div');
-  mainCard.className = 'card';
-  container.appendChild(mainCard);
-
-  function renderTabContent() {
-    mainCard.innerHTML = '';
-    const filterBar = document.createElement('div');
-    filterBar.className = 'filter-bar';
-    filterBar.style.marginBottom = '1.25rem';
-    filterBar.innerHTML = `
-      <div class="search-box">
-        <i data-lucide="search" class="search-icon" style="width: 16px; height: 16px;"></i>
-        <input type="text" class="form-input" id="inv-search-input" placeholder="Search by Product name, Size, Category..." value="${searchQuery}">
-      </div>
-      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-        <select class="form-select" id="inv-category-select" style="width: 160px;">
-          <option value="ALL">All Categories</option>
-          ${store.data.categories.map(c => `<option value="${c}" ${selectedCategory === c ? 'selected' : ''}>${c}</option>`).join('')}
-        </select>
-        <select class="form-select" id="inv-status-select" style="width: 160px;">
-          <option value="ALL">All Statuses</option>
-          <option value="NORMAL" ${selectedStatus === 'NORMAL' ? 'selected' : ''}>Normal</option>
-          <option value="LOW" ${selectedStatus === 'LOW' ? 'selected' : ''}>Low Stock</option>
-          <option value="OUT" ${selectedStatus === 'OUT' ? 'selected' : ''}>Out of Stock</option>
-        </select>
-      </div>
-    `;
-
-    filterBar.querySelector('#inv-search-input').addEventListener('input', (e) => { searchQuery = e.target.value; renderTableRows(); });
-    filterBar.querySelector('#inv-category-select').addEventListener('change', (e) => { selectedCategory = e.target.value; renderTableRows(); });
-    filterBar.querySelector('#inv-status-select').addEventListener('change', (e) => { selectedStatus = e.target.value; renderTableRows(); });
-
-    mainCard.appendChild(filterBar);
-
-    const tableResp = document.createElement('div');
-    tableResp.className = 'table-responsive';
-    tableResp.innerHTML = `
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>Product Name</th>
-            <th>Category</th>
-            <th>Size</th>
-            <th>Available Stock</th>
-            <th>Damaged</th>
-            <th>Status</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody id="inventory-tbody"></tbody>
-      </table>
-    `;
-    mainCard.appendChild(tableResp);
-    renderTableRows();
-
-    if (window.lucide) window.lucide.createIcons();
-  }
-
-  function renderTableRows() {
-    const tbody = mainCard.querySelector('#inventory-tbody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-
-    const rows = [];
-    store.data.products.forEach(p => {
-      p.variants.forEach(v => {
-        const q = searchQuery.toLowerCase();
-        const matchesSearch = !q || p.name.toLowerCase().includes(q) || v.sku.toLowerCase().includes(q) ;
-        const matchesCat = selectedCategory === 'ALL' || p.category === selectedCategory;
-        let statusKey = v.stock === 0 ? 'OUT' : (v.stock <= p.minStock ? 'LOW' : 'NORMAL');
-        const matchesStatus = selectedStatus === 'ALL' || selectedStatus === statusKey;
-
-        if (matchesSearch && matchesCat && matchesStatus) rows.push({ product: p, variant: v, statusKey });
-      });
-    });
-
-    if (rows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No inventory records match the selected filters.</td></tr>`;
-      return;
-    }
-
-    rows.forEach(({ product, variant, statusKey }) => {
-      const tr = document.createElement('tr');
-      let badgeVariant = statusKey === 'OUT' ? 'danger' : (statusKey === 'LOW' ? 'warning' : 'success');
-      let badgeLabel = statusKey === 'OUT' ? 'Out of Stock' : (statusKey === 'LOW' ? 'Low Stock' : 'Available');
-
-      tr.innerHTML = `
-        <td>
-          <div style="font-weight: 600; font-size: 0.925rem; color: var(--text-primary);">${product.name}</div>
-        </td>
-        <td>${createBadge({ label: product.category, variant: 'secondary' }).outerHTML}</td>
-        <td><span style="font-weight: 500;">${variant.size === 'Standard' ? 'Standard' : variant.size}</span></td>
-        <td><span style="font-weight: 600; color: ${variant.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${variant.stock} units</span></td>
-        <td>${variant.damaged > 0 ? `<span class="badge badge-danger">${variant.damaged} damaged</span>` : '<span style="color: var(--text-tertiary);">0</span>'}</td>
-        <td>${createBadge({ label: badgeLabel, variant: badgeVariant }).outerHTML}</td>
-        <td>
-          <button type="button" class="btn btn-secondary btn-sm quick-adj-btn" data-sku="${variant.sku}" style="padding: 0.3rem 0.65rem; font-size: 0.8rem; gap: 0.35rem; display: inline-flex; align-items: center;">
-            <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i>
-            <span>Edit</span>
-          </button>
-        </td>
-      `;
-
-      tr.querySelector('.quick-adj-btn').addEventListener('click', () => openStockAdjustModal(variant.sku, variant.stock));
-      tbody.appendChild(tr);
-    });
-
-    if (window.lucide) window.lucide.createIcons();
-  }
-
-  function openStockAdjustModal(defaultSku = '', defaultStock = 0) {
-    let selectedSKU = defaultSku;
-    let targetProd = null;
-    let targetVariant = null;
-
-    if (selectedSKU) {
-      for (let p of store.data.products) {
-        let v = p.variants.find(x => x.sku === selectedSKU);
-        if (v) {
-          targetProd = p;
-          targetVariant = v;
-          break;
-        }
-      }
-    }
-
-    if (!targetVariant && store.data.products.length > 0) {
-      targetProd = store.data.products[0];
-      targetVariant = targetProd.variants[0];
-      selectedSKU = targetVariant ? targetVariant.sku : '';
-    }
-
-    const currentStock = targetVariant ? targetVariant.stock : 0;
-    const prodVariantName = targetProd && targetVariant
-      ? `${targetProd.name} — ${targetVariant.size === 'Standard' ? 'Standard' : targetVariant.size}`
-      : 'Unknown Product';
-
-    const formHtml = `
-      <div style="display: flex; flex-direction: column; gap: 1.15rem;">
-        <!-- Product Variant (Read-Only) -->
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Product Variant</label>
-          <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); padding: 0.55rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-            ${prodVariantName}
-          </div>
-        </div>
-
-        <!-- Current Stock (Read-Only) -->
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Current Stock</label>
-          <div style="font-size: 1.1rem; font-weight: 700; color: var(--brand-primary); padding: 0.45rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: inline-block;">
-            ${currentStock} units
-          </div>
-        </div>
-
-        <!-- Adjustment Type -->
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Adjustment Type *</label>
-          <select class="form-select" id="adj-type-select">
-            <option value="REMOVE" selected>Remove Stock</option>
-            <option value="ADD">Add Stock</option>
-          </select>
-        </div>
-
-        <!-- Quantity -->
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Quantity *</label>
-          <input type="number" class="form-input" id="adj-qty-input" value="1" min="1" placeholder="e.g. 2" style="font-weight: 600;">
-        </div>
-
-        <!-- Reason -->
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Reason *</label>
-          <select class="form-select" id="adj-reason-select">
-            <option value="Stock Correction">Stock Correction</option>
-            <option value="Damaged Stock" selected>Damaged Stock</option>
-            <option value="Sample / Display">Sample / Display</option>
-            <option value="Other">Other</option>
-          </select>
-        </div>
-
-        <!-- Optional Notes for Other -->
-        <div class="form-group" id="adj-notes-container" style="display: none;">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Adjustment Notes</label>
-          <input type="text" class="form-input" id="adj-notes-input" placeholder="Enter reason...">
-        </div>
-
-        <!-- New Calculated Stock Display -->
-        <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 0.85rem; border-top: 1px solid var(--border-color); font-size: 0.95rem;">
-          <span style="font-weight: 600; color: var(--text-secondary);">New Stock:</span>
-          <span style="font-size: 1.25rem; font-weight: 700; color: var(--brand-primary);" id="adj-new-calculated-stock">
-            ${Math.max(0, currentStock - 1)} units
-          </span>
-        </div>
-      </div>
-    `;
-
-    const bodyEl = document.createElement('div');
-    bodyEl.innerHTML = formHtml;
-
-    const typeSelect = bodyEl.querySelector('#adj-type-select');
-    const qtyInput = bodyEl.querySelector('#adj-qty-input');
-    const reasonSelect = bodyEl.querySelector('#adj-reason-select');
-    const notesContainer = bodyEl.querySelector('#adj-notes-container');
-    const calcDisplay = bodyEl.querySelector('#adj-new-calculated-stock');
-
-    function updateCalculation() {
-      const isAdd = typeSelect.value === 'ADD';
-      const parsedQty = parseInt(qtyInput.value, 10);
-      const qty = isNaN(parsedQty) || parsedQty < 1 ? 0 : parsedQty;
-
-      let calcResult = isAdd ? (currentStock + qty) : (currentStock - qty);
-      if (calcResult < 0) calcResult = 0;
-
-      calcDisplay.textContent = `${calcResult} units`;
-    }
-
-    typeSelect.addEventListener('change', updateCalculation);
-    qtyInput.addEventListener('input', updateCalculation);
-
-    reasonSelect.addEventListener('change', () => {
-      if (reasonSelect.value === 'Other') {
-        notesContainer.style.display = 'block';
-      } else {
-        notesContainer.style.display = 'none';
-      }
-    });
-
-    updateCalculation();
-
-    const cancelBtn = createButton({ text: 'Cancel', variant: 'secondary', onClick: () => modal.closeModal() });
-    const saveBtn = createButton({
-      text: 'Save Adjustment',
-      variant: 'primary',
-      onClick: () => {
-        const isAdd = typeSelect.value === 'ADD';
-        const parsedQty = parseInt(qtyInput.value, 10);
-
-        if (isNaN(parsedQty) || parsedQty <= 0) {
-          toast.show({ message: 'Quantity must be a positive whole number greater than 0', type: 'danger' });
-          return;
-        }
-
-        if (!isAdd && parsedQty > currentStock) {
-          toast.show({ message: `Cannot remove ${parsedQty} units. Maximum available stock to remove is ${currentStock} units`, type: 'danger' });
-          return;
-        }
-
-        let reasonText = reasonSelect.value;
-        if (reasonText === 'Other') {
-          const notesVal = bodyEl.querySelector('#adj-notes-input').value.trim();
-          reasonText = notesVal ? `Other: ${notesVal}` : 'Other';
-        }
-
-        const finalNewStock = isAdd ? (currentStock + parsedQty) : (currentStock - parsedQty);
-
-        store.adjustStock(selectedSKU, finalNewStock, reasonText);
-        toast.show({ message: `Successfully updated stock to ${finalNewStock} units`, type: 'success' });
-        modal.closeModal();
-        renderTabContent();
-      }
-    });
-
-    const modal = createModal({ title: 'Manual Stock Adjustment', bodyElement: bodyEl, footerButtons: [cancelBtn, saveBtn] });
-  }
-
-
-
-  renderTabContent();
-  return container;
-}
-
-
-// EDIT PRODUCT PAGE
-function renderEditProductPage(productToEdit, onNavigate = null) {
-  const prod = productToEdit || (store.data.products ? store.data.products[0] : null);
-  const container = document.createElement('div');
-  container.className = 'page-container';
-
-  const headerDiv = document.createElement('div');
-  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.appendChild(createBreadcrumb([
-    { label: 'Products', target: 'products' },
-    { label: 'Edit Product' }
-  ], onNavigate));
-  container.appendChild(headerDiv);
-
-  if (!prod) {
-    container.innerHTML += `<div class="card" style="padding: 2rem; color: var(--text-secondary);">No product selected to edit.</div>`;
-    return container;
-  }
-
-  const mainCard = document.createElement('div');
-  mainCard.className = 'card';
-  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%;';
-
-  const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
-  const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
-  const totalStock = (prod.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-
-  mainCard.innerHTML = `
-    <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
-      Edit Product Details
-    </h3>
-
-    <div class="form-group">
-      <label class="form-label" style="font-weight: 500;">Product Name <span style="color: #ef4444;">*</span></label>
-      <input type="text" id="edit-prod-name" class="form-input" value="${prod.name || ''}">
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-      <div class="form-group">
-        <label class="form-label" style="font-weight: 500;">Category</label>
-        <select id="edit-prod-category" class="form-select">
-          ${catOptions.map(c => `<option value="${c}" ${c === prod.category ? 'selected' : ''}>${c}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label" style="font-weight: 500;">Brand</label>
-        <select id="edit-prod-brand" class="form-select">
-          ${brandOptions.map(b => `<option value="${b}" ${b === prod.brand ? 'selected' : ''}>${b}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-      <div class="form-group">
-        <label class="form-label" style="font-weight: 500;">Selling Price (₹)</label>
-        <input type="number" id="edit-prod-price" class="form-input" placeholder="e.g. 1499" value="${prod.sellingPrice !== null && prod.sellingPrice !== undefined ? prod.sellingPrice : ''}">
-        <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">Leave blank if Price Not Set.</span>
-      </div>
-      <div class="form-group">
-        <label class="form-label" style="font-weight: 500;">Status</label>
-        <select id="edit-prod-status" class="form-select">
-          <option value="Active" ${prod.status === 'Active' ? 'selected' : ''}>Active</option>
-          <option value="Inactive" ${prod.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label" style="font-weight: 500;">Description (Optional)</label>
-      <textarea id="edit-prod-desc" class="form-input" rows="3" placeholder="Product details, material info, style guide...">${prod.description || ''}</textarea>
-    </div>
-
-    <div style="padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); font-size: 0.85rem; color: var(--text-secondary);">
-      <strong style="color: var(--text-primary);">Inventory Stock Note:</strong> Editing product details will update catalog metadata while leaving current stock level (<strong>${totalStock} units</strong>) untouched.
-    </div>
-
-    <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem; margin-top: 0.5rem;">
-      <button type="button" id="btn-cancel-edit-prod" class="btn btn-secondary">Cancel</button>
-      <button type="button" id="btn-save-edit-prod" class="btn btn-primary">Save Changes</button>
-    </div>
-  `;
-
-  container.appendChild(mainCard);
-
-  mainCard.querySelector('#btn-cancel-edit-prod').addEventListener('click', () => {
-    if (onNavigate) onNavigate('products');
-  });
-
-  mainCard.querySelector('#btn-save-edit-prod').addEventListener('click', () => {
-    const name = mainCard.querySelector('#edit-prod-name').value.trim();
-    const category = mainCard.querySelector('#edit-prod-category').value;
-    const brand = mainCard.querySelector('#edit-prod-brand').value;
-    const priceVal = mainCard.querySelector('#edit-prod-price').value.trim();
-    const sellingPrice = priceVal !== '' ? parseFloat(priceVal) : null;
-    const status = mainCard.querySelector('#edit-prod-status').value;
-    const description = mainCard.querySelector('#edit-prod-desc').value.trim();
-
-    if (!name) {
-      toast.show({ message: 'Product Name is required.', type: 'danger' });
-      return;
-    }
-
-    store.updateProduct(prod.id, {
-      name,
-      category,
-      brand,
-      sellingPrice,
-      status,
-      description
-    });
-
-    toast.show({ message: 'Product updated successfully.', type: 'success' });
-    if (onNavigate) onNavigate('products');
-  });
-
-  if (window.lucide) window.lucide.createIcons();
-  return container;
-}
-
-// PRODUCTS PAGE
-function renderProducts(params = {}, onNavigate = null) {
-  if (params && (params.action === 'edit' || params.view === 'edit')) {
-    return renderEditProductPage(params.productToEdit || params.product, onNavigate);
-  }
-
-  const container = document.createElement('div');
-  container.className = 'page-container';
-
-  let searchQuery = '';
-  let selectedCategory = 'ALL';
-  let selectedStatus = 'ALL';
-
-  // 1. Header (Breadcrumb ONLY - NO "+ Add Product" button!)
-  const headerDiv = document.createElement('div');
-  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-  headerDiv.appendChild(createBreadcrumb([
-    { label: 'Products' }
-  ], onNavigate));
-  container.appendChild(headerDiv);
-
-  // 2. Filters Row
+  // 2. Filters Bar Card
   const filtersCard = document.createElement('div');
   filtersCard.className = 'card';
-  filtersCard.style.marginBottom = '1.25rem';
-  filtersCard.style.padding = '0.85rem 1.15rem';
+  filtersCard.style.cssText = 'padding: 0.85rem 1.15rem; margin-bottom: 1.25rem;';
 
   const categories = store.data.categories || ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies'];
 
@@ -3494,7 +3043,7 @@ function renderProducts(params = {}, onNavigate = null) {
       <div style="display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: center; flex: 1;">
         <div style="position: relative; flex: 1; min-width: 200px; max-width: 320px;">
           <i data-lucide="search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-secondary);"></i>
-          <input type="text" class="form-input search-input" placeholder="Search product name..." style="padding-left: 32px; font-size: 0.85rem;">
+          <input type="text" class="form-input search-input" placeholder="Search product or brand..." style="padding-left: 32px; font-size: 0.85rem;">
         </div>
 
         <select class="form-select category-filter" style="width: auto; min-width: 140px; font-size: 0.85rem;">
@@ -3503,20 +3052,22 @@ function renderProducts(params = {}, onNavigate = null) {
         </select>
 
         <select class="form-select status-filter" style="width: auto; min-width: 130px; font-size: 0.85rem;">
-          <option value="ALL">All Status</option>
-          <option value="Active">Active</option>
-          <option value="Inactive">Inactive</option>
+          <option value="ALL" ${selectedStatus === 'ALL' ? 'selected' : ''}>All Status</option>
+          <option value="Active" ${selectedStatus === 'Active' ? 'selected' : ''}>Active</option>
+          <option value="LOW" ${selectedStatus === 'LOW' ? 'selected' : ''}>Low Stock</option>
+          <option value="OUT" ${selectedStatus === 'OUT' ? 'selected' : ''}>Out of Stock</option>
+          <option value="Inactive" ${selectedStatus === 'Inactive' ? 'selected' : ''}>Inactive</option>
         </select>
       </div>
 
       <div style="font-size: 0.85rem; color: var(--text-secondary);">
-        Total: <strong id="product-count-label" style="color: var(--text-primary);">${(store.data.products || []).length}</strong> Products
+        Total: <strong id="inv-count-label" style="color: var(--text-primary);">${(store.data.products || []).length}</strong> Unique Products
       </div>
     </div>
   `;
   container.appendChild(filtersCard);
 
-  // 3. Products Table Card
+  // 3. Main Inventory Table Card
   const tableCard = document.createElement('div');
   tableCard.className = 'card';
 
@@ -3528,13 +3079,15 @@ function renderProducts(params = {}, onNavigate = null) {
         <tr>
           <th>Product Name</th>
           <th>Category</th>
+          <th>Brand</th>
+          <th>Size</th>
           <th>Selling Price</th>
-          <th>Stock</th>
+          <th>Current Stock</th>
           <th>Status</th>
           <th>Actions</th>
         </tr>
       </thead>
-      <tbody id="products-table-body"></tbody>
+      <tbody id="inventory-table-body"></tbody>
     </table>
   `;
   tableCard.appendChild(tableContainer);
@@ -3543,33 +3096,57 @@ function renderProducts(params = {}, onNavigate = null) {
   const searchInp = filtersCard.querySelector('.search-input');
   const catFilter = filtersCard.querySelector('.category-filter');
   const statusFilter = filtersCard.querySelector('.status-filter');
-  const tbody = tableContainer.querySelector('#products-table-body');
-  const countLabel = filtersCard.querySelector('#product-count-label');
+  const tbody = tableContainer.querySelector('#inventory-table-body');
+  const countLabel = filtersCard.querySelector('#inv-count-label');
 
-  searchInp.addEventListener('input', (e) => { searchQuery = e.target.value; renderProductsList(); });
-  catFilter.addEventListener('change', (e) => { selectedCategory = e.target.value; renderProductsList(); });
-  statusFilter.addEventListener('change', (e) => { selectedStatus = e.target.value; renderProductsList(); });
+  searchInp.addEventListener('input', (e) => { searchQuery = e.target.value; renderInventoryTable(); });
+  catFilter.addEventListener('change', (e) => { selectedCategory = e.target.value; renderInventoryTable(); });
+  statusFilter.addEventListener('change', (e) => { selectedStatus = e.target.value; renderInventoryTable(); });
 
-  function renderProductsList() {
+  function renderInventoryTable() {
     tbody.innerHTML = '';
     const products = store.data.products || [];
 
-    const filtered = products.filter(p => {
-      const matchQuery = p.name.toLowerCase().includes(searchQuery.toLowerCase());
+    // Flatten products into product-size inventory rows
+    const rows = [];
+    products.forEach(p => {
+      const matchQuery = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || (p.brand || '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchCat = selectedCategory === 'ALL' || p.category === selectedCategory;
-      const matchStatus = selectedStatus === 'ALL' || p.status === selectedStatus;
-      return matchQuery && matchCat && matchStatus;
+
+      if (matchQuery && matchCat) {
+        const variants = (p.variants && p.variants.length > 0) ? p.variants : [{ size: 'Standard', stock: p.totalStock || 0 }];
+        variants.forEach(v => {
+          let itemStatus = p.status || 'Active';
+          if (v.stock === 0) itemStatus = 'Out of Stock';
+          else if (v.stock <= (p.minStock || 5)) itemStatus = 'Low Stock';
+
+          let matchStat = true;
+          if (selectedStatus === 'Active') matchStat = (p.status === 'Active');
+          else if (selectedStatus === 'Inactive') matchStat = (p.status === 'Inactive');
+          else if (selectedStatus === 'LOW') matchStat = (v.stock > 0 && v.stock <= (p.minStock || 5));
+          else if (selectedStatus === 'OUT') matchStat = (v.stock === 0);
+
+          if (matchStat) {
+            rows.push({
+              product: p,
+              size: v.size || 'Standard',
+              stock: v.stock || 0,
+              status: itemStatus
+            });
+          }
+        });
+      }
     });
 
-    countLabel.textContent = filtered.length;
+    countLabel.textContent = products.length;
 
-    if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No products match your criteria.</td></tr>`;
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No inventory stock items match your criteria.</td></tr>`;
       return;
     }
 
-    filtered.forEach(p => {
-      const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+    rows.forEach(r => {
+      const p = r.product;
       const isPriceSet = p.sellingPrice !== null && p.sellingPrice !== undefined && p.sellingPrice > 0;
       const priceDisplay = isPriceSet ? `₹${p.sellingPrice.toLocaleString()}` : `<span style="color: var(--text-secondary); font-style: italic;">Price Not Set</span>`;
 
@@ -3579,23 +3156,30 @@ function renderProducts(params = {}, onNavigate = null) {
           <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">${p.name}</div>
         </td>
         <td style="color: var(--text-secondary);">${p.category || 'General'}</td>
+        <td style="color: var(--text-secondary);">${p.brand || 'Unbranded'}</td>
+        <td><span style="font-weight: 500; padding: 0.2rem 0.5rem; background: var(--bg-secondary); border-radius: 4px; font-size: 0.8rem;">${r.size}</span></td>
         <td style="font-weight: 600;">${priceDisplay}</td>
-        <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${totalStock} units</td>
-        <td>${createBadge({ label: p.status || 'Active', variant: 'secondary' }).outerHTML}</td>
+        <td style="font-weight: 600; color: ${r.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${r.stock} units</td>
+        <td>${createBadge({ label: r.status, variant: 'secondary' }).outerHTML}</td>
         <td>
-          <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <button type="button" class="btn btn-secondary btn-sm view-prod-btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">View</button>
-            <button type="button" class="btn btn-secondary btn-sm edit-prod-btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Edit</button>
+          <div style="display: flex; gap: 0.4rem; align-items: center;">
+            <button type="button" class="btn btn-secondary btn-sm view-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">View</button>
+            <button type="button" class="btn btn-secondary btn-sm edit-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">Edit</button>
+            <button type="button" class="btn btn-secondary btn-sm adjust-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">Adjust</button>
           </div>
         </td>
       `;
 
-      tr.querySelector('.view-prod-btn').addEventListener('click', () => {
+      tr.querySelector('.view-inv-btn').addEventListener('click', () => {
         openProductDetailsModal(p);
       });
 
-      tr.querySelector('.edit-prod-btn').addEventListener('click', () => {
-        if (onNavigate) onNavigate('products', { action: 'edit', productToEdit: p });
+      tr.querySelector('.edit-inv-btn').addEventListener('click', () => {
+        openEditProductModal(p, () => renderInventoryTable());
+      });
+
+      tr.querySelector('.adjust-inv-btn').addEventListener('click', () => {
+        openRowStockAdjustModal(p, r.size, r.stock, () => renderInventoryTable());
       });
 
       tbody.appendChild(tr);
@@ -3604,8 +3188,228 @@ function renderProducts(params = {}, onNavigate = null) {
     if (window.lucide) window.lucide.createIcons();
   }
 
-  renderProductsList();
+  renderInventoryTable();
   return container;
+}
+
+// EDIT PRODUCT INFO MODAL (PRESERVES STOCK INTACT)
+function openEditProductModal(product, onSaved) {
+  const existingModal = document.getElementById('modal-edit-product');
+  if (existingModal) existingModal.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-edit-product';
+  modal.className = 'modal-overlay active';
+
+  const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
+  const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width: 520px; width: 95%;">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+        <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Edit Product Details</h3>
+        <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">
+          <i data-lucide="x" style="width: 20px; height: 20px;"></i>
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Product Name <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="edit-prod-name" class="form-input" value="${product.name || ''}">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 500;">Category</label>
+            <select id="edit-prod-cat" class="form-select">
+              ${catOptions.map(c => `<option value="${c}" ${c === product.category ? 'selected' : ''}>${c}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 500;">Brand</label>
+            <select id="edit-prod-brand" class="form-select">
+              ${brandOptions.map(b => `<option value="${b}" ${b === product.brand ? 'selected' : ''}>${b}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 500;">Selling Price (₹)</label>
+            <input type="number" id="edit-prod-price" class="form-input" placeholder="e.g. 1499" value="${product.sellingPrice !== null && product.sellingPrice !== undefined ? product.sellingPrice : ''}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 500;">Status</label>
+            <select id="edit-prod-status" class="form-select">
+              <option value="Active" ${product.status === 'Active' ? 'selected' : ''}>Active</option>
+              <option value="Inactive" ${product.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+        <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
+        <button type="button" class="btn btn-primary save-modal-btn">Save Changes</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  if (window.lucide) window.lucide.createIcons();
+
+  const closeModal = () => modal.remove();
+  modal.querySelector('.modal-close-btn').onclick = closeModal;
+  modal.querySelector('.cancel-modal-btn').onclick = closeModal;
+
+  modal.querySelector('.save-modal-btn').onclick = () => {
+    const name = modal.querySelector('#edit-prod-name').value.trim();
+    const category = modal.querySelector('#edit-prod-cat').value;
+    const brand = modal.querySelector('#edit-prod-brand').value;
+    const priceVal = modal.querySelector('#edit-prod-price').value.trim();
+    const sellingPrice = priceVal !== '' ? parseFloat(priceVal) : null;
+    const status = modal.querySelector('#edit-prod-status').value;
+
+    if (!name) {
+      toast.show({ message: 'Product Name is required.', type: 'danger' });
+      return;
+    }
+
+    store.updateProduct(product.id, {
+      name,
+      category,
+      brand,
+      sellingPrice,
+      status
+    });
+
+    toast.show({ message: 'Product details updated successfully.', type: 'success' });
+    closeModal();
+    if (onSaved) onSaved();
+  };
+}
+
+// ROW MANUAL STOCK ADJUSTMENT MODAL
+function openRowStockAdjustModal(product, size, currentStock, onAdjusted) {
+  const existingModal = document.getElementById('modal-adjust-row-stock');
+  if (existingModal) existingModal.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-adjust-row-stock';
+  modal.className = 'modal-overlay active';
+
+  let adjType = 'ADD';
+  let adjQty = 1;
+
+  function calculateNewStock() {
+    if (adjType === 'ADD') return currentStock + adjQty;
+    return Math.max(0, currentStock - adjQty);
+  }
+
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width: 480px; width: 95%;">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+        <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Manual Stock Audit / Adjustment</h3>
+        <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">
+          <i data-lucide="x" style="width: 20px; height: 20px;"></i>
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div style="padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); font-size: 0.875rem;">
+          <div style="font-weight: 600; color: var(--text-primary); font-size: 0.95rem; margin-bottom: 4px;">${product.name}</div>
+          <div style="color: var(--text-secondary); display: flex; gap: 1rem;">
+            <span>Size: <strong>${size}</strong></span>
+            <span>Current Stock: <strong>${currentStock} units</strong></span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Adjustment Type</label>
+          <select id="adj-type-select" class="form-select">
+            <option value="ADD" selected>Add Stock (+)</option>
+            <option value="REMOVE">Remove Stock (-)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Quantity</label>
+          <input type="number" id="adj-qty-input" class="form-input" min="1" value="1">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Reason</label>
+          <select id="adj-reason-select" class="form-select">
+            <option value="Stock Audit">Manual Stock Audit</option>
+            <option value="Damaged Stock">Damaged Stock</option>
+            <option value="Received Return">Customer Return</option>
+            <option value="Internal Use">Internal Display / Sample</option>
+          </select>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.9rem;">
+          <span style="color: var(--text-secondary);">Calculated New Stock:</span>
+          <strong id="adj-new-stock-label" style="font-size: 1.1rem; color: var(--text-primary);">${calculateNewStock()} units</strong>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+        <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
+        <button type="button" class="btn btn-primary save-modal-btn">Save Adjustment</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  if (window.lucide) window.lucide.createIcons();
+
+  const closeModal = () => modal.remove();
+  modal.querySelector('.modal-close-btn').onclick = closeModal;
+  modal.querySelector('.cancel-modal-btn').onclick = closeModal;
+
+  const typeSel = modal.querySelector('#adj-type-select');
+  const qtyInp = modal.querySelector('#adj-qty-input');
+  const newStockLabel = modal.querySelector('#adj-new-stock-label');
+
+  function updateCalc() {
+    adjType = typeSel.value;
+    adjQty = parseInt(qtyInp.value, 10) || 0;
+    const newStock = calculateNewStock();
+    newStockLabel.textContent = `${newStock} units`;
+  }
+
+  typeSel.onchange = updateCalc;
+  qtyInp.oninput = updateCalc;
+
+  modal.querySelector('.save-modal-btn').onclick = () => {
+    const finalQty = parseInt(qtyInp.value, 10) || 0;
+    const reason = modal.querySelector('#adj-reason-select').value;
+
+    if (finalQty <= 0) {
+      toast.show({ message: 'Quantity must be greater than 0.', type: 'danger' });
+      return;
+    }
+
+    const variant = (product.variants || []).find(v => v.size === size) || (product.variants || [])[0];
+    if (variant) {
+      if (adjType === 'ADD') {
+        variant.stock = (variant.stock || 0) + finalQty;
+      } else {
+        if (finalQty > variant.stock) {
+          toast.show({ message: `Cannot remove more than current stock (${variant.stock} units).`, type: 'danger' });
+          return;
+        }
+        variant.stock = variant.stock - finalQty;
+      }
+      product.totalStock = (product.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+      store.save();
+    }
+
+    toast.show({ message: `Stock updated successfully.`, type: 'success' });
+    closeModal();
+    if (onAdjusted) onAdjusted();
+  };
 }
 
 // PURCHASES PAGE
@@ -4617,7 +4421,7 @@ class MasterWebAdminApp {
     switch (this.activeNavId) {
       case 'overview': pageView = renderOverview(this.navigateTo); break;
       case 'inventory': pageView = renderInventory(this.navParams, this.navigateTo); break;
-      case 'products': pageView = renderProducts(this.navParams, this.navigateTo); break;
+      case 'products': pageView = renderInventory(this.navParams, this.navigateTo); break;
       case 'purchases': pageView = renderPurchases(this.navParams, this.navigateTo); break;
       case 'sales': pageView = renderSales(this.navParams, this.navigateTo); break;
       case 'customers': pageView = renderCustomers(this.navigateTo); break;
