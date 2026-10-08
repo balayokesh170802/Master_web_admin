@@ -1,462 +1,3 @@
-function renderAddProductPage(onNavigate = null) {
-  const container = document.createElement('div');
-  container.className = 'page-container';
-
-  // 1. Breadcrumb Header (Products / Add Product)
-  const headerDiv = document.createElement('div');
-  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-
-  const breadcrumb = createBreadcrumb([
-    { label: 'Products', target: 'products' },
-    { label: 'Add Product' }
-  ], onNavigate);
-
-  headerDiv.appendChild(breadcrumb);
-  container.appendChild(headerDiv);
-
-  // 2. Main Form Card
-  const mainCard = document.createElement('div');
-  mainCard.className = 'card';
-  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
-
-  const catOptions = store.data.categories.length > 0 ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
-  const brandOptions = store.data.brands.length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
-  const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
-
-  let hasSizes = true;
-  let selectedSizes = new Set(['S', 'M', 'L', 'XL']);
-  let sizeStockMap = { 'S': 5, 'M': 10, 'L': 8, 'XL': 3 };
-  let sizeDamagedMap = { 'S': 0, 'M': 0, 'L': 0, 'XL': 0 };
-
-  const formContainer = document.createElement('div');
-  formContainer.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
-
-  formContainer.innerHTML = `
-    <!-- Basic Information -->
-    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Basic Information</h4>
-      
-      <div class="form-group">
-        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Product Name *</label>
-        <input type="text" class="form-input" id="new-prod-name" placeholder="e.g. Linen Casual Shirt">
-      </div>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Category *</label>
-          <select class="form-select" id="new-prod-cat">
-            ${catOptions.map(c => `<option value="${c}">${c}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Brand</label>
-          <select class="form-select" id="new-prod-brand">
-            ${brandOptions.map(b => `<option value="${b}">${b}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Status</label>
-          <select class="form-select" id="new-prod-status">
-            <option value="Active" selected>Active</option>
-            <option value="Inactive">Inactive</option>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <!-- Pricing -->
-    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Pricing</h4>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Price (₹) *</label>
-          <input type="number" class="form-input" id="new-prod-cost" placeholder="e.g. 500" min="0">
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Selling Price (₹) *</label>
-          <input type="number" class="form-input" id="new-prod-price" placeholder="e.g. 1299" min="0">
-        </div>
-      </div>
-    </div>
-
-    <!-- Product Sizes & Initial Stock -->
-    <div style="display: flex; flex-direction: column; gap: 0.85rem; background: var(--bg-secondary); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-      <div>
-        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">Product Sizes & Initial Stock</h4>
-        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">Add the available sizes and enter the opening stock for each size.</p>
-      </div>
-
-      <!-- Question: Does this product have sizes? [Yes] [No] -->
-      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
-        <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Does this product have sizes?</span>
-        <div style="display: flex; gap: 0.35rem; background: var(--bg-surface); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-          <button type="button" class="btn btn-sm" id="has-sizes-yes" style="padding: 0.25rem 0.85rem; font-weight: 600;">Yes</button>
-          <button type="button" class="btn btn-sm" id="has-sizes-no" style="padding: 0.25rem 0.85rem; font-weight: 600;">No</button>
-        </div>
-      </div>
-
-      <!-- Size-Based Section -->
-      <div id="size-based-section" style="display: flex; flex-direction: column; gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Select Available Sizes:</label>
-          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;" id="size-chips-box">
-            ${allSizes.map(s => `
-              <button type="button" class="size-chip-btn" data-size="${s}" style="padding: 0.35rem 0.75rem; font-size: 0.825rem; font-weight: 600; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s ease;">
-                ${s}
-              </button>
-            `).join('')}
-          </div>
-        </div>
-
-        <!-- Generated Size Stock Table -->
-        <div class="table-responsive" style="background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-          <table class="admin-table" style="font-size: 0.85rem;">
-            <thead>
-              <tr>
-                <th style="width: 30%;">Size</th>
-                <th style="width: 35%;">Available Stock (Units)</th>
-                <th style="width: 35%;">Damaged Stock (Units)</th>
-              </tr>
-            </thead>
-            <tbody id="size-stock-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Non-Size Product Section -->
-      <div id="no-size-section" style="display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Initial Available Stock *</label>
-          <input type="number" class="form-input" id="single-stock-input" value="25" min="0" placeholder="e.g. 25">
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Initial Damaged Stock</label>
-          <input type="number" class="form-input" id="single-damaged-input" value="0" min="0" placeholder="e.g. 0" style="color: var(--status-danger);">
-        </div>
-      </div>
-
-      <!-- Total Initial Stock Display -->
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.9rem;">
-        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: center;">
-          <div>
-            <span style="font-weight: 600; color: var(--text-secondary);">Total Available Stock: </span>
-            <span style="font-size: 1.15rem; font-weight: 700; color: var(--brand-primary);" id="total-stock-display">0 units</span>
-          </div>
-          <div>
-            <span style="font-weight: 600; color: var(--text-secondary);">Total Damaged Stock: </span>
-            <span style="font-size: 1.15rem; font-weight: 700; color: var(--status-danger);" id="total-damaged-display">0 units</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Description -->
-    <div class="form-group">
-      <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Description</label>
-      <textarea class="form-textarea" id="new-prod-desc" rows="3" placeholder="Enter product description (optional)"></textarea>
-    </div>
-
-    <!-- Action Buttons Bar -->
-    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
-      <button type="button" class="btn btn-secondary" id="cancel-add-prod-btn">Cancel</button>
-      <button type="button" class="btn btn-primary" id="save-add-prod-btn" style="padding: 0.55rem 1.25rem; font-weight: 600;">Create Product</button>
-    </div>
-  `;
-
-  mainCard.appendChild(formContainer);
-  container.appendChild(mainCard);
-
-  // Interactive Logic
-  function updateToggleButtons() {
-    const yesBtn = formContainer.querySelector('#has-sizes-yes');
-    const noBtn = formContainer.querySelector('#has-sizes-no');
-    const sizeSection = formContainer.querySelector('#size-based-section');
-    const noSizeSection = formContainer.querySelector('#no-size-section');
-
-    if (hasSizes) {
-      yesBtn.style.backgroundColor = 'var(--brand-primary)';
-      yesBtn.style.color = '#ffffff';
-      yesBtn.style.borderColor = 'var(--brand-primary)';
-      noBtn.style.backgroundColor = 'transparent';
-      noBtn.style.color = 'var(--text-secondary)';
-      noBtn.style.borderColor = 'transparent';
-
-      sizeSection.style.display = 'flex';
-      noSizeSection.style.display = 'none';
-    } else {
-      noBtn.style.backgroundColor = 'var(--brand-primary)';
-      noBtn.style.color = '#ffffff';
-      noBtn.style.borderColor = 'var(--brand-primary)';
-      yesBtn.style.backgroundColor = 'transparent';
-      yesBtn.style.color = 'var(--text-secondary)';
-      yesBtn.style.borderColor = 'transparent';
-
-      sizeSection.style.display = 'none';
-      noSizeSection.style.display = 'flex';
-    }
-    renderSizeStockTable();
-  }
-
-  function renderSizeChips() {
-    formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
-      const s = btn.dataset.size;
-      if (selectedSizes.has(s)) {
-        btn.style.backgroundColor = 'var(--brand-primary)';
-        btn.style.color = '#ffffff';
-        btn.style.borderColor = 'var(--brand-primary)';
-      } else {
-        btn.style.backgroundColor = 'var(--bg-surface)';
-        btn.style.color = 'var(--text-secondary)';
-        btn.style.borderColor = 'var(--border-color)';
-      }
-    });
-  }
-
-  function renderSizeStockTable() {
-    const tbody = formContainer.querySelector('#size-stock-tbody');
-
-    if (hasSizes) {
-      tbody.innerHTML = '';
-      if (selectedSizes.size === 0) {
-        tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--status-warning-text); padding: 1rem;">Please select at least one size above.</td></tr>`;
-        recalcTotal();
-        return;
-      }
-
-      Array.from(selectedSizes).forEach(sz => {
-        const qty = sizeStockMap[sz] !== undefined ? sizeStockMap[sz] : 5;
-        const dmg = sizeDamagedMap[sz] !== undefined ? sizeDamagedMap[sz] : 0;
-        sizeStockMap[sz] = qty;
-        sizeDamagedMap[sz] = dmg;
-
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td style="font-weight: 600; color: var(--text-primary);">${sz}</td>
-          <td>
-            <input type="number" class="form-input size-stock-input" data-size="${sz}" value="${qty}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600;">
-          </td>
-          <td>
-            <input type="number" class="form-input size-damaged-input" data-size="${sz}" value="${dmg}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600; color: var(--status-danger);">
-          </td>
-        `;
-
-        tr.querySelector('.size-stock-input').addEventListener('input', (e) => {
-          const parsed = parseInt(e.target.value, 10);
-          sizeStockMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
-          recalcTotal();
-        });
-
-        tr.querySelector('.size-damaged-input').addEventListener('input', (e) => {
-          const parsed = parseInt(e.target.value, 10);
-          sizeDamagedMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
-          recalcTotal();
-        });
-
-        tbody.appendChild(tr);
-      });
-      recalcTotal();
-    } else {
-      recalcTotal();
-    }
-  }
-
-  function recalcTotal() {
-    const totalDisplay = formContainer.querySelector('#total-stock-display');
-    const totalDamagedDisplay = formContainer.querySelector('#total-damaged-display');
-
-    if (hasSizes) {
-      let totalStock = 0;
-      let totalDamaged = 0;
-      selectedSizes.forEach(sz => {
-        totalStock += (sizeStockMap[sz] || 0);
-        totalDamaged += (sizeDamagedMap[sz] || 0);
-      });
-      if (totalDisplay) totalDisplay.textContent = `${totalStock} units`;
-      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${totalDamaged} units`;
-    } else {
-      const singleInput = formContainer.querySelector('#single-stock-input');
-      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
-      const parsedStock = singleInput ? parseInt(singleInput.value, 10) : 0;
-      const parsedDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
-      const stockQty = isNaN(parsedStock) || parsedStock < 0 ? 0 : parsedStock;
-      const dmgQty = isNaN(parsedDmg) || parsedDmg < 0 ? 0 : parsedDmg;
-      if (totalDisplay) totalDisplay.textContent = `${stockQty} units`;
-      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${dmgQty} units`;
-    }
-  }
-
-  formContainer.querySelector('#has-sizes-yes').addEventListener('click', () => { hasSizes = true; updateToggleButtons(); });
-  formContainer.querySelector('#has-sizes-no').addEventListener('click', () => { hasSizes = false; updateToggleButtons(); });
-
-  formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const s = btn.dataset.size;
-      if (selectedSizes.has(s)) {
-        selectedSizes.delete(s);
-      } else {
-        selectedSizes.add(s);
-        if (sizeStockMap[s] === undefined) sizeStockMap[s] = 5;
-      }
-      renderSizeChips();
-      renderSizeStockTable();
-    });
-  });
-
-  formContainer.querySelector('#single-stock-input').addEventListener('input', () => recalcTotal());
-  const singleDmgEl = formContainer.querySelector('#single-damaged-input');
-  if (singleDmgEl) singleDmgEl.addEventListener('input', () => recalcTotal());
-  formContainer.querySelector('#cancel-add-prod-btn').addEventListener('click', () => {
-    if (onNavigate) onNavigate('products');
-  });
-
-  formContainer.querySelector('#save-add-prod-btn').addEventListener('click', () => {
-    const name = formContainer.querySelector('#new-prod-name').value.trim();
-    const category = formContainer.querySelector('#new-prod-cat').value;
-    const brand = formContainer.querySelector('#new-prod-brand').value;
-    const costStr = formContainer.querySelector('#new-prod-cost').value;
-    const priceStr = formContainer.querySelector('#new-prod-price').value;
-    const status = formContainer.querySelector('#new-prod-status').value;
-    const desc = formContainer.querySelector('#new-prod-desc').value.trim();
-
-    if (!name) {
-      toast.show({ message: 'Product Name is required', type: 'danger' });
-      return;
-    }
-    if (!costStr || isNaN(costStr) || parseFloat(costStr) <= 0) {
-      toast.show({ message: 'Valid Purchase Price is required', type: 'danger' });
-      return;
-    }
-    if (!priceStr || isNaN(priceStr) || parseFloat(priceStr) <= 0) {
-      toast.show({ message: 'Valid Selling Price is required', type: 'danger' });
-      return;
-    }
-
-    const purchasePrice = parseFloat(costStr);
-    const sellingPrice = parseFloat(priceStr);
-
-    if (sellingPrice < purchasePrice) {
-      const confirmLoss = confirm(`Warning: Selling Price (₹${sellingPrice}) is lower than Purchase Price (₹${purchasePrice}). Do you still want to save?`);
-      if (!confirmLoss) return;
-    }
-
-    let variants = [];
-    let totalInitialStock = 0;
-    const prefix = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) || 'PRD';
-
-    if (hasSizes) {
-      if (selectedSizes.size === 0) {
-        toast.show({ message: 'Please select at least one size for size-based product', type: 'danger' });
-        return;
-      }
-
-      let hasInvalidStock = false;
-      Array.from(selectedSizes).forEach(sz => {
-        const stockVal = sizeStockMap[sz];
-        if (stockVal === undefined || isNaN(stockVal) || stockVal < 0) {
-          hasInvalidStock = true;
-        }
-      });
-
-      if (hasInvalidStock) {
-        toast.show({ message: 'Initial stock values must be valid whole numbers (0 or greater)', type: 'danger' });
-        return;
-      }
-
-      let totalInitialDamaged = 0;
-      variants = Array.from(selectedSizes).map(sz => {
-        const st = sizeStockMap[sz] || 0;
-        const dmg = sizeDamagedMap[sz] || 0;
-        totalInitialStock += st;
-        totalInitialDamaged += dmg;
-
-        if (dmg > 0 && Array.isArray(store.data.damagedStockRegister)) {
-          store.data.damagedStockRegister.unshift({
-            id: `DMG-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-            product: name,
-            sku: `${prefix}-${sz}`,
-            size: sz,
-            qty: dmg,
-            reason: "Initial Stock Audit - Damaged Intake",
-            date: new Date().toISOString().split('T')[0]
-          });
-        }
-
-        return {
-          sku: `${prefix}-${sz}`,
-          size: sz,
-          stock: st,
-          damaged: dmg,
-          daysInStock: 0
-        };
-      });
-    } else {
-      const singleVal = parseInt(formContainer.querySelector('#single-stock-input').value, 10);
-      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
-      const singleDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
-      if (isNaN(singleVal) || singleVal < 0) {
-        toast.show({ message: 'Initial stock must be a valid whole number (0 or greater)', type: 'danger' });
-        return;
-      }
-      const dmgVal = isNaN(singleDmg) || singleDmg < 0 ? 0 : singleDmg;
-      totalInitialStock = singleVal;
-
-      if (dmgVal > 0 && Array.isArray(store.data.damagedStockRegister)) {
-        store.data.damagedStockRegister.unshift({
-          id: `DMG-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-          product: name,
-          sku: `${prefix}-STD`,
-          size: 'Standard',
-          qty: dmgVal,
-          reason: "Initial Stock Audit - Damaged Intake",
-          date: new Date().toISOString().split('T')[0]
-        });
-      }
-
-      variants = [
-        {
-          sku: `${prefix}-STD`,
-          size: 'Standard',
-          stock: singleVal,
-          damaged: dmgVal,
-          daysInStock: 0
-        }
-      ];
-    }
-
-    const newProduct = {
-      id: `PROD-${Date.now().toString().slice(-4)}`,
-      name: name,
-      category: category,
-      brand: brand,
-      description: desc,
-      purchasePrice: purchasePrice,
-      sellingPrice: sellingPrice,
-      minStock: 10,
-      supplier: "Apex Apparel Ltd",
-      status: status,
-      variants: variants
-    };
-
-    store.addProduct(newProduct);
-    toast.show({ message: `Successfully created product "${name}" with total initial stock of ${totalInitialStock} units`, type: 'success' });
-    if (onNavigate) onNavigate('products');
-  });
-
-  updateToggleButtons();
-  renderSizeChips();
-
-  if (window.lucide) window.lucide.createIcons();
-  return container;
-}
-
-/**
- * Master Web Admin — Unified Application Script
- * Compatible with file:// protocol (double-clicking index.html directly) AND http:// localhost dev servers.
- */
-
-// ==========================================
-// 1. MOCK DATA & REACTIVE STORE MANAGER
-// ==========================================
 const initialData = {
   storeInfo: {
     name: "Apex Fashion Store",
@@ -1852,7 +1393,24 @@ const initialData = {
 
 class StoreManager {
   constructor() {
-    this.data = JSON.parse(localStorage.getItem('master_web_admin_data_v2')) || initialData;
+    try {
+      const saved = localStorage.getItem('master_web_admin_data_v2');
+      this.data = saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(initialData));
+    } catch (e) {
+      this.data = JSON.parse(JSON.stringify(initialData));
+    }
+
+    if (!this.data || typeof this.data !== 'object') {
+      this.data = JSON.parse(JSON.stringify(initialData));
+    }
+
+    if (!Array.isArray(this.data.products)) this.data.products = initialData.products || [];
+    if (!Array.isArray(this.data.categories)) this.data.categories = initialData.categories || [];
+    if (!Array.isArray(this.data.brands)) this.data.brands = initialData.brands || [];
+    if (!Array.isArray(this.data.purchases)) this.data.purchases = initialData.purchases || [];
+    if (!Array.isArray(this.data.sales)) this.data.sales = initialData.sales || [];
+    if (!Array.isArray(this.data.customers)) this.data.customers = initialData.customers || [];
+
     this.listeners = [];
   }
 
@@ -1911,144 +1469,169 @@ class StoreManager {
     };
   }
 
-  addStockIn(purchasePayload) {
+addStockIn(purchasePayload) {
+    // purchasePayload: { supplier, date, notes, items: [ { productId, isNewProduct, newProductData, size, qty }, ... ] }
     let totalQty = 0;
-    let totalAmount = 0;
+    const itemRecords = [];
 
-    purchasePayload.items.forEach(item => {
-      totalQty += item.received;
-      totalAmount += (item.good * item.price);
+    (purchasePayload.items || []).forEach(item => {
+      totalQty += item.qty;
 
-      const product = this.data.products.find(p => p.name === item.product || p.id === item.productId);
+      let product = null;
+      if (item.isNewProduct && item.newProductData) {
+        const newProdId = `PROD-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`;
+        const sizeArr = item.newProductData.sizes || [];
+        const hasSizes = sizeArr.length > 0;
+
+        const variants = hasSizes
+          ? sizeArr.map(s => ({ size: s, stock: s === item.size ? item.qty : 0, damaged: 0 }))
+          : [{ size: 'Standard', stock: item.qty, damaged: 0 }];
+
+        product = {
+          id: newProdId,
+          name: item.newProductData.name,
+          category: item.newProductData.category || 'General',
+          brand: item.newProductData.brand || 'Unbranded',
+          sellingPrice: item.newProductData.sellingPrice !== null && item.newProductData.sellingPrice !== undefined && item.newProductData.sellingPrice !== '' ? parseFloat(item.newProductData.sellingPrice) : null,
+          purchasePrice: Math.round((parseFloat(item.newProductData.sellingPrice) || 1000) * 0.6),
+          minStock: 5,
+          status: 'Active',
+          variants: variants,
+          totalStock: item.qty
+        };
+        this.data.products.unshift(product);
+      } else {
+        product = this.data.products.find(p => p.id === item.productId || p.name.toLowerCase() === (item.productName || '').toLowerCase());
+      }
+
       if (product) {
-        const variant = product.variants.find(v => v.sku === item.sku);
-        if (variant) {
-          variant.stock += item.good;
-          variant.damaged += item.damaged;
-
-          this.data.stockMovements.unshift({
-            id: `MOV-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-            date: new Date().toLocaleString(),
-            product: product.name,
-            sku: item.sku,
-            type: 'Stock In',
-            quantity: item.good,
-            reference: purchasePayload.invoiceNumber,
-            user: 'Manager'
-          });
-
-          if (item.damaged > 0) {
-            this.data.stockMovements.unshift({
-              id: `MOV-DMG-${Date.now()}`,
-              date: new Date().toLocaleString(),
-              product: product.name,
-              sku: item.sku,
-              type: 'Damage',
-              quantity: item.damaged,
-              reference: purchasePayload.invoiceNumber,
-              user: 'Manager'
-            });
-
-            this.data.damagedStockRegister.unshift({
-              id: `DMG-${Date.now()}`,
-              product: product.name,
-              sku: item.sku,
-              quantity: item.damaged,
-              supplier: purchasePayload.supplier,
-              purchaseId: purchasePayload.invoiceNumber,
-              date: purchasePayload.date,
-              reason: item.damageReason || "Damaged during shipment quality check",
-              notes: item.damageNotes || "Isolated from available sellable stock."
-            });
-          }
+        if (!product.variants || product.variants.length === 0) {
+          product.variants = [{ size: 'Standard', stock: 0, damaged: 0 }];
         }
+
+        let variant = product.variants.find(v => v.size === item.size);
+        if (!variant) {
+          variant = { size: item.size || 'Standard', stock: 0, damaged: 0 };
+          product.variants.push(variant);
+        }
+
+        variant.stock = (variant.stock || 0) + item.qty;
+        product.totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+
+        itemRecords.push({
+          product: product.name,
+          size: item.size || 'Standard',
+          qty: item.qty
+        });
       }
     });
 
-    this.data.purchases.unshift({
+    const purchaseRecord = {
       id: `PUR-${Date.now().toString().slice(-4)}`,
       supplier: purchasePayload.supplier,
-      invoiceNumber: purchasePayload.invoiceNumber,
-      date: purchasePayload.date,
-      productCount: purchasePayload.items.length,
+      date: purchasePayload.date || new Date().toISOString().split('T')[0],
+      notes: purchasePayload.notes || '',
+      productCount: itemRecords.length,
       totalQuantity: totalQty,
-      totalAmount: totalAmount,
       status: 'Completed',
-      items: purchasePayload.items
-    });
+      items: itemRecords
+    };
+
+    this.data.purchases.unshift(purchaseRecord);
     this.save();
+    return purchaseRecord;
   }
 
   addSale(salePayload) {
+    // salePayload: { customerName, customerPhone, paymentMethod, paymentStatus, discount, items: [ { productId, size, qty, sellingPrice }, ... ] }
     let totalAmt = 0;
+    let totalItemCount = 0;
     const saleItems = [];
 
-    salePayload.items.forEach(item => {
-      let finalAmt = (item.price * item.qty) - (item.discount || 0);
-      totalAmt += finalAmt;
-
-      let foundProd = null;
-      let foundVariant = null;
-
-      for (let p of this.data.products) {
-        let v = p.variants.find(v => v.sku === item.sku);
-        if (v) {
-          foundProd = p;
-          foundVariant = v;
-          break;
+    (salePayload.items || []).forEach(item => {
+      const prod = this.data.products.find(p => p.id === item.productId);
+      if (prod) {
+        const variant = (prod.variants || []).find(v => v.size === item.size) || (prod.variants || [])[0];
+        if (variant) {
+          variant.stock = Math.max(0, (variant.stock || 0) - item.qty);
         }
-      }
+        prod.totalStock = (prod.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
 
-      if (foundVariant) {
-        foundVariant.stock = Math.max(0, foundVariant.stock - item.qty);
+        const lineTotal = (item.sellingPrice || prod.sellingPrice || 0) * item.qty;
+        totalAmt += lineTotal;
+        totalItemCount += item.qty;
 
-        this.data.stockMovements.unshift({
-          id: `MOV-SALE-${Date.now()}`,
-          date: new Date().toLocaleString(),
-          product: foundProd.name,
-          sku: item.sku,
-          type: 'Sale',
-          quantity: -item.qty,
-          reference: salePayload.billNumber || `BILL-${Date.now().toString().slice(-4)}`,
-          user: 'Staff'
+        saleItems.push({
+          product: prod.name,
+          productId: prod.id,
+          size: item.size || 'Standard',
+          qty: item.qty,
+          price: item.sellingPrice || prod.sellingPrice || 0,
+          amount: lineTotal
         });
       }
-
-      saleItems.push({
-        product: foundProd ? foundProd.name : item.sku,
-        sku: item.sku,
-        qty: item.qty,
-        price: item.price,
-        discount: item.discount || 0,
-        amount: finalAmt
-      });
     });
 
-    const billNo = salePayload.billNumber || `BILL-2026-${Math.floor(1000 + Math.random() * 9000)}`;
-    this.data.sales.unshift({
-      id: billNo,
+    const discountVal = parseFloat(salePayload.discount) || 0;
+    const finalTotal = Math.max(0, totalAmt - discountVal);
+
+    const saleRecord = {
+      id: `BILL-${Date.now().toString().slice(-4)}`,
       date: new Date().toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }),
-      customer: salePayload.customerName || "Walk-in Customer",
-      phone: salePayload.phone || "-",
-      itemCount: salePayload.items.length,
-      totalAmount: totalAmt,
-      paymentMethod: salePayload.paymentMethod || 'UPI',
-      status: 'Completed',
+      customer: salePayload.customerName || 'Walk-in Customer',
+      phone: salePayload.customerPhone || '-',
+      itemCount: totalItemCount,
+      totalAmount: finalTotal,
+      paymentMethod: salePayload.paymentMethod || 'Cash',
+      status: salePayload.paymentStatus || 'Paid',
+      discount: discountVal,
       items: saleItems
-    });
+    };
 
-    this.save();
-  }
+    // Automatic Customer Update
+    const custName = salePayload.customerName || 'Walk-in Customer';
+    const custPhone = salePayload.customerPhone || '-';
 
-  addProduct(prod) {
-    this.data.products.unshift(prod);
+    if (custName && custName !== 'Walk-in Customer') {
+      let customer = this.data.customers.find(c => c.name.toLowerCase() === custName.toLowerCase());
+      if (!customer) {
+        customer = {
+          id: `CUST-${String(this.data.customers.length + 1).padStart(2, '0')}`,
+          name: custName,
+          phone: custPhone,
+          ordersCount: 0,
+          lastPurchase: new Date().toISOString().split('T')[0],
+          totalSpend: 0
+        };
+        this.data.customers.unshift(customer);
+      }
+
+      customer.ordersCount = (customer.ordersCount || 0) + 1;
+      customer.totalSpend = (customer.totalSpend || 0) + finalTotal;
+      customer.lastPurchase = new Date().toISOString().split('T')[0];
+      if (custPhone && custPhone !== '-') customer.phone = custPhone;
+    }
+
+    this.data.sales.unshift(saleRecord);
     this.save();
+    return saleRecord;
   }
 
   updateProduct(id, updatedData) {
     const idx = this.data.products.findIndex(p => p.id === id);
     if (idx !== -1) {
-      this.data.products[idx] = { ...this.data.products[idx], ...updatedData };
+      const existing = this.data.products[idx];
+      this.data.products[idx] = {
+        ...existing,
+        name: updatedData.name !== undefined ? updatedData.name : existing.name,
+        category: updatedData.category !== undefined ? updatedData.category : existing.category,
+        brand: updatedData.brand !== undefined ? updatedData.brand : existing.brand,
+        sellingPrice: updatedData.sellingPrice !== undefined ? updatedData.sellingPrice : existing.sellingPrice,
+        description: updatedData.description !== undefined ? updatedData.description : existing.description,
+        status: updatedData.status !== undefined ? updatedData.status : existing.status,
+        variants: existing.variants, // PRESERVE INVENTORY STOCK INTACT
+        totalStock: existing.totalStock
+      };
       this.save();
     }
   }
@@ -2564,6 +2147,465 @@ function createTopbar(activeTitle, onThemeToggle) {
 // 4. PAGE RENDERERS
 // ==========================================
 
+function renderAddProductPage(onNavigate = null) {
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  // 1. Breadcrumb Header (Products / Add Product)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
+
+  const breadcrumb = createBreadcrumb([
+    { label: 'Products', target: 'products' },
+    { label: 'Add Product' }
+  ], onNavigate);
+
+  headerDiv.appendChild(breadcrumb);
+  container.appendChild(headerDiv);
+
+  // 2. Main Form Card
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%;';
+
+  const catOptions = store.data.categories.length > 0 ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
+  const brandOptions = store.data.brands.length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+  const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+
+  let hasSizes = true;
+  let selectedSizes = new Set(['S', 'M', 'L', 'XL']);
+  let sizeStockMap = { 'S': 5, 'M': 10, 'L': 8, 'XL': 3 };
+  let sizeDamagedMap = { 'S': 0, 'M': 0, 'L': 0, 'XL': 0 };
+
+  const formContainer = document.createElement('div');
+  formContainer.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+
+  formContainer.innerHTML = `
+    <!-- Basic Information -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Basic Information</h4>
+      
+      <div class="form-group">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Product Name *</label>
+        <input type="text" class="form-input" id="new-prod-name" placeholder="e.g. Linen Casual Shirt">
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Category *</label>
+          <select class="form-select" id="new-prod-cat">
+            ${catOptions.map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Brand</label>
+          <select class="form-select" id="new-prod-brand">
+            ${brandOptions.map(b => `<option value="${b}">${b}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Status</label>
+          <select class="form-select" id="new-prod-status">
+            <option value="Active" selected>Active</option>
+            <option value="Inactive">Inactive</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pricing -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Pricing</h4>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Price (₹) *</label>
+          <input type="number" class="form-input" id="new-prod-cost" placeholder="e.g. 500" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Selling Price (₹) *</label>
+          <input type="number" class="form-input" id="new-prod-price" placeholder="e.g. 1299" min="0">
+        </div>
+      </div>
+    </div>
+
+    <!-- Product Sizes & Initial Stock -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem; background: var(--bg-secondary); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+      <div>
+        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">Product Sizes & Initial Stock</h4>
+        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">Add the available sizes and enter the opening stock for each size.</p>
+      </div>
+
+      <!-- Question: Does this product have sizes? [Yes] [No] -->
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
+        <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Does this product have sizes?</span>
+        <div style="display: flex; gap: 0.35rem; background: var(--bg-surface); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <button type="button" class="btn btn-sm" id="has-sizes-yes" style="padding: 0.25rem 0.85rem; font-weight: 600;">Yes</button>
+          <button type="button" class="btn btn-sm" id="has-sizes-no" style="padding: 0.25rem 0.85rem; font-weight: 600;">No</button>
+        </div>
+      </div>
+
+      <!-- Size-Based Section -->
+      <div id="size-based-section" style="display: flex; flex-direction: column; gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Select Available Sizes:</label>
+          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;" id="size-chips-box">
+            ${allSizes.map(s => `
+              <button type="button" class="size-chip-btn" data-size="${s}" style="padding: 0.35rem 0.75rem; font-size: 0.825rem; font-weight: 600; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s ease;">
+                ${s}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+
+        <!-- Generated Size Stock Table -->
+        <div class="table-responsive" style="background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <table class="admin-table" style="font-size: 0.85rem;">
+            <thead>
+              <tr>
+                <th style="width: 30%;">Size</th>
+                <th style="width: 35%;">Available Stock (Units)</th>
+                <th style="width: 35%;">Damaged Stock (Units)</th>
+              </tr>
+            </thead>
+            <tbody id="size-stock-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Non-Size Product Section -->
+      <div id="no-size-section" style="display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Initial Available Stock *</label>
+          <input type="number" class="form-input" id="single-stock-input" value="25" min="0" placeholder="e.g. 25">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Initial Damaged Stock</label>
+          <input type="number" class="form-input" id="single-damaged-input" value="0" min="0" placeholder="e.g. 0" style="color: var(--status-danger);">
+        </div>
+      </div>
+
+      <!-- Total Initial Stock Display -->
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.9rem;">
+        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: center;">
+          <div>
+            <span style="font-weight: 600; color: var(--text-secondary);">Total Available Stock: </span>
+            <span style="font-size: 1.15rem; font-weight: 700; color: var(--brand-primary);" id="total-stock-display">0 units</span>
+          </div>
+          <div>
+            <span style="font-weight: 600; color: var(--text-secondary);">Total Damaged Stock: </span>
+            <span style="font-size: 1.15rem; font-weight: 700; color: var(--status-danger);" id="total-damaged-display">0 units</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Description -->
+    <div class="form-group">
+      <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Description</label>
+      <textarea class="form-textarea" id="new-prod-desc" rows="3" placeholder="Enter product description (optional)"></textarea>
+    </div>
+
+    <!-- Action Buttons Bar -->
+    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+      <button type="button" class="btn btn-secondary" id="cancel-add-prod-btn">Cancel</button>
+      <button type="button" class="btn btn-primary" id="save-add-prod-btn" style="padding: 0.55rem 1.25rem; font-weight: 600;">Create Product</button>
+    </div>
+  `;
+
+  mainCard.appendChild(formContainer);
+  container.appendChild(mainCard);
+
+  // Interactive Logic
+  function updateToggleButtons() {
+    const yesBtn = formContainer.querySelector('#has-sizes-yes');
+    const noBtn = formContainer.querySelector('#has-sizes-no');
+    const sizeSection = formContainer.querySelector('#size-based-section');
+    const noSizeSection = formContainer.querySelector('#no-size-section');
+
+    if (hasSizes) {
+      yesBtn.style.backgroundColor = 'var(--brand-primary)';
+      yesBtn.style.color = '#ffffff';
+      yesBtn.style.borderColor = 'var(--brand-primary)';
+      noBtn.style.backgroundColor = 'transparent';
+      noBtn.style.color = 'var(--text-secondary)';
+      noBtn.style.borderColor = 'transparent';
+
+      sizeSection.style.display = 'flex';
+      noSizeSection.style.display = 'none';
+    } else {
+      noBtn.style.backgroundColor = 'var(--brand-primary)';
+      noBtn.style.color = '#ffffff';
+      noBtn.style.borderColor = 'var(--brand-primary)';
+      yesBtn.style.backgroundColor = 'transparent';
+      yesBtn.style.color = 'var(--text-secondary)';
+      yesBtn.style.borderColor = 'transparent';
+
+      sizeSection.style.display = 'none';
+      noSizeSection.style.display = 'flex';
+    }
+    renderSizeStockTable();
+  }
+
+  function renderSizeChips() {
+    formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
+      const s = btn.dataset.size;
+      if (selectedSizes.has(s)) {
+        btn.style.backgroundColor = 'var(--brand-primary)';
+        btn.style.color = '#ffffff';
+        btn.style.borderColor = 'var(--brand-primary)';
+      } else {
+        btn.style.backgroundColor = 'var(--bg-surface)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderColor = 'var(--border-color)';
+      }
+    });
+  }
+
+  function renderSizeStockTable() {
+    const tbody = formContainer.querySelector('#size-stock-tbody');
+
+    if (hasSizes) {
+      tbody.innerHTML = '';
+      if (selectedSizes.size === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--status-warning-text); padding: 1rem;">Please select at least one size above.</td></tr>`;
+        recalcTotal();
+        return;
+      }
+
+      Array.from(selectedSizes).forEach(sz => {
+        const qty = sizeStockMap[sz] !== undefined ? sizeStockMap[sz] : 5;
+        const dmg = sizeDamagedMap[sz] !== undefined ? sizeDamagedMap[sz] : 0;
+        sizeStockMap[sz] = qty;
+        sizeDamagedMap[sz] = dmg;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="font-weight: 600; color: var(--text-primary);">${sz}</td>
+          <td>
+            <input type="number" class="form-input size-stock-input" data-size="${sz}" value="${qty}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600;">
+          </td>
+          <td>
+            <input type="number" class="form-input size-damaged-input" data-size="${sz}" value="${dmg}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600; color: var(--status-danger);">
+          </td>
+        `;
+
+        tr.querySelector('.size-stock-input').addEventListener('input', (e) => {
+          const parsed = parseInt(e.target.value, 10);
+          sizeStockMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+          recalcTotal();
+        });
+
+        tr.querySelector('.size-damaged-input').addEventListener('input', (e) => {
+          const parsed = parseInt(e.target.value, 10);
+          sizeDamagedMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
+          recalcTotal();
+        });
+
+        tbody.appendChild(tr);
+      });
+      recalcTotal();
+    } else {
+      recalcTotal();
+    }
+  }
+
+  function recalcTotal() {
+    const totalDisplay = formContainer.querySelector('#total-stock-display');
+    const totalDamagedDisplay = formContainer.querySelector('#total-damaged-display');
+
+    if (hasSizes) {
+      let totalStock = 0;
+      let totalDamaged = 0;
+      selectedSizes.forEach(sz => {
+        totalStock += (sizeStockMap[sz] || 0);
+        totalDamaged += (sizeDamagedMap[sz] || 0);
+      });
+      if (totalDisplay) totalDisplay.textContent = `${totalStock} units`;
+      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${totalDamaged} units`;
+    } else {
+      const singleInput = formContainer.querySelector('#single-stock-input');
+      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
+      const parsedStock = singleInput ? parseInt(singleInput.value, 10) : 0;
+      const parsedDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
+      const stockQty = isNaN(parsedStock) || parsedStock < 0 ? 0 : parsedStock;
+      const dmgQty = isNaN(parsedDmg) || parsedDmg < 0 ? 0 : parsedDmg;
+      if (totalDisplay) totalDisplay.textContent = `${stockQty} units`;
+      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${dmgQty} units`;
+    }
+  }
+
+  formContainer.querySelector('#has-sizes-yes').addEventListener('click', () => { hasSizes = true; updateToggleButtons(); });
+  formContainer.querySelector('#has-sizes-no').addEventListener('click', () => { hasSizes = false; updateToggleButtons(); });
+
+  formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = btn.dataset.size;
+      if (selectedSizes.has(s)) {
+        selectedSizes.delete(s);
+      } else {
+        selectedSizes.add(s);
+        if (sizeStockMap[s] === undefined) sizeStockMap[s] = 5;
+      }
+      renderSizeChips();
+      renderSizeStockTable();
+    });
+  });
+
+  formContainer.querySelector('#single-stock-input').addEventListener('input', () => recalcTotal());
+  const singleDmgEl = formContainer.querySelector('#single-damaged-input');
+  if (singleDmgEl) singleDmgEl.addEventListener('input', () => recalcTotal());
+  formContainer.querySelector('#cancel-add-prod-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('products');
+  });
+
+  formContainer.querySelector('#save-add-prod-btn').addEventListener('click', () => {
+    const name = formContainer.querySelector('#new-prod-name').value.trim();
+    const category = formContainer.querySelector('#new-prod-cat').value;
+    const brand = formContainer.querySelector('#new-prod-brand').value;
+    const costStr = formContainer.querySelector('#new-prod-cost').value;
+    const priceStr = formContainer.querySelector('#new-prod-price').value;
+    const status = formContainer.querySelector('#new-prod-status').value;
+    const desc = formContainer.querySelector('#new-prod-desc').value.trim();
+
+    if (!name) {
+      toast.show({ message: 'Product Name is required', type: 'danger' });
+      return;
+    }
+    if (!costStr || isNaN(costStr) || parseFloat(costStr) <= 0) {
+      toast.show({ message: 'Valid Purchase Price is required', type: 'danger' });
+      return;
+    }
+    if (!priceStr || isNaN(priceStr) || parseFloat(priceStr) <= 0) {
+      toast.show({ message: 'Valid Selling Price is required', type: 'danger' });
+      return;
+    }
+
+    const purchasePrice = parseFloat(costStr);
+    const sellingPrice = parseFloat(priceStr);
+
+    if (sellingPrice < purchasePrice) {
+      const confirmLoss = confirm(`Warning: Selling Price (₹${sellingPrice}) is lower than Purchase Price (₹${purchasePrice}). Do you still want to save?`);
+      if (!confirmLoss) return;
+    }
+
+    let variants = [];
+    let totalInitialStock = 0;
+    const prefix = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) || 'PRD';
+
+    if (hasSizes) {
+      if (selectedSizes.size === 0) {
+        toast.show({ message: 'Please select at least one size for size-based product', type: 'danger' });
+        return;
+      }
+
+      let hasInvalidStock = false;
+      Array.from(selectedSizes).forEach(sz => {
+        const stockVal = sizeStockMap[sz];
+        if (stockVal === undefined || isNaN(stockVal) || stockVal < 0) {
+          hasInvalidStock = true;
+        }
+      });
+
+      if (hasInvalidStock) {
+        toast.show({ message: 'Initial stock values must be valid whole numbers (0 or greater)', type: 'danger' });
+        return;
+      }
+
+      let totalInitialDamaged = 0;
+      variants = Array.from(selectedSizes).map(sz => {
+        const st = sizeStockMap[sz] || 0;
+        const dmg = sizeDamagedMap[sz] || 0;
+        totalInitialStock += st;
+        totalInitialDamaged += dmg;
+
+        if (dmg > 0 && Array.isArray(store.data.damagedStockRegister)) {
+          store.data.damagedStockRegister.unshift({
+            id: `DMG-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+            product: name,
+            sku: `${prefix}-${sz}`,
+            size: sz,
+            qty: dmg,
+            reason: "Initial Stock Audit - Damaged Intake",
+            date: new Date().toISOString().split('T')[0]
+          });
+        }
+
+        return {
+          sku: `${prefix}-${sz}`,
+          size: sz,
+          stock: st,
+          damaged: dmg,
+          daysInStock: 0
+        };
+      });
+    } else {
+      const singleVal = parseInt(formContainer.querySelector('#single-stock-input').value, 10);
+      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
+      const singleDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
+      if (isNaN(singleVal) || singleVal < 0) {
+        toast.show({ message: 'Initial stock must be a valid whole number (0 or greater)', type: 'danger' });
+        return;
+      }
+      const dmgVal = isNaN(singleDmg) || singleDmg < 0 ? 0 : singleDmg;
+      totalInitialStock = singleVal;
+
+      if (dmgVal > 0 && Array.isArray(store.data.damagedStockRegister)) {
+        store.data.damagedStockRegister.unshift({
+          id: `DMG-${Date.now()}-${Math.floor(Math.random()*1000)}`,
+          product: name,
+          sku: `${prefix}-STD`,
+          size: 'Standard',
+          qty: dmgVal,
+          reason: "Initial Stock Audit - Damaged Intake",
+          date: new Date().toISOString().split('T')[0]
+        });
+      }
+
+      variants = [
+        {
+          sku: `${prefix}-STD`,
+          size: 'Standard',
+          stock: singleVal,
+          damaged: dmgVal,
+          daysInStock: 0
+        }
+      ];
+    }
+
+    const newProduct = {
+      id: `PROD-${Date.now().toString().slice(-4)}`,
+      name: name,
+      category: category,
+      brand: brand,
+      description: desc,
+      purchasePrice: purchasePrice,
+      sellingPrice: sellingPrice,
+      minStock: 10,
+      supplier: "Apex Apparel Ltd",
+      status: status,
+      variants: variants
+    };
+
+    store.addProduct(newProduct);
+    toast.show({ message: `Successfully created product "${name}" with total initial stock of ${totalInitialStock} units`, type: 'success' });
+    if (onNavigate) onNavigate('products');
+  });
+
+  updateToggleButtons();
+  renderSizeChips();
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
+/**
+ * Master Web Admin — Unified Application Script
+ * Compatible with file:// protocol (double-clicking index.html directly) AND http:// localhost dev servers.
+ */
+
+// ==========================================
+// 1. MOCK DATA & REACTIVE STORE MANAGER
+// ==========================================
 // OVERVIEW PAGE
 function renderOverview(onNavigate) {
   const container = document.createElement('div');
@@ -3301,428 +3343,127 @@ function renderInventory(params = {}, onNavigate = null) {
 
 // EDIT PRODUCT PAGE
 function renderEditProductPage(productToEdit, onNavigate = null) {
-  if (!productToEdit) {
-    if (onNavigate) onNavigate('products');
-    return document.createElement('div');
-  }
-
+  const prod = productToEdit || (store.data.products ? store.data.products[0] : null);
   const container = document.createElement('div');
   container.className = 'page-container';
 
-  // 1. Breadcrumb Header (Products / Edit Product)
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-
-  const breadcrumb = createBreadcrumb([
+  headerDiv.appendChild(createBreadcrumb([
     { label: 'Products', target: 'products' },
     { label: 'Edit Product' }
-  ], onNavigate);
-
-  headerDiv.appendChild(breadcrumb);
+  ], onNavigate));
   container.appendChild(headerDiv);
 
-  // 2. Main Form Card
+  if (!prod) {
+    container.innerHTML += `<div class="card" style="padding: 2rem; color: var(--text-secondary);">No product selected to edit.</div>`;
+    return container;
+  }
+
   const mainCard = document.createElement('div');
   mainCard.className = 'card';
-  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%;';
 
-  const catOptions = store.data.categories.length > 0 ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
-  const brandOptions = store.data.brands.length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
-  const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+  const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
+  const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+  const totalStock = (prod.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
 
-  let existingVariants = productToEdit.variants || [];
-  let hasSizes = existingVariants.some(v => v.size !== 'Standard' && v.size !== '');
-  let selectedSizes = new Set(hasSizes ? existingVariants.map(v => v.size) : ['S', 'M', 'L', 'XL']);
+  mainCard.innerHTML = `
+    <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      Edit Product Details
+    </h3>
 
-  let sizeStockMap = {};
-  let sizeDamagedMap = {};
-
-  existingVariants.forEach(v => {
-    sizeStockMap[v.size] = v.stock !== undefined ? v.stock : 0;
-    sizeDamagedMap[v.size] = v.damaged !== undefined ? v.damaged : 0;
-  });
-
-  const formContainer = document.createElement('div');
-  formContainer.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
-
-  formContainer.innerHTML = `
-    <!-- Basic Information -->
-    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Edit Product</h4>
-
-      <div class="form-group">
-        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Product Name *</label>
-        <input type="text" class="form-input" id="edit-prod-name" value="${productToEdit.name || ''}" placeholder="e.g. Linen Casual Shirt">
-      </div>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Category *</label>
-          <select class="form-select" id="edit-prod-cat">
-            ${catOptions.map(c => `<option value="${c}" ${c === productToEdit.category ? 'selected' : ''}>${c}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Brand</label>
-          <select class="form-select" id="edit-prod-brand">
-            ${brandOptions.map(b => `<option value="${b}" ${b === productToEdit.brand ? 'selected' : ''}>${b}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Status</label>
-          <select class="form-select" id="edit-prod-status">
-            <option value="Active" ${productToEdit.status === 'Active' ? 'selected' : ''}>Active</option>
-            <option value="Inactive" ${productToEdit.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <!-- Pricing -->
-    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Pricing</h4>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Price (₹) *</label>
-          <input type="number" class="form-input" id="edit-prod-cost" value="${productToEdit.purchasePrice || 0}" min="0">
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Selling Price (₹) *</label>
-          <input type="number" class="form-input" id="edit-prod-price" value="${productToEdit.sellingPrice || 0}" min="0">
-        </div>
-      </div>
-    </div>
-
-    <!-- Product Sizes & Existing Inventory -->
-    <div style="display: flex; flex-direction: column; gap: 0.85rem; background: var(--bg-secondary); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-      <div>
-        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">Product Sizes & Inventory Quantities</h4>
-        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">Manage available sizes. Existing stock counts are preserved.</p>
-      </div>
-
-      <!-- Question: Does this product have sizes? [Yes] [No] -->
-      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
-        <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Does this product have sizes?</span>
-        <div style="display: flex; gap: 0.35rem; background: var(--bg-surface); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-          <button type="button" class="btn btn-sm" id="has-sizes-yes" style="padding: 0.25rem 0.85rem; font-weight: 600;">Yes</button>
-          <button type="button" class="btn btn-sm" id="has-sizes-no" style="padding: 0.25rem 0.85rem; font-weight: 600;">No</button>
-        </div>
-      </div>
-
-      <!-- Size-Based Section -->
-      <div id="size-based-section" style="display: flex; flex-direction: column; gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Select Available Sizes:</label>
-          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;" id="size-chips-box">
-            ${allSizes.map(s => `
-              <button type="button" class="size-chip-btn" data-size="${s}" style="padding: 0.35rem 0.75rem; font-size: 0.825rem; font-weight: 600; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s ease;">
-                ${s}
-              </button>
-            `).join('')}
-          </div>
-        </div>
-
-        <!-- Generated Size Stock Table -->
-        <div class="table-responsive" style="background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-          <table class="admin-table" style="font-size: 0.85rem;">
-            <thead>
-              <tr>
-                <th style="width: 30%;">Size</th>
-                <th style="width: 35%;">Available Stock (Units)</th>
-                <th style="width: 35%;">Damaged Stock (Units)</th>
-              </tr>
-            </thead>
-            <tbody id="size-stock-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Non-Size Product Section -->
-      <div id="no-size-section" style="display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Available Stock *</label>
-          <input type="number" class="form-input" id="single-stock-input" value="${hasSizes ? 0 : (existingVariants[0]?.stock || 0)}" min="0">
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Damaged Stock</label>
-          <input type="number" class="form-input" id="single-damaged-input" value="${hasSizes ? 0 : (existingVariants[0]?.damaged || 0)}" min="0" style="color: var(--status-danger);">
-        </div>
-      </div>
-
-      <!-- Total Stock Display -->
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.9rem;">
-        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: center;">
-          <div>
-            <span style="font-weight: 600; color: var(--text-secondary);">Total Available Stock: </span>
-            <span style="font-size: 1.15rem; font-weight: 700; color: var(--brand-primary);" id="total-stock-display">0 units</span>
-          </div>
-          <div>
-            <span style="font-weight: 600; color: var(--text-secondary);">Total Damaged Stock: </span>
-            <span style="font-size: 1.15rem; font-weight: 700; color: var(--status-danger);" id="total-damaged-display">0 units</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Description -->
     <div class="form-group">
-      <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Description</label>
-      <textarea class="form-textarea" id="edit-prod-desc" rows="3" placeholder="Enter product description (optional)">${productToEdit.description || ''}</textarea>
+      <label class="form-label" style="font-weight: 500;">Product Name <span style="color: #ef4444;">*</span></label>
+      <input type="text" id="edit-prod-name" class="form-input" value="${prod.name || ''}">
     </div>
 
-    <!-- Action Buttons Bar -->
-    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
-      <button type="button" class="btn btn-secondary" id="cancel-edit-prod-btn">Cancel</button>
-      <button type="button" class="btn btn-primary" id="save-edit-prod-btn" style="padding: 0.55rem 1.25rem; font-weight: 600;">Save Changes</button>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 500;">Category</label>
+        <select id="edit-prod-category" class="form-select">
+          ${catOptions.map(c => `<option value="${c}" ${c === prod.category ? 'selected' : ''}>${c}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 500;">Brand</label>
+        <select id="edit-prod-brand" class="form-select">
+          ${brandOptions.map(b => `<option value="${b}" ${b === prod.brand ? 'selected' : ''}>${b}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 500;">Selling Price (₹)</label>
+        <input type="number" id="edit-prod-price" class="form-input" placeholder="e.g. 1499" value="${prod.sellingPrice !== null && prod.sellingPrice !== undefined ? prod.sellingPrice : ''}">
+        <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">Leave blank if Price Not Set.</span>
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 500;">Status</label>
+        <select id="edit-prod-status" class="form-select">
+          <option value="Active" ${prod.status === 'Active' ? 'selected' : ''}>Active</option>
+          <option value="Inactive" ${prod.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" style="font-weight: 500;">Description (Optional)</label>
+      <textarea id="edit-prod-desc" class="form-input" rows="3" placeholder="Product details, material info, style guide...">${prod.description || ''}</textarea>
+    </div>
+
+    <div style="padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); font-size: 0.85rem; color: var(--text-secondary);">
+      <strong style="color: var(--text-primary);">Inventory Stock Note:</strong> Editing product details will update catalog metadata while leaving current stock level (<strong>${totalStock} units</strong>) untouched.
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem; margin-top: 0.5rem;">
+      <button type="button" id="btn-cancel-edit-prod" class="btn btn-secondary">Cancel</button>
+      <button type="button" id="btn-save-edit-prod" class="btn btn-primary">Save Changes</button>
     </div>
   `;
 
-  mainCard.appendChild(formContainer);
   container.appendChild(mainCard);
 
-  // Interactive Logic
-  function updateToggleButtons() {
-    const yesBtn = formContainer.querySelector('#has-sizes-yes');
-    const noBtn = formContainer.querySelector('#has-sizes-no');
-    const sizeSection = formContainer.querySelector('#size-based-section');
-    const noSizeSection = formContainer.querySelector('#no-size-section');
-
-    if (hasSizes) {
-      yesBtn.style.backgroundColor = 'var(--brand-primary)';
-      yesBtn.style.color = '#ffffff';
-      yesBtn.style.borderColor = 'var(--brand-primary)';
-      noBtn.style.backgroundColor = 'transparent';
-      noBtn.style.color = 'var(--text-secondary)';
-      noBtn.style.borderColor = 'transparent';
-
-      sizeSection.style.display = 'flex';
-      noSizeSection.style.display = 'none';
-    } else {
-      noBtn.style.backgroundColor = 'var(--brand-primary)';
-      noBtn.style.color = '#ffffff';
-      noBtn.style.borderColor = 'var(--brand-primary)';
-      yesBtn.style.backgroundColor = 'transparent';
-      yesBtn.style.color = 'var(--text-secondary)';
-      yesBtn.style.borderColor = 'transparent';
-
-      sizeSection.style.display = 'none';
-      noSizeSection.style.display = 'grid';
-    }
-    renderSizeChips();
-    renderSizeStockTable();
-  }
-
-  function renderSizeChips() {
-    formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
-      const s = btn.dataset.size;
-      if (selectedSizes.has(s)) {
-        btn.style.backgroundColor = 'var(--brand-primary)';
-        btn.style.color = '#ffffff';
-        btn.style.borderColor = 'var(--brand-primary)';
-      } else {
-        btn.style.backgroundColor = 'var(--bg-surface)';
-        btn.style.color = 'var(--text-secondary)';
-        btn.style.borderColor = 'var(--border-color)';
-      }
-    });
-  }
-
-  function renderSizeStockTable() {
-    const tbody = formContainer.querySelector('#size-stock-tbody');
-
-    if (hasSizes) {
-      tbody.innerHTML = '';
-      if (selectedSizes.size === 0) {
-        tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--status-warning-text); padding: 1rem;">Please select at least one size above.</td></tr>`;
-        recalcTotal();
-        return;
-      }
-
-      Array.from(selectedSizes).forEach(sz => {
-        const existingV = existingVariants.find(v => v.size === sz);
-        const qty = sizeStockMap[sz] !== undefined ? sizeStockMap[sz] : (existingV ? existingV.stock : 0);
-        const dmg = sizeDamagedMap[sz] !== undefined ? sizeDamagedMap[sz] : (existingV ? existingV.damaged : 0);
-        sizeStockMap[sz] = qty;
-        sizeDamagedMap[sz] = dmg;
-
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td style="font-weight: 600; color: var(--text-primary);">${sz}</td>
-          <td>
-            <input type="number" class="form-input size-stock-input" data-size="${sz}" value="${qty}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600;">
-          </td>
-          <td>
-            <input type="number" class="form-input size-damaged-input" data-size="${sz}" value="${dmg}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600; color: var(--status-danger);">
-          </td>
-        `;
-
-        tr.querySelector('.size-stock-input').addEventListener('input', (e) => {
-          const parsed = parseInt(e.target.value, 10);
-          sizeStockMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
-          recalcTotal();
-        });
-
-        tr.querySelector('.size-damaged-input').addEventListener('input', (e) => {
-          const parsed = parseInt(e.target.value, 10);
-          sizeDamagedMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
-          recalcTotal();
-        });
-
-        tbody.appendChild(tr);
-      });
-      recalcTotal();
-    } else {
-      recalcTotal();
-    }
-  }
-
-  function recalcTotal() {
-    const totalDisplay = formContainer.querySelector('#total-stock-display');
-    const totalDamagedDisplay = formContainer.querySelector('#total-damaged-display');
-
-    if (hasSizes) {
-      let totalStock = 0;
-      let totalDamaged = 0;
-      selectedSizes.forEach(sz => {
-        totalStock += (sizeStockMap[sz] || 0);
-        totalDamaged += (sizeDamagedMap[sz] || 0);
-      });
-      if (totalDisplay) totalDisplay.textContent = `${totalStock} units`;
-      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${totalDamaged} units`;
-    } else {
-      const singleInput = formContainer.querySelector('#single-stock-input');
-      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
-      const parsedStock = singleInput ? parseInt(singleInput.value, 10) : 0;
-      const parsedDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
-      const stockQty = isNaN(parsedStock) || parsedStock < 0 ? 0 : parsedStock;
-      const dmgQty = isNaN(parsedDmg) || parsedDmg < 0 ? 0 : parsedDmg;
-      if (totalDisplay) totalDisplay.textContent = `${stockQty} units`;
-      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${dmgQty} units`;
-    }
-  }
-
-  formContainer.querySelector('#has-sizes-yes').addEventListener('click', () => { hasSizes = true; updateToggleButtons(); });
-  formContainer.querySelector('#has-sizes-no').addEventListener('click', () => { hasSizes = false; updateToggleButtons(); });
-
-  formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const s = btn.dataset.size;
-      if (selectedSizes.has(s)) {
-        selectedSizes.delete(s);
-      } else {
-        selectedSizes.add(s);
-        if (sizeStockMap[s] === undefined) {
-          const existingV = existingVariants.find(v => v.size === s);
-          sizeStockMap[s] = existingV ? existingV.stock : 0;
-        }
-      }
-      renderSizeChips();
-      renderSizeStockTable();
-    });
-  });
-
-  formContainer.querySelector('#single-stock-input').addEventListener('input', () => recalcTotal());
-  const singleDmgEl = formContainer.querySelector('#single-damaged-input');
-  if (singleDmgEl) singleDmgEl.addEventListener('input', () => recalcTotal());
-
-  formContainer.querySelector('#cancel-edit-prod-btn').addEventListener('click', () => {
+  mainCard.querySelector('#btn-cancel-edit-prod').addEventListener('click', () => {
     if (onNavigate) onNavigate('products');
   });
 
-  formContainer.querySelector('#save-edit-prod-btn').addEventListener('click', () => {
-    const name = formContainer.querySelector('#edit-prod-name').value.trim();
-    const category = formContainer.querySelector('#edit-prod-cat').value;
-    const brand = formContainer.querySelector('#edit-prod-brand').value;
-    const costStr = formContainer.querySelector('#edit-prod-cost').value;
-    const priceStr = formContainer.querySelector('#edit-prod-price').value;
-    const status = formContainer.querySelector('#edit-prod-status').value;
-    const desc = formContainer.querySelector('#edit-prod-desc').value.trim();
+  mainCard.querySelector('#btn-save-edit-prod').addEventListener('click', () => {
+    const name = mainCard.querySelector('#edit-prod-name').value.trim();
+    const category = mainCard.querySelector('#edit-prod-category').value;
+    const brand = mainCard.querySelector('#edit-prod-brand').value;
+    const priceVal = mainCard.querySelector('#edit-prod-price').value.trim();
+    const sellingPrice = priceVal !== '' ? parseFloat(priceVal) : null;
+    const status = mainCard.querySelector('#edit-prod-status').value;
+    const description = mainCard.querySelector('#edit-prod-desc').value.trim();
 
     if (!name) {
-      toast.show({ message: 'Product Name is required', type: 'danger' });
-      return;
-    }
-    if (!costStr || isNaN(costStr) || parseFloat(costStr) <= 0) {
-      toast.show({ message: 'Valid Purchase Price is required', type: 'danger' });
-      return;
-    }
-    if (!priceStr || isNaN(priceStr) || parseFloat(priceStr) <= 0) {
-      toast.show({ message: 'Valid Selling Price is required', type: 'danger' });
+      toast.show({ message: 'Product Name is required.', type: 'danger' });
       return;
     }
 
-    const purchasePrice = parseFloat(costStr);
-    const sellingPrice = parseFloat(priceStr);
+    store.updateProduct(prod.id, {
+      name,
+      category,
+      brand,
+      sellingPrice,
+      status,
+      description
+    });
 
-    let updatedVariants = [];
-    const prefix = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) || 'PRD';
-
-    if (hasSizes) {
-      if (selectedSizes.size === 0) {
-        toast.show({ message: 'Please select at least one size', type: 'danger' });
-        return;
-      }
-
-      updatedVariants = Array.from(selectedSizes).map(sz => {
-        const existingV = existingVariants.find(v => v.size === sz);
-        const st = sizeStockMap[sz] !== undefined ? sizeStockMap[sz] : (existingV ? existingV.stock : 0);
-        const dmg = sizeDamagedMap[sz] !== undefined ? sizeDamagedMap[sz] : (existingV ? existingV.damaged : 0);
-
-        return {
-          sku: existingV ? existingV.sku : `${prefix}-${sz}`,
-          size: sz,
-          stock: st,
-          damaged: dmg,
-          daysInStock: existingV ? (existingV.daysInStock || 0) : 0
-        };
-      });
-    } else {
-      const singleInput = formContainer.querySelector('#single-stock-input');
-      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
-      const existingV = existingVariants[0];
-
-      const st = singleInput ? parseInt(singleInput.value, 10) : (existingV ? existingV.stock : 0);
-      const dmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : (existingV ? existingV.damaged : 0);
-
-      updatedVariants = [
-        {
-          sku: existingV ? existingV.sku : `${prefix}-STD`,
-          size: 'Standard',
-          stock: isNaN(st) || st < 0 ? 0 : st,
-          damaged: isNaN(dmg) || dmg < 0 ? 0 : dmg,
-          daysInStock: existingV ? (existingV.daysInStock || 0) : 0
-        }
-      ];
-    }
-
-    const updatedData = {
-      name: name,
-      category: category,
-      brand: brand,
-      description: desc,
-      purchasePrice: purchasePrice,
-      sellingPrice: sellingPrice,
-      status: status,
-      variants: updatedVariants
-    };
-
-    store.updateProduct(productToEdit.id, updatedData);
-    toast.show({ message: `Successfully updated product "${name}"`, type: 'success' });
+    toast.show({ message: 'Product updated successfully.', type: 'success' });
     if (onNavigate) onNavigate('products');
   });
 
-  updateToggleButtons();
+  if (window.lucide) window.lucide.createIcons();
   return container;
 }
 
 // PRODUCTS PAGE
 function renderProducts(params = {}, onNavigate = null) {
-  if (params && (params.action === 'add' || params.view === 'add')) {
-    return renderAddProductPage(onNavigate);
-  }
   if (params && (params.action === 'edit' || params.view === 'edit')) {
-    const prodToEdit = params.product || store.data.products.find(x => x.id === params.productId);
-    return renderEditProductPage(prodToEdit, onNavigate);
+    return renderEditProductPage(params.productToEdit || params.product, onNavigate);
   }
 
   const container = document.createElement('div');
@@ -3730,143 +3471,132 @@ function renderProducts(params = {}, onNavigate = null) {
 
   let searchQuery = '';
   let selectedCategory = 'ALL';
-  let selectedBrand = 'ALL';
+  let selectedStatus = 'ALL';
 
+  // 1. Header (Breadcrumb ONLY - NO "+ Add Product" button!)
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-
-  let prodBreadcrumbItems = [
+  headerDiv.appendChild(createBreadcrumb([
     { label: 'Products' }
-  ];
-  if (params && params.openProduct) {
-    prodBreadcrumbItems = [
-      { label: 'Products', target: 'products' },
-      { label: 'Product Details' }
-    ];
-  }
-
-  headerDiv.appendChild(createBreadcrumb(prodBreadcrumbItems, onNavigate));
-
-  const prodActions = document.createElement('div');
-  prodActions.id = 'prod-header-actions';
-  headerDiv.appendChild(prodActions);
-
-  const addProductBtn = createButton({ text: 'Add New Product', icon: 'plus', variant: 'primary', size: 'sm', onClick: () => { if (onNavigate) onNavigate('products', { action: 'add' }); } });
-  headerDiv.querySelector('#prod-header-actions').appendChild(addProductBtn);
+  ], onNavigate));
   container.appendChild(headerDiv);
 
-  const mainCard = document.createElement('div');
-  mainCard.className = 'card';
-  container.appendChild(mainCard);
+  // 2. Filters Row
+  const filtersCard = document.createElement('div');
+  filtersCard.className = 'card';
+  filtersCard.style.marginBottom = '1.25rem';
+  filtersCard.style.padding = '0.85rem 1.15rem';
 
-  const filterBar = document.createElement('div');
-  filterBar.className = 'filter-bar';
-  filterBar.style.marginBottom = '1.25rem';
-  filterBar.innerHTML = `
-    <div class="search-box">
-      <i data-lucide="search" class="search-icon" style="width: 16px; height: 16px;"></i>
-      <input type="text" class="form-input" id="prod-search-input" placeholder="Search by Product Name, Category, Brand..." value="${searchQuery}">
-    </div>
-    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-      <select class="form-select" id="prod-category-select" style="width: 160px;">
-        <option value="ALL">All Categories</option>
-        ${store.data.categories.map(c => `<option value="${c}">${c}</option>`).join('')}
-      </select>
-      <select class="form-select" id="prod-brand-select" style="width: 160px;">
-        <option value="ALL">All Brands</option>
-        ${store.data.brands.map(b => `<option value="${b}">${b}</option>`).join('')}
-      </select>
+  const categories = store.data.categories || ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies'];
+
+  filtersCard.innerHTML = `
+    <div style="display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: center; justify-content: space-between;">
+      <div style="display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: center; flex: 1;">
+        <div style="position: relative; flex: 1; min-width: 200px; max-width: 320px;">
+          <i data-lucide="search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-secondary);"></i>
+          <input type="text" class="form-input search-input" placeholder="Search product name..." style="padding-left: 32px; font-size: 0.85rem;">
+        </div>
+
+        <select class="form-select category-filter" style="width: auto; min-width: 140px; font-size: 0.85rem;">
+          <option value="ALL">All Categories</option>
+          ${categories.map(c => `<option value="${c}">${c}</option>`).join('')}
+        </select>
+
+        <select class="form-select status-filter" style="width: auto; min-width: 130px; font-size: 0.85rem;">
+          <option value="ALL">All Status</option>
+          <option value="Active">Active</option>
+          <option value="Inactive">Inactive</option>
+        </select>
+      </div>
+
+      <div style="font-size: 0.85rem; color: var(--text-secondary);">
+        Total: <strong id="product-count-label" style="color: var(--text-primary);">${(store.data.products || []).length}</strong> Products
+      </div>
     </div>
   `;
+  container.appendChild(filtersCard);
 
-  filterBar.querySelector('#prod-search-input').addEventListener('input', (e) => { searchQuery = e.target.value; renderProductsList(); });
-  filterBar.querySelector('#prod-category-select').addEventListener('change', (e) => { selectedCategory = e.target.value; renderProductsList(); });
-  filterBar.querySelector('#prod-brand-select').addEventListener('change', (e) => { selectedBrand = e.target.value; renderProductsList(); });
+  // 3. Products Table Card
+  const tableCard = document.createElement('div');
+  tableCard.className = 'card';
 
-  mainCard.appendChild(filterBar);
-
-  const tableResp = document.createElement('div');
-  tableResp.className = 'table-responsive';
-  tableResp.innerHTML = `
+  const tableContainer = document.createElement('div');
+  tableContainer.className = 'table-responsive';
+  tableContainer.innerHTML = `
     <table class="admin-table">
       <thead>
         <tr>
           <th>Product Name</th>
-          <th>Brand</th>
-          <th>Purchase Price</th>
+          <th>Category</th>
           <th>Selling Price</th>
-          <th>Variants Count</th>
-          <th>Total Stock</th>
+          <th>Stock</th>
           <th>Status</th>
           <th>Actions</th>
         </tr>
       </thead>
-      <tbody id="products-tbody"></tbody>
+      <tbody id="products-table-body"></tbody>
     </table>
   `;
-  mainCard.appendChild(tableResp);
+  tableCard.appendChild(tableContainer);
+  container.appendChild(tableCard);
+
+  const searchInp = filtersCard.querySelector('.search-input');
+  const catFilter = filtersCard.querySelector('.category-filter');
+  const statusFilter = filtersCard.querySelector('.status-filter');
+  const tbody = tableContainer.querySelector('#products-table-body');
+  const countLabel = filtersCard.querySelector('#product-count-label');
+
+  searchInp.addEventListener('input', (e) => { searchQuery = e.target.value; renderProductsList(); });
+  catFilter.addEventListener('change', (e) => { selectedCategory = e.target.value; renderProductsList(); });
+  statusFilter.addEventListener('change', (e) => { selectedStatus = e.target.value; renderProductsList(); });
 
   function renderProductsList() {
-    const tbody = mainCard.querySelector('#products-tbody');
-    if (!tbody) return;
     tbody.innerHTML = '';
+    const products = store.data.products || [];
 
-    const filtered = store.data.products.filter(p => {
-      const q = searchQuery.toLowerCase();
-      const matchesQuery = !q || p.name.toLowerCase().includes(q) || p.variants.some(v => v.sku.toLowerCase().includes(q));
-      const matchesCat = selectedCategory === 'ALL' || p.category === selectedCategory;
-      const matchesBrand = selectedBrand === 'ALL' || p.brand === selectedBrand;
-      return matchesQuery && matchesCat && matchesBrand;
+    const filtered = products.filter(p => {
+      const matchQuery = p.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchCat = selectedCategory === 'ALL' || p.category === selectedCategory;
+      const matchStatus = selectedStatus === 'ALL' || p.status === selectedStatus;
+      return matchQuery && matchCat && matchStatus;
     });
 
+    countLabel.textContent = filtered.length;
+
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No products found in catalog.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No products match your criteria.</td></tr>`;
       return;
     }
 
-    if (params.openProduct) {
-      setTimeout(() => {
-        openProductDetailsModal(params.openProduct);
-      }, 100);
-    }
-
     filtered.forEach(p => {
-      const totalStock = p.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
-      const margin = Math.round(((p.sellingPrice - p.purchasePrice) / p.sellingPrice) * 100);
-      const statusVariant = p.status === 'Active' ? 'success' : 'secondary';
+      const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+      const isPriceSet = p.sellingPrice !== null && p.sellingPrice !== undefined && p.sellingPrice > 0;
+      const priceDisplay = isPriceSet ? `₹${p.sellingPrice.toLocaleString()}` : `<span style="color: var(--text-secondary); font-style: italic;">Price Not Set</span>`;
 
       const tr = document.createElement('tr');
-      tr.style.cursor = 'pointer';
-      tr.addEventListener('click', (e) => {
-        openProductDetailsModal(p);
-      });
       tr.innerHTML = `
         <td>
-          <div style="font-weight: 600; font-size: 0.925rem; color: var(--text-primary); transition: color 0.15s ease;">${p.name}</div>
+          <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">${p.name}</div>
         </td>
-        <td style="color: var(--text-secondary);">${p.brand}</td>
-        <td>₹${p.purchasePrice}</td>
-        <td style="font-weight: 600;">₹${p.sellingPrice}</td>
-        <td><span style="font-weight: 500;">${p.variants.length} Variants</span></td>
+        <td style="color: var(--text-secondary);">${p.category || 'General'}</td>
+        <td style="font-weight: 600;">${priceDisplay}</td>
         <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${totalStock} units</td>
-        <td>${createBadge({ label: p.status, variant: statusVariant }).outerHTML}</td>
+        <td>${createBadge({ label: p.status || 'Active', variant: 'secondary' }).outerHTML}</td>
         <td>
-          <button type="button" class="btn btn-secondary btn-sm edit-prod-btn" data-prod-id="${p.id}" style="padding: 0.3rem 0.65rem; font-size: 0.8rem; gap: 0.35rem; display: inline-flex; align-items: center;">
-            <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i>
-            <span>Edit</span>
-          </button>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <button type="button" class="btn btn-secondary btn-sm view-prod-btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">View</button>
+            <button type="button" class="btn btn-secondary btn-sm edit-prod-btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">Edit</button>
+          </div>
         </td>
       `;
 
-      const editBtn = tr.querySelector('.edit-prod-btn');
-      if (editBtn) {
-        editBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (onNavigate) {
-            onNavigate('products', { action: 'edit', productId: p.id, product: p });
-          }
-        });
-      }
+      tr.querySelector('.view-prod-btn').addEventListener('click', () => {
+        openProductDetailsModal(p);
+      });
+
+      tr.querySelector('.edit-prod-btn').addEventListener('click', () => {
+        if (onNavigate) onNavigate('products', { action: 'edit', productToEdit: p });
+      });
 
       tbody.appendChild(tr);
     });
@@ -3879,7 +3609,11 @@ function renderProducts(params = {}, onNavigate = null) {
 }
 
 // PURCHASES PAGE
-function renderPurchases(onNavigate = null) {
+function renderPurchases(params = {}, onNavigate = null) {
+  if (params && (params.action === 'add' || params.view === 'add')) {
+    return renderAddPurchasePage(onNavigate);
+  }
+
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -3888,6 +3622,15 @@ function renderPurchases(onNavigate = null) {
   headerDiv.appendChild(createBreadcrumb([
     { label: 'Purchases' }
   ], onNavigate));
+
+  const btnAddPurchase = createButton({
+    text: 'Add Purchase',
+    icon: 'plus',
+    variant: 'primary',
+    size: 'sm',
+    onClick: () => { if (onNavigate) onNavigate('purchases', { action: 'add' }); }
+  });
+  headerDiv.appendChild(btnAddPurchase);
   container.appendChild(headerDiv);
 
   const mainCard = document.createElement('div');
@@ -3901,19 +3644,17 @@ function renderPurchases(onNavigate = null) {
             <th>Date</th>
             <th>Items Count</th>
             <th>Total Qty</th>
-            <th>Amount</th>
             <th>Status</th>
           </tr>
         </thead>
         <tbody>
-          ${store.data.purchases.map(p => `
+          ${(store.data.purchases || []).map(p => `
             <tr>
-              <td style="font-weight: 500;">${p.supplier}</td>
-              <td style="color: var(--text-secondary);">${p.date}</td>
-              <td>${p.productCount} items</td>
-              <td style="font-weight: 600;">${p.totalQuantity} units</td>
-              <td style="font-weight: 600;">₹${p.totalAmount.toLocaleString()}</td>
-              <td>${createBadge({ label: p.status, variant: 'success' }).outerHTML}</td>
+              <td style="font-weight: 500; color: var(--text-primary);">${p.supplier || 'Supplier'}</td>
+              <td style="color: var(--text-secondary);">${p.date || '-'}</td>
+              <td>${p.productCount || (p.items ? p.items.length : 1)} items</td>
+              <td style="font-weight: 600; color: var(--text-primary);">${p.totalQuantity || 0} units</td>
+              <td>${createBadge({ label: p.status || 'Completed', variant: 'secondary' }).outerHTML}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -3926,217 +3667,734 @@ function renderPurchases(onNavigate = null) {
   return container;
 }
 
-// SALES PAGE
-function renderSales(params = {}, onNavigate = null) {
+// ADD PURCHASE PAGE
+function renderAddPurchasePage(onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
-  let searchQuery = '';
-  let selectedDate = 'ALL';
-  let selectedCategory = 'ALL';
-  let selectedPayment = 'ALL';
-  let selectedStatus = 'ALL';
-
-  // 1. Header (Breadcrumb navigation)
+  // Breadcrumb Header (Purchases / Add Purchase)
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   headerDiv.appendChild(createBreadcrumb([
-    { label: 'Sales' }
+    { label: 'Purchases', target: 'purchases' },
+    { label: 'Add Purchase' }
   ], onNavigate));
   container.appendChild(headerDiv);
 
-  // 2. Summary Cards (Compact 4 Cards Row)
-  const todaySalesList = store.data.sales.filter(s => s.date.includes('Oct 6'));
-  const todaysSalesAmount = todaySalesList.reduce((sum, s) => sum + s.totalAmount, 0);
-  const todaysBillsCount = todaySalesList.length;
-  const todaysUnitsSold = todaySalesList.reduce((sum, s) => sum + s.itemCount, 0);
-  const avgBillValue = todaysBillsCount > 0 ? Math.round(todaysSalesAmount / todaysBillsCount) : 0;
-
-  const summaryGrid = document.createElement('div');
-  summaryGrid.className = 'kpi-grid';
-  summaryGrid.style.marginBottom = '1.25rem';
-  summaryGrid.innerHTML = `
-    <div class="metric-card">
-      <div class="metric-header">
-        <span style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Today's Sales</span>
-        <div style="width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color);">
-          <i data-lucide="dollar-sign" style="width: 16px; height: 16px; color: var(--text-secondary);"></i>
-        </div>
-      </div>
-      <div class="metric-value" style="font-size: 1.55rem; font-weight: 700; color: var(--text-primary); line-height: 1.2;">₹${todaysSalesAmount.toLocaleString('en-IN')}</div>
-    </div>
-
-    <div class="metric-card">
-      <div class="metric-header">
-        <span style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Bills Today</span>
-        <div style="width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color);">
-          <i data-lucide="receipt" style="width: 16px; height: 16px; color: var(--text-secondary);"></i>
-        </div>
-      </div>
-      <div class="metric-value" style="font-size: 1.55rem; font-weight: 700; color: var(--text-primary); line-height: 1.2;">${todaysBillsCount}</div>
-    </div>
-
-    <div class="metric-card">
-      <div class="metric-header">
-        <span style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Units Sold</span>
-        <div style="width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color);">
-          <i data-lucide="shopping-bag" style="width: 16px; height: 16px; color: var(--text-secondary);"></i>
-        </div>
-      </div>
-      <div class="metric-value" style="font-size: 1.55rem; font-weight: 700; color: var(--text-primary); line-height: 1.2;">${todaysUnitsSold}</div>
-    </div>
-
-    <div class="metric-card">
-      <div class="metric-header">
-        <span style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Average Bill Value</span>
-        <div style="width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color);">
-          <i data-lucide="trending-up" style="width: 16px; height: 16px; color: var(--text-secondary);"></i>
-        </div>
-      </div>
-      <div class="metric-value" style="font-size: 1.55rem; font-weight: 700; color: var(--text-primary); line-height: 1.2;">₹${avgBillValue.toLocaleString('en-IN')}</div>
-    </div>
-  `;
-  container.appendChild(summaryGrid);
-
-  // 3. Search & Filter Bar
   const mainCard = document.createElement('div');
   mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
 
-  const filterBar = document.createElement('div');
-  filterBar.className = 'filter-bar';
-  filterBar.style.marginBottom = '1.25rem';
-  filterBar.style.display = 'flex';
-  filterBar.style.gap = '0.75rem';
-  filterBar.style.flexWrap = 'wrap';
-  filterBar.style.alignItems = 'center';
-  filterBar.innerHTML = `
-    <div class="search-box" style="flex: 1; min-width: 240px;">
-      <i data-lucide="search" class="search-icon" style="width: 16px; height: 16px;"></i>
-      <input type="text" class="form-input" id="sales-search-input" placeholder="Search customer, product or date..." value="${searchQuery}">
+  const purchaseItemsData = [];
+
+  mainCard.innerHTML = `
+    <!-- SECTION A: PURCHASE INFORMATION -->
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        Purchase Information
+      </h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Supplier <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="pur-supplier" class="form-input" placeholder="e.g. Apex Apparel Ltd" value="Apex Apparel Ltd">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Purchase Date <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="pur-date" class="form-input" value="${new Date().toISOString().split('T')[0]}">
+        </div>
+        <div class="form-group" style="grid-column: 1 / -1;">
+          <label class="form-label" style="font-weight: 500;">Notes (Optional)</label>
+          <input type="text" id="pur-notes" class="form-input" placeholder="Optional purchase notes or remarks">
+        </div>
+      </div>
     </div>
-    <div style="display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center;">
-      <select class="form-select" id="sales-date-select" style="width: 130px;">
-        <option value="ALL">All Dates</option>
-        <option value="TODAY">Today</option>
-        <option value="YESTERDAY">Yesterday</option>
-        <option value="THIS_WEEK">This Week</option>
-        <option value="THIS_MONTH">This Month</option>
-      </select>
-      <select class="form-select" id="sales-cat-select" style="width: 145px;">
-        <option value="ALL">All Categories</option>
-        ${store.data.categories.map(c => `<option value="${c}">${c}</option>`).join('')}
-      </select>
-      <select class="form-select" id="sales-payment-select" style="width: 140px;">
-        <option value="ALL">All Payments</option>
-        <option value="Cash">Cash</option>
-        <option value="UPI">UPI</option>
-        <option value="Card">Card</option>
-      </select>
-      <select class="form-select" id="sales-status-select" style="width: 135px;">
-        <option value="ALL">All Statuses</option>
-        <option value="Completed">Completed</option>
-        <option value="Pending">Pending</option>
-        <option value="Cancelled">Cancelled</option>
-      </select>
+
+    <!-- SECTION B: PRODUCT / STOCK DETAILS -->
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary);">
+          Product / Stock Details
+        </h3>
+        <button type="button" id="btn-open-create-prod-modal" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem;">
+          <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+          <span>+ Create New Product</span>
+        </button>
+      </div>
+
+      <div id="pur-items-container" style="display: flex; flex-direction: column; gap: 1rem;"></div>
+
+      <button type="button" id="btn-add-pur-item" class="btn btn-secondary btn-sm" style="align-self: start; display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem;">
+        <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+        <span>Add Another Item</span>
+      </button>
+    </div>
+
+    <!-- SECTION C: ACTION BUTTONS -->
+    <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem; margin-top: 0.5rem;">
+      <button type="button" id="btn-cancel-pur" class="btn btn-secondary">Cancel</button>
+      <button type="button" id="btn-save-pur" class="btn btn-primary" style="padding: 0.65rem 1.5rem;">
+        Save & Receive Stock
+      </button>
     </div>
   `;
 
-  filterBar.querySelector('#sales-search-input').addEventListener('input', (e) => { searchQuery = e.target.value; renderSalesTable(); });
-  filterBar.querySelector('#sales-date-select').addEventListener('change', (e) => { selectedDate = e.target.value; renderSalesTable(); });
-  filterBar.querySelector('#sales-cat-select').addEventListener('change', (e) => { selectedCategory = e.target.value; renderSalesTable(); });
-  filterBar.querySelector('#sales-payment-select').addEventListener('change', (e) => { selectedPayment = e.target.value; renderSalesTable(); });
-  filterBar.querySelector('#sales-status-select').addEventListener('change', (e) => { selectedStatus = e.target.value; renderSalesTable(); });
-
-  mainCard.appendChild(filterBar);
-
-  const tableResp = document.createElement('div');
-  tableResp.className = 'table-responsive';
-  tableResp.innerHTML = `
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th>Customer</th>
-          <th>Date & Time</th>
-          <th>Items</th>
-          <th>Total Amount</th>
-          <th>Payment Method</th>
-          <th>Status</th>
-          <th style="text-align: right;">Action</th>
-        </tr>
-      </thead>
-      <tbody id="sales-tbody"></tbody>
-    </table>
-  `;
-  mainCard.appendChild(tableResp);
   container.appendChild(mainCard);
 
-  function renderSalesTable() {
-    const tbody = mainCard.querySelector('#sales-tbody');
-    if (!tbody) return;
-    tbody.innerHTML = '';
+  const itemsContainer = mainCard.querySelector('#pur-items-container');
 
-    const filtered = store.data.sales.filter(s => {
-      const q = searchQuery.toLowerCase().trim();
-      const matchesSearch = !q ||
-        s.id.toLowerCase().includes(q) ||
-        s.customer.toLowerCase().includes(q) ||
-        s.items.some(i => i.product.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q));
+  function renderPurchaseItems() {
+    itemsContainer.innerHTML = '';
+    const productsList = store.data.products || [];
 
-      const matchesCat = selectedCategory === 'ALL' || s.items.some(i => {
-        const p = store.data.products.find(prod => prod.name === i.product);
-        return p && p.category === selectedCategory;
+    if (purchaseItemsData.length === 0) {
+      const defaultP = productsList[0];
+      purchaseItemsData.push({
+        productId: defaultP ? defaultP.id : '',
+        size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
+        qty: 10
       });
-
-      const matchesPay = selectedPayment === 'ALL' || s.paymentMethod === selectedPayment;
-      const matchesStatus = selectedStatus === 'ALL' || s.status === selectedStatus;
-
-      let matchesDate = true;
-      if (selectedDate === 'TODAY') {
-        matchesDate = s.date.includes('Oct 6');
-      } else if (selectedDate === 'YESTERDAY') {
-        matchesDate = s.date.includes('Oct 5');
-      } else if (selectedDate === 'THIS_WEEK') {
-        matchesDate = s.date.includes('Oct');
-      } else if (selectedDate === 'THIS_MONTH') {
-        matchesDate = s.date.includes('Oct') || s.date.includes('Sep');
-      }
-
-      return matchesSearch && matchesCat && matchesPay && matchesStatus && matchesDate;
-    });
-
-    if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No sales transactions match the selected filters.</td></tr>`;
-      return;
     }
 
-    filtered.forEach(s => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td style="font-weight: 600; color: var(--text-primary);">${s.customer}</td>
-        <td style="color: var(--text-secondary); font-size: 0.825rem;">${s.date}</td>
-        <td style="color: var(--text-secondary);">${s.itemCount} item${s.itemCount > 1 ? 's' : ''}</td>
-        <td style="font-weight: 600; color: var(--text-primary);">₹${s.totalAmount.toLocaleString('en-IN')}</td>
-        <td>${createBadge({ label: s.paymentMethod, variant: 'secondary' }).outerHTML}</td>
-        <td>${createBadge({ label: s.status, variant: 'success' }).outerHTML}</td>
-        <td style="text-align: right;">
-          <button class="btn btn-sm view-receipt-btn" style="color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-color); font-weight: 600; padding: 0.25rem 0.65rem; display: inline-flex; align-items: center; gap: 0.35rem; border-radius: var(--radius-sm); cursor: pointer;">
-            <i data-lucide="receipt" style="width: 14px; height: 14px; color: var(--text-secondary);"></i> View Receipt
-          </button>
-        </td>
+    purchaseItemsData.forEach((item, index) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 0.85rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
+      if (window.innerWidth < 600) row.style.gridTemplateColumns = '1fr 1fr';
+
+      const selectedProd = productsList.find(p => p.id === item.productId) || productsList[0];
+      const hasSizes = selectedProd && selectedProd.variants && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size !== 'Standard');
+
+      let sizeOptionsHtml = '';
+      if (hasSizes) {
+        sizeOptionsHtml = selectedProd.variants.map(v => `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}</option>`).join('');
+      } else {
+        sizeOptionsHtml = `<option value="Standard">Standard (No sizes)</option>`;
+      }
+
+      row.innerHTML = `
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Product</label>
+          <select class="form-select pur-prod-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
+            ${productsList.map(p => `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Size</label>
+          <select class="form-select pur-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;" ${!hasSizes ? 'disabled' : ''}>
+            ${sizeOptionsHtml}
+          </select>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Quantity</label>
+          <input type="number" class="form-input pur-qty-input" min="1" value="${item.qty || 1}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
+        </div>
+
+        <button type="button" class="btn btn-ghost pur-remove-btn" style="padding: 0.45rem; color: var(--text-secondary);" title="Remove item">
+          <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+        </button>
       `;
 
-      tr.querySelector('.view-receipt-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        openSaleDetailsModal(s);
+      const prodSel = row.querySelector('.pur-prod-select');
+      const sizeSel = row.querySelector('.pur-size-select');
+      const qtyInp = row.querySelector('.pur-qty-input');
+      const removeBtn = row.querySelector('.pur-remove-btn');
+
+      prodSel.addEventListener('change', (e) => {
+        item.productId = e.target.value;
+        const newP = productsList.find(p => p.id === item.productId);
+        if (newP && newP.variants && newP.variants.length > 0) {
+          item.size = newP.variants[0].size;
+        } else {
+          item.size = 'Standard';
+        }
+        renderPurchaseItems();
       });
 
-      tbody.appendChild(tr);
+      sizeSel.addEventListener('change', (e) => {
+        item.size = e.target.value;
+      });
+
+      qtyInp.addEventListener('input', (e) => {
+        item.qty = parseInt(e.target.value, 10) || 0;
+      });
+
+      removeBtn.addEventListener('click', () => {
+        if (purchaseItemsData.length <= 1) {
+          toast.show({ message: 'At least one item is required for a purchase.', type: 'warning' });
+          return;
+        }
+        purchaseItemsData.splice(index, 1);
+        renderPurchaseItems();
+      });
+
+      itemsContainer.appendChild(row);
     });
 
     if (window.lucide) window.lucide.createIcons();
   }
 
-  renderSalesTable();
+  renderPurchaseItems();
+
+  mainCard.querySelector('#btn-add-pur-item').addEventListener('click', () => {
+    const productsList = store.data.products || [];
+    const defaultP = productsList[0];
+    purchaseItemsData.push({
+      productId: defaultP ? defaultP.id : '',
+      size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
+      qty: 10
+    });
+    renderPurchaseItems();
+  });
+
+  // Create New Product Modal Option
+  mainCard.querySelector('#btn-open-create-prod-modal').addEventListener('click', () => {
+    openCreateProductModalInline((newProd) => {
+      purchaseItemsData.push({
+        productId: newProd.id,
+        size: newProd.variants && newProd.variants.length > 0 ? newProd.variants[0].size : 'Standard',
+        qty: 10
+      });
+      renderPurchaseItems();
+    });
+  });
+
+  mainCard.querySelector('#btn-cancel-pur').addEventListener('click', () => {
+    if (onNavigate) onNavigate('purchases');
+  });
+
+  mainCard.querySelector('#btn-save-pur').addEventListener('click', () => {
+    const supplier = mainCard.querySelector('#pur-supplier').value.trim();
+    const date = mainCard.querySelector('#pur-date').value;
+    const notes = mainCard.querySelector('#pur-notes').value.trim();
+
+    if (!supplier) {
+      toast.show({ message: 'Supplier is required.', type: 'danger' });
+      return;
+    }
+
+    for (let item of purchaseItemsData) {
+      if (!item.productId) {
+        toast.show({ message: 'Please select a product for all purchase items.', type: 'danger' });
+        return;
+      }
+      if (!item.qty || item.qty <= 0) {
+        toast.show({ message: 'Purchase quantity must be greater than 0.', type: 'danger' });
+        return;
+      }
+    }
+
+    store.addStockIn({
+      supplier,
+      date,
+      notes,
+      items: purchaseItemsData
+    });
+
+    toast.show({ message: 'Stock received and inventory updated successfully.', type: 'success' });
+    if (onNavigate) onNavigate('purchases');
+  });
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
+// INLINE NEW PRODUCT CREATION MODAL (PURCHASES FLOW)
+function openCreateProductModalInline(onCreated) {
+  const modalDiv = document.createElement('div');
+  modalDiv.className = 'modal-overlay';
+
+  const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
+  const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+
+  modalDiv.innerHTML = `
+    <div class="modal-content" style="max-width: 500px; width: 95%;">
+      <div class="modal-header">
+        <h3 class="card-title" style="font-weight: 600; font-size: 1.1rem; color: var(--text-primary);">Create New Product</h3>
+        <button type="button" class="btn btn-ghost btn-sm close-modal-btn" style="padding: 0.25rem;">
+          <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+        </button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Product Name <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="inline-prod-name" class="form-input" placeholder="e.g. Classic Linen Shirt">
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem;">
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 500;">Category</label>
+            <select id="inline-prod-cat" class="form-select">
+              ${catOptions.map(c => `<option value="${c}">${c}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-weight: 500;">Brand</label>
+            <select id="inline-prod-brand" class="form-select">
+              ${brandOptions.map(b => `<option value="${b}">${b}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Selling Price (₹)</label>
+          <input type="number" id="inline-prod-price" class="form-input" placeholder="Optional e.g. 1499">
+          <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">Leave blank if price will be set later during product edit.</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Sizes</label>
+          <input type="text" id="inline-prod-sizes" class="form-input" placeholder="S, M, L, XL" value="S, M, L, XL">
+          <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">Comma separated sizes (e.g. S, M, L, XL) or leave blank if no sizes.</span>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem; margin-top: 0.5rem;">
+        <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
+        <button type="button" class="btn btn-primary save-modal-btn">Save Product</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modalDiv);
+  if (window.lucide) window.lucide.createIcons();
+
+  const closeModal = () => modalDiv.remove();
+  modalDiv.querySelector('.close-modal-btn').addEventListener('click', closeModal);
+  modalDiv.querySelector('.cancel-modal-btn').addEventListener('click', closeModal);
+
+  modalDiv.querySelector('.save-modal-btn').addEventListener('click', () => {
+    const name = modalDiv.querySelector('#inline-prod-name').value.trim();
+    const category = modalDiv.querySelector('#inline-prod-cat').value;
+    const brand = modalDiv.querySelector('#inline-prod-brand').value;
+    const priceVal = modalDiv.querySelector('#inline-prod-price').value.trim();
+    const sellingPrice = priceVal ? parseFloat(priceVal) : null;
+    const sizesStr = modalDiv.querySelector('#inline-prod-sizes').value.trim();
+
+    if (!name) {
+      toast.show({ message: 'Product Name is required.', type: 'danger' });
+      return;
+    }
+
+    const newProdId = `PROD-${Date.now().toString().slice(-4)}`;
+    const sizeArr = sizesStr ? sizesStr.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : [];
+    const variants = sizeArr.length > 0
+      ? sizeArr.map(s => ({ size: s, stock: 0, damaged: 0 }))
+      : [{ size: 'Standard', stock: 0, damaged: 0 }];
+
+    const newProd = {
+      id: newProdId,
+      name,
+      category,
+      brand,
+      sellingPrice,
+      purchasePrice: sellingPrice ? Math.round(sellingPrice * 0.6) : 0,
+      minStock: 5,
+      status: 'Active',
+      variants,
+      totalStock: 0
+    };
+
+    store.data.products.unshift(newProd);
+    store.save();
+
+    toast.show({ message: `Product "${name}" created.`, type: 'success' });
+    closeModal();
+    if (onCreated) onCreated(newProd);
+  });
+}
+
+// SALES PAGE
+function renderSales(params = {}, onNavigate = null) {
+  if (params && (params.action === 'add' || params.view === 'add')) {
+    return renderAddSalePage(onNavigate);
+  }
+
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  let searchQuery = '';
+
+  // 1. Header (Breadcrumb + "+ Add Sale" button)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Sales' }
+  ], onNavigate));
+
+  const btnAddSale = createButton({
+    text: 'Add Sale',
+    icon: 'plus',
+    variant: 'primary',
+    size: 'sm',
+    onClick: () => { if (onNavigate) onNavigate('sales', { action: 'add' }); }
+  });
+  headerDiv.appendChild(btnAddSale);
+  container.appendChild(headerDiv);
+
+  // 2. Sales Table Card
+  const tableCard = document.createElement('div');
+  tableCard.className = 'card';
+
+  const tableContainer = document.createElement('div');
+  tableContainer.className = 'table-responsive';
+  tableContainer.innerHTML = `
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Date</th>
+          <th>Items</th>
+          <th>Total Amount</th>
+          <th>Payment Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(store.data.sales || []).map(s => `
+          <tr>
+            <td style="font-weight: 600; color: var(--text-primary);">${s.customer || 'Walk-in Customer'}</td>
+            <td style="color: var(--text-secondary);">${s.date || '-'}</td>
+            <td>${s.itemCount || (s.items ? s.items.length : 1)} items</td>
+            <td style="font-weight: 600; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
+            <td>${createBadge({ label: s.status || 'Paid', variant: 'secondary' }).outerHTML}</td>
+            <td>
+              <button type="button" class="btn btn-secondary btn-sm view-sale-btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">View</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  tableCard.appendChild(tableContainer);
+  container.appendChild(tableCard);
+
+  // Bind view sale buttons
+  const viewBtns = tableContainer.querySelectorAll('.view-sale-btn');
+  viewBtns.forEach((btn, i) => {
+    btn.addEventListener('click', () => {
+      openSaleDetailsModal(store.data.sales[i]);
+    });
+  });
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
+// ADD SALE PAGE
+function renderAddSalePage(onNavigate = null) {
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  // Breadcrumb Header (Sales / Add Sale)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Sales', target: 'sales' },
+    { label: 'Add Sale' }
+  ], onNavigate));
+  container.appendChild(headerDiv);
+
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
+
+  const saleItemsData = [];
+
+  mainCard.innerHTML = `
+    <!-- SECTION A: CUSTOMER -->
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        Customer Information
+      </h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Customer Name <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="sale-cust-name" class="form-input" placeholder="e.g. Sneha Patel" value="Walk-in Customer">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Phone Number</label>
+          <input type="text" id="sale-cust-phone" class="form-input" placeholder="e.g. +91 98765 43210">
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION B: SALE ITEMS -->
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        Sale Items
+      </h3>
+
+      <div id="sale-items-container" style="display: flex; flex-direction: column; gap: 1rem;"></div>
+
+      <button type="button" id="btn-add-sale-row" class="btn btn-secondary btn-sm" style="align-self: start; display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem;">
+        <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+        <span>Add Another Item</span>
+      </button>
+    </div>
+
+    <!-- SECTION C: PAYMENT & SUMMARY -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <h4 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--text-primary);">Payment Details</h4>
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Payment Method</label>
+          <select id="sale-pay-method" class="form-select">
+            <option value="Cash">Cash</option>
+            <option value="UPI" selected>UPI</option>
+            <option value="Card">Card</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Payment Status</label>
+          <select id="sale-pay-status" class="form-select">
+            <option value="Paid" selected>Paid</option>
+            <option value="Pending">Pending</option>
+            <option value="Partial">Partial</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 0.85rem; background: var(--bg-secondary); padding: 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+        <h4 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--text-primary);">Sale Summary</h4>
+        <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+          <span style="color: var(--text-secondary);">Subtotal:</span>
+          <strong id="summary-subtotal" style="color: var(--text-primary);">₹0</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem;">
+          <span style="color: var(--text-secondary);">Discount (₹):</span>
+          <input type="number" id="sale-discount-input" class="form-input" min="0" value="0" style="width: 90px; padding: 0.25rem 0.5rem; text-align: right; font-size: 0.85rem;">
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 1.1rem; font-weight: 700; color: var(--text-primary); border-top: 1px solid var(--border-color); padding-top: 0.65rem; margin-top: 0.25rem;">
+          <span>Final Total:</span>
+          <span id="summary-final-total" style="color: var(--text-primary);">₹0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION D: ACTION BUTTONS -->
+    <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+      <button type="button" id="btn-cancel-sale" class="btn btn-secondary">Cancel</button>
+      <button type="button" id="btn-complete-sale" class="btn btn-primary" style="padding: 0.65rem 1.5rem;">
+        Complete Sale
+      </button>
+    </div>
+  `;
+
+  container.appendChild(mainCard);
+
+  const itemsContainer = mainCard.querySelector('#sale-items-container');
+
+  function updateSaleSummary() {
+    let subtotal = 0;
+    const productsList = store.data.products || [];
+
+    saleItemsData.forEach(item => {
+      const prod = productsList.find(p => p.id === item.productId);
+      const price = (prod && prod.sellingPrice) ? prod.sellingPrice : 0;
+      subtotal += (item.qty || 0) * price;
+    });
+
+    const discountVal = parseFloat(mainCard.querySelector('#sale-discount-input').value) || 0;
+    const finalTotal = Math.max(0, subtotal - discountVal);
+
+    mainCard.querySelector('#summary-subtotal').textContent = `₹${subtotal.toLocaleString('en-IN')}`;
+    mainCard.querySelector('#summary-final-total').textContent = `₹${finalTotal.toLocaleString('en-IN')}`;
+  }
+
+  function renderSaleRows() {
+    itemsContainer.innerHTML = '';
+    const productsList = store.data.products || [];
+
+    if (saleItemsData.length === 0) {
+      const defaultP = productsList[0];
+      saleItemsData.push({
+        productId: defaultP ? defaultP.id : '',
+        size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
+        qty: 1
+      });
+    }
+
+    saleItemsData.forEach((item, index) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
+      if (window.innerWidth < 768) row.style.gridTemplateColumns = '1fr 1fr';
+
+      const selectedProd = productsList.find(p => p.id === item.productId) || productsList[0];
+      const hasSizes = selectedProd && selectedProd.variants && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size !== 'Standard');
+
+      let sizeOptionsHtml = '';
+      let availStock = 0;
+
+      if (hasSizes) {
+        sizeOptionsHtml = selectedProd.variants.map(v => `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}</option>`).join('');
+        const selectedVariant = selectedProd.variants.find(v => v.size === item.size) || selectedProd.variants[0];
+        if (selectedVariant) {
+          availStock = selectedVariant.stock || 0;
+          item.size = selectedVariant.size;
+        }
+      } else if (selectedProd) {
+        sizeOptionsHtml = `<option value="Standard">Standard (No sizes)</option>`;
+        availStock = (selectedProd.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+        item.size = 'Standard';
+      }
+
+      const price = (selectedProd && selectedProd.sellingPrice !== null && selectedProd.sellingPrice !== undefined) ? selectedProd.sellingPrice : 0;
+      const priceDisplay = price > 0 ? `₹${price.toLocaleString()}` : 'Price Not Set';
+      const lineTotal = (item.qty || 0) * price;
+
+      row.innerHTML = `
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Product</label>
+          <select class="form-select sale-prod-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
+            ${productsList.map(p => `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Size</label>
+          <select class="form-select sale-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;" ${!hasSizes ? 'disabled' : ''}>
+            ${sizeOptionsHtml}
+          </select>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Avail. Stock</label>
+          <div class="sale-avail-stock" style="font-weight: 600; font-size: 0.875rem; padding: 0.45rem 0; color: ${availStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${availStock} units</div>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Selling Price</label>
+          <div class="sale-selling-price" style="font-weight: 600; font-size: 0.875rem; padding: 0.45rem 0; color: var(--text-primary);">${priceDisplay}</div>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Quantity</label>
+          <input type="number" class="form-input sale-qty-input" min="1" value="${item.qty || 1}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
+        </div>
+
+        <button type="button" class="btn btn-ghost sale-remove-btn" style="padding: 0.45rem; color: var(--text-secondary);" title="Remove item">
+          <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+        </button>
+      `;
+
+      const prodSel = row.querySelector('.sale-prod-select');
+      const sizeSel = row.querySelector('.sale-size-select');
+      const qtyInp = row.querySelector('.sale-qty-input');
+      const removeBtn = row.querySelector('.sale-remove-btn');
+
+      prodSel.addEventListener('change', (e) => {
+        item.productId = e.target.value;
+        const newP = productsList.find(p => p.id === item.productId);
+        if (newP && newP.variants && newP.variants.length > 0) {
+          item.size = newP.variants[0].size;
+        } else {
+          item.size = 'Standard';
+        }
+        renderSaleRows();
+        updateSaleSummary();
+      });
+
+      sizeSel.addEventListener('change', (e) => {
+        item.size = e.target.value;
+        renderSaleRows();
+        updateSaleSummary();
+      });
+
+      qtyInp.addEventListener('input', (e) => {
+        item.qty = parseInt(e.target.value, 10) || 0;
+        updateSaleSummary();
+      });
+
+      removeBtn.addEventListener('click', () => {
+        if (saleItemsData.length <= 1) {
+          toast.show({ message: 'At least one item is required for a sale.', type: 'warning' });
+          return;
+        }
+        saleItemsData.splice(index, 1);
+        renderSaleRows();
+        updateSaleSummary();
+      });
+
+      itemsContainer.appendChild(row);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  renderSaleRows();
+  updateSaleSummary();
+
+  mainCard.querySelector('#btn-add-sale-row').addEventListener('click', () => {
+    const productsList = store.data.products || [];
+    const defaultP = productsList[0];
+    saleItemsData.push({
+      productId: defaultP ? defaultP.id : '',
+      size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
+      qty: 1
+    });
+    renderSaleRows();
+    updateSaleSummary();
+  });
+
+  mainCard.querySelector('#sale-discount-input').addEventListener('input', updateSaleSummary);
+
+  mainCard.querySelector('#btn-cancel-sale').addEventListener('click', () => {
+    if (onNavigate) onNavigate('sales');
+  });
+
+  mainCard.querySelector('#btn-complete-sale').addEventListener('click', () => {
+    const custName = mainCard.querySelector('#sale-cust-name').value.trim();
+    const custPhone = mainCard.querySelector('#sale-cust-phone').value.trim();
+    const payMethod = mainCard.querySelector('#sale-pay-method').value;
+    const payStatus = mainCard.querySelector('#sale-pay-status').value;
+    const discount = parseFloat(mainCard.querySelector('#sale-discount-input').value) || 0;
+
+    if (!custName) {
+      toast.show({ message: 'Customer Name is required.', type: 'danger' });
+      return;
+    }
+
+    if (saleItemsData.length === 0) {
+      toast.show({ message: 'Please add at least one item to the sale.', type: 'danger' });
+      return;
+    }
+
+    const productsList = store.data.products || [];
+
+    for (let item of saleItemsData) {
+      const prod = productsList.find(p => p.id === item.productId);
+      if (!prod) {
+        toast.show({ message: 'Please select a valid product.', type: 'danger' });
+        return;
+      }
+
+      if (!item.qty || item.qty <= 0) {
+        toast.show({ message: `Quantity must be greater than 0 for "${prod.name}".`, type: 'danger' });
+        return;
+      }
+
+      const variant = (prod.variants || []).find(v => v.size === item.size) || (prod.variants || [])[0];
+      const availStock = variant ? (variant.stock || 0) : 0;
+
+      if (item.qty > availStock) {
+        const sizeLabel = item.size && item.size !== 'Standard' ? ` (${item.size})` : '';
+        toast.show({ message: `Only ${availStock} units are available for ${prod.name}${sizeLabel}.`, type: 'danger' });
+        return;
+      }
+    }
+
+    store.addSale({
+      customerName: custName,
+      customerPhone: custPhone,
+      paymentMethod: payMethod,
+      paymentStatus: payStatus,
+      discount: discount,
+      items: saleItemsData
+    });
+
+    toast.show({ message: 'Sale completed successfully.', type: 'success' });
+    if (onNavigate) onNavigate('sales');
+  });
+
   if (window.lucide) window.lucide.createIcons();
   return container;
 }
@@ -4360,7 +4618,7 @@ class MasterWebAdminApp {
       case 'overview': pageView = renderOverview(this.navigateTo); break;
       case 'inventory': pageView = renderInventory(this.navParams, this.navigateTo); break;
       case 'products': pageView = renderProducts(this.navParams, this.navigateTo); break;
-      case 'purchases': pageView = renderPurchases(this.navigateTo); break;
+      case 'purchases': pageView = renderPurchases(this.navParams, this.navigateTo); break;
       case 'sales': pageView = renderSales(this.navParams, this.navigateTo); break;
       case 'customers': pageView = renderCustomers(this.navigateTo); break;
       case 'reports': pageView = renderReports(this.navigateTo); break;
