@@ -2290,7 +2290,7 @@ function createTopbar(activeTitle, onThemeToggle) {
 // 4. PAGE RENDERERS
 // ==========================================
 
-// ADD NEW PRODUCT PAGE (Full Purchase & Costing Workflow)
+// ADD NEW PRODUCT PAGE (Basic Information Only - No Size Costing)
 function renderAddProductPage(params = {}, onNavigate = null) {
   if (typeof params === 'function') {
     onNavigate = params;
@@ -2300,7 +2300,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
-  // 1. Header (Breadcrumb: Purchases / Add New Product)
+  // 1. Header (Breadcrumb & Back Button)
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   
@@ -2334,35 +2334,20 @@ function renderAddProductPage(params = {}, onNavigate = null) {
 
   const catOptions = (store.data.categories || []).length > 0 ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
   const brandOptions = (store.data.brands || []).length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
-  const supplierOptions = (store.data.suppliers || []).length > 0 ? store.data.suppliers.map(s => s.name) : ['Apex Apparel Ltd', 'SilkRoute Fabrics', 'Urban Thread Co'];
+  const availableSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
 
   let hasSizes = true;
-  let pricingStrategy = 'markup'; // 'markup', 'fixed', 'manual'
-  let markupPercentage = 50;
-  let fixedProfitUnit = 300;
-
-  // Initial Size Rows State
-  let sizeRows = [
-    { size: 'S', qty: 5, buyingPrice: 200 },
-    { size: 'M', qty: 10, buyingPrice: 220 },
-    { size: 'L', qty: 10, buyingPrice: 220 },
-    { size: 'XL', qty: 5, buyingPrice: 240 }
-  ];
-
-  // Non-size product initial state
-  let singleQty = 20;
-  let singleBuyingPrice = 500;
-  let singleSellingPriceManual = 750;
-
+  let selectedSizes = new Set(['S', 'M', 'L', 'XL']);
+  let pricingStrategy = 'markup';
+  let markupPct = 50;
+  let fixedProfitVal = 300;
   let isSubmitting = false;
 
   const formContainer = document.createElement('div');
   formContainer.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem;';
 
-  const todayStr = new Date().toISOString().split('T')[0];
-
   formContainer.innerHTML = `
-    <!-- Section 1: Basic Product Information -->
+    <!-- Basic Product Details -->
     <div style="display: flex; flex-direction: column; gap: 1rem;">
       <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
         <i data-lucide="package" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
@@ -2371,7 +2356,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
       
       <div class="form-group">
         <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Product Name *</label>
-        <input type="text" class="form-input" id="new-prod-name" placeholder="e.g. Linen Casual Shirt" style="font-size: 0.9rem;">
+        <input type="text" class="form-input" id="new-prod-name" placeholder="e.g. Cotton Casual Shirt" style="font-size: 0.9rem;">
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
@@ -2391,49 +2376,22 @@ function renderAddProductPage(params = {}, onNavigate = null) {
 
       <div class="form-group">
         <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Description (Optional)</label>
-        <textarea class="form-textarea" id="new-prod-desc" rows="2" placeholder="Product fabric, fit, or details..."></textarea>
+        <textarea class="form-textarea" id="new-prod-desc" rows="3" placeholder="Enter fabric composition, fit type, or product details..."></textarea>
       </div>
     </div>
 
-    <!-- Section 2: Purchase & Supplier Information -->
-    <div style="display: flex; flex-direction: column; gap: 1rem; background: var(--bg-secondary); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
-        <i data-lucide="truck" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
-        Supplier & Purchase Details
-      </h4>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Supplier *</label>
-          <select class="form-select" id="new-prod-supplier">
-            ${supplierOptions.map(s => `<option value="${s}">${s}</option>`).join('')}
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Date *</label>
-          <input type="date" class="form-input" id="new-prod-date" value="${todayStr}">
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Notes / Reference (Optional)</label>
-        <input type="text" class="form-input" id="new-prod-notes" placeholder="Invoice # or batch notes">
-      </div>
-    </div>
-
-    <!-- Section 3: Size Management & Pricing Strategy -->
+    <!-- Size Management & Pricing Strategy Setup -->
     <div style="display: flex; flex-direction: column; gap: 1.25rem;">
       <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
-        <i data-lucide="calculator" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
-        Costing & Selling Price Strategy
+        <i data-lucide="layers" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Size Options & Pricing Strategy
       </h4>
 
-      <!-- Size Toggle -->
+      <!-- Has Sizes Toggle -->
       <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; background: var(--bg-surface); padding: 0.85rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
         <div>
-          <span style="font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">Does this product have size variants?</span>
-          <p style="font-size: 0.775rem; color: var(--text-secondary); margin: 0;">Enable size-wise quantities and prices (e.g., S, M, L, XL).</p>
+          <span style="font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">Does this product use size variants?</span>
+          <p style="font-size: 0.775rem; color: var(--text-secondary); margin: 0;">Enable clothing sizes (e.g., S, M, L, XL) or select No for single-item products.</p>
         </div>
         <div style="display: flex; gap: 0.35rem; background: var(--bg-secondary); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
           <button type="button" class="btn btn-sm" id="has-sizes-yes" style="padding: 0.3rem 1rem; font-weight: 600;">Yes (Size-wise)</button>
@@ -2441,130 +2399,59 @@ function renderAddProductPage(params = {}, onNavigate = null) {
         </div>
       </div>
 
-      <!-- Strategy Selector -->
+      <!-- Size Selection Chips -->
+      <div id="size-chips-container" style="display: flex; flex-direction: column; gap: 0.75rem; background: var(--bg-surface); padding: 1rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin: 0;">Available Product Sizes:</label>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;" id="size-chips-box">
+          ${availableSizes.map(s => `
+            <button type="button" class="size-chip-btn" data-size="${s}" style="padding: 0.4rem 0.85rem; font-size: 0.825rem; font-weight: 600; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s ease;">
+              ${s}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Default Selling Price Strategy -->
       <div style="display: flex; flex-direction: column; gap: 0.75rem; background: var(--bg-surface); padding: 1rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
         <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin: 0;">Selling Price Calculation Method:</label>
         
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">
           <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.65rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; font-weight: 500;">
-            <input type="radio" name="pricing-strategy" value="markup" checked>
+            <input type="radio" name="prod-strategy" value="markup" checked>
             Percentage Markup (%)
           </label>
           <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.65rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; font-weight: 500;">
-            <input type="radio" name="pricing-strategy" value="fixed">
+            <input type="radio" name="prod-strategy" value="fixed">
             Fixed Profit Per Unit (₹)
           </label>
           <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.65rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; font-weight: 500;">
-            <input type="radio" name="pricing-strategy" value="manual">
+            <input type="radio" name="prod-strategy" value="manual">
             Manual Selling Price
           </label>
         </div>
 
-        <!-- Strategy Inputs -->
-        <div id="strategy-input-container" style="padding-top: 0.5rem;">
-          <div id="strategy-markup-box" style="display: flex; align-items: center; gap: 0.75rem; max-width: 320px;">
+        <div id="strategy-val-box" style="padding-top: 0.35rem;">
+          <div id="strategy-markup-input-box" style="display: flex; align-items: center; gap: 0.75rem; max-width: 320px;">
             <label style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary); white-space: nowrap;">Markup Percentage (%):</label>
-            <input type="number" class="form-input" id="input-markup-pct" value="50" min="0" step="5" style="font-weight: 600;">
+            <input type="number" class="form-input" id="input-prod-markup" value="50" min="0" step="5" style="font-weight: 600;">
           </div>
-          <div id="strategy-fixed-box" style="display: none; align-items: center; gap: 0.75rem; max-width: 320px;">
+          <div id="strategy-fixed-input-box" style="display: none; align-items: center; gap: 0.75rem; max-width: 320px;">
             <label style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary); white-space: nowrap;">Fixed Profit Per Unit (₹):</label>
-            <input type="number" class="form-input" id="input-fixed-profit" value="300" min="0" step="10" style="font-weight: 600;">
+            <input type="number" class="form-input" id="input-prod-fixed" value="300" min="0" step="10" style="font-weight: 600;">
           </div>
-          <div id="strategy-manual-box" style="display: none; font-size: 0.8rem; color: var(--text-secondary);">
-            Enter individual selling prices directly in the table below.
-          </div>
-        </div>
-      </div>
-
-      <!-- Section 4: Costing Table (Size-based) -->
-      <div id="size-table-wrapper" style="display: flex; flex-direction: column; gap: 0.75rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">Size-wise Quantity & Cost Breakdown</span>
-          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-size-row" style="font-weight: 600;">
-            <i data-lucide="plus" style="width: 14px; height: 14px;"></i> Add Size Row
-          </button>
-        </div>
-
-        <div class="table-responsive" style="background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-          <table class="admin-table" style="font-size: 0.85rem;">
-            <thead>
-              <tr>
-                <th style="width: 15%;">Size</th>
-                <th style="width: 18%;">Qty Purchased</th>
-                <th style="width: 20%;">Buying Price / Unit (₹)</th>
-                <th style="width: 18%;">Total Buying Cost (₹)</th>
-                <th style="width: 20%;">Selling Price / Unit (₹)</th>
-                <th style="width: 18%;">Total Selling Value (₹)</th>
-                <th style="width: 8%; text-align: center;">Action</th>
-              </tr>
-            </thead>
-            <tbody id="size-table-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Section 4 (Alt): Non-size Product Inputs -->
-      <div id="no-size-wrapper" style="display: none; flex-direction: column; gap: 1rem; background: var(--bg-surface); padding: 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">Single Item Purchase & Pricing</span>
-        
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-          <div class="form-group">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Quantity Purchased *</label>
-            <input type="number" class="form-input" id="single-qty-input" value="20" min="1" style="font-weight: 600;">
-          </div>
-          <div class="form-group">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Buying Price / Unit (₹) *</label>
-            <input type="number" class="form-input" id="single-buying-input" value="500" min="0" style="font-weight: 600;">
-          </div>
-          <div class="form-group">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Total Buying Cost (₹)</label>
-            <input type="text" class="form-input" id="single-total-cost-display" readonly style="background: var(--bg-secondary); font-weight: 700; color: var(--brand-primary);">
-          </div>
-          <div class="form-group">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Selling Price / Unit (₹) *</label>
-            <input type="number" class="form-input" id="single-selling-input" value="750" min="0" style="font-weight: 600;">
-          </div>
-          <div class="form-group">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Total Selling Value (₹)</label>
-            <input type="text" class="form-input" id="single-total-selling-display" readonly style="background: var(--bg-secondary); font-weight: 700; color: var(--status-success);">
+          <div id="strategy-manual-info-box" style="display: none; font-size: 0.8rem; color: var(--text-secondary);">
+            Selling prices will be entered manually per size when recording purchases.
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Section 5: Real-Time Financial Summaries -->
-    <div style="display: flex; flex-direction: column; gap: 0.75rem; background: var(--bg-secondary); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-      <div style="display: flex; align-items: center; justify-content: space-between;">
-        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin: 0;">Financial Summary (Calculated Real-Time)</h4>
-        <span style="font-size: 0.75rem; color: var(--text-secondary); font-style: italic;">*Estimated gross profit before operational expenses.</span>
-      </div>
-
-      <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
-        <div class="kpi-card">
-          <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Units Purchased</div>
-          <div style="font-size: 1.35rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;" id="summary-total-units">0</div>
-        </div>
-        <div class="kpi-card">
-          <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Purchase Cost</div>
-          <div style="font-size: 1.35rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;" id="summary-total-cost">₹0</div>
-        </div>
-        <div class="kpi-card">
-          <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Est. Selling Value</div>
-          <div style="font-size: 1.35rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;" id="summary-selling-value">₹0</div>
-        </div>
-        <div class="kpi-card">
-          <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Est. Gross Profit</div>
-          <div style="font-size: 1.35rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;" id="summary-gross-profit">₹0</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Section 6: Action Buttons -->
+    <!-- Action Buttons -->
     <div style="display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
-      <button type="button" class="btn btn-secondary" id="cancel-add-prod-btn">Back to Purchases</button>
-      <button type="button" class="btn btn-primary" id="save-add-prod-btn" style="padding: 0.65rem 1.5rem; font-weight: 600; font-size: 0.9rem;">
+      <button type="button" class="btn btn-secondary" id="cancel-add-prod-btn">${returnTo === 'add-purchase' ? 'Back to Add Purchase' : 'Cancel'}</button>
+      <button type="button" class="btn btn-primary" id="save-add-prod-btn" style="padding: 0.65rem 1.5rem; font-weight: 600;">
         <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
-        Save Product & Receive Stock
+        Save Product
       </button>
     </div>
   `;
@@ -2572,152 +2459,11 @@ function renderAddProductPage(params = {}, onNavigate = null) {
   mainCard.appendChild(formContainer);
   container.appendChild(mainCard);
 
-  // Helper: Calculate Selling Price based on strategy & buying price
-  function calculateSellingPrice(buyingPrice, manualVal = null) {
-    const buy = parseFloat(buyingPrice) || 0;
-    if (pricingStrategy === 'markup') {
-      return Math.round(buy * (1 + (parseFloat(markupPercentage) || 0) / 100));
-    } else if (pricingStrategy === 'fixed') {
-      return Math.round(buy + (parseFloat(fixedProfitUnit) || 0));
-    } else {
-      return manualVal !== null ? (parseFloat(manualVal) || 0) : Math.round(buy * 1.5);
-    }
-  }
-
-  // Render Size Rows Table
-  function renderSizeTable() {
-    const tbody = formContainer.querySelector('#size-table-tbody');
-    tbody.innerHTML = '';
-
-    if (sizeRows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--status-warning-text); padding: 1.25rem;">No size rows added. Click "+ Add Size Row" above.</td></tr>`;
-      recalculateSummaries();
-      return;
-    }
-
-    sizeRows.forEach((row, idx) => {
-      const buyPrice = parseFloat(row.buyingPrice) || 0;
-      const qty = parseInt(row.qty, 10) || 0;
-      const rowCost = qty * buyPrice;
-
-      const sellPrice = calculateSellingPrice(buyPrice, row.manualSellingPrice);
-      row.sellingPrice = sellPrice;
-      const rowSellingValue = qty * sellPrice;
-
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>
-          <input type="text" class="form-input row-size-input" value="${row.size}" style="max-width: 90px; font-weight: 600;">
-        </td>
-        <td>
-          <input type="number" class="form-input row-qty-input" value="${qty}" min="0" style="max-width: 100px; font-weight: 600;">
-        </td>
-        <td>
-          <input type="number" class="form-input row-buying-input" value="${buyPrice}" min="0" style="max-width: 120px; font-weight: 600;">
-        </td>
-        <td style="font-weight: 700; color: var(--brand-primary);">
-          ₹${rowCost.toLocaleString()}
-        </td>
-        <td>
-          <input type="number" class="form-input row-selling-input" value="${sellPrice}" min="0" ${pricingStrategy !== 'manual' ? 'readonly style="background: var(--bg-secondary); max-width: 120px; font-weight: 600;"' : 'style="max-width: 120px; font-weight: 600;"'}>
-        </td>
-        <td style="font-weight: 700; color: var(--status-success);">
-          ₹${rowSellingValue.toLocaleString()}
-        </td>
-        <td style="text-align: center;">
-          <button type="button" class="btn btn-sm btn-icon row-remove-btn" title="Remove Row" style="color: var(--status-danger);">
-            <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
-          </button>
-        </td>
-      `;
-
-      // Input change listeners
-      tr.querySelector('.row-size-input').addEventListener('input', (e) => {
-        row.size = e.target.value.trim().toUpperCase() || 'STD';
-      });
-
-      tr.querySelector('.row-qty-input').addEventListener('input', (e) => {
-        row.qty = parseInt(e.target.value, 10) || 0;
-        renderSizeTable();
-      });
-
-      tr.querySelector('.row-buying-input').addEventListener('input', (e) => {
-        row.buyingPrice = parseFloat(e.target.value) || 0;
-        renderSizeTable();
-      });
-
-      if (pricingStrategy === 'manual') {
-        tr.querySelector('.row-selling-input').addEventListener('input', (e) => {
-          row.manualSellingPrice = parseFloat(e.target.value) || 0;
-          renderSizeTable();
-        });
-      }
-
-      tr.querySelector('.row-remove-btn').addEventListener('click', () => {
-        sizeRows.splice(idx, 1);
-        renderSizeTable();
-      });
-
-      tbody.appendChild(tr);
-    });
-
-    if (window.lucide) window.lucide.createIcons();
-    recalculateSummaries();
-  }
-
-  // Recalculate Financial Summaries Real-Time
-  function recalculateSummaries() {
-    let totalUnits = 0;
-    let totalCost = 0;
-    let totalSellingValue = 0;
-
-    if (hasSizes) {
-      sizeRows.forEach(row => {
-        const q = parseInt(row.qty, 10) || 0;
-        const buy = parseFloat(row.buyingPrice) || 0;
-        const sell = row.sellingPrice || calculateSellingPrice(buy, row.manualSellingPrice);
-
-        totalUnits += q;
-        totalCost += (q * buy);
-        totalSellingValue += (q * sell);
-      });
-    } else {
-      const q = parseInt(formContainer.querySelector('#single-qty-input').value, 10) || 0;
-      const buy = parseFloat(formContainer.querySelector('#single-buying-input').value) || 0;
-
-      let sell = 0;
-      if (pricingStrategy === 'manual') {
-        sell = parseFloat(formContainer.querySelector('#single-selling-input').value) || 0;
-      } else {
-        sell = calculateSellingPrice(buy);
-        const sellInput = formContainer.querySelector('#single-selling-input');
-        if (sellInput) sellInput.value = sell;
-      }
-
-      totalUnits = q;
-      totalCost = q * buy;
-      totalSellingValue = q * sell;
-
-      const costDisp = formContainer.querySelector('#single-total-cost-display');
-      const sellDisp = formContainer.querySelector('#single-total-selling-display');
-      if (costDisp) costDisp.value = `₹${totalCost.toLocaleString()}`;
-      if (sellDisp) sellDisp.value = `₹${totalSellingValue.toLocaleString()}`;
-    }
-
-    const grossProfit = totalSellingValue - totalCost;
-
-    formContainer.querySelector('#summary-total-units').textContent = `${totalUnits} units`;
-    formContainer.querySelector('#summary-total-cost').textContent = `₹${totalCost.toLocaleString()}`;
-    formContainer.querySelector('#summary-selling-value').textContent = `₹${totalSellingValue.toLocaleString()}`;
-    formContainer.querySelector('#summary-gross-profit').textContent = `₹${grossProfit.toLocaleString()}`;
-  }
-
-  // Toggle Has Sizes (Yes/No)
-  function updateHasSizesToggle() {
+  // Interactivity Functions
+  function updateToggleState() {
     const yesBtn = formContainer.querySelector('#has-sizes-yes');
     const noBtn = formContainer.querySelector('#has-sizes-no');
-    const sizeWrapper = formContainer.querySelector('#size-table-wrapper');
-    const noSizeWrapper = formContainer.querySelector('#no-size-wrapper');
+    const chipsContainer = formContainer.querySelector('#size-chips-container');
 
     if (hasSizes) {
       yesBtn.style.backgroundColor = 'var(--brand-primary)';
@@ -2727,9 +2473,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
       noBtn.style.color = 'var(--text-secondary)';
       noBtn.style.borderColor = 'transparent';
 
-      sizeWrapper.style.display = 'flex';
-      noSizeWrapper.style.display = 'none';
-      renderSizeTable();
+      chipsContainer.style.display = 'flex';
     } else {
       noBtn.style.backgroundColor = 'var(--brand-primary)';
       noBtn.style.color = '#ffffff';
@@ -2738,17 +2482,29 @@ function renderAddProductPage(params = {}, onNavigate = null) {
       yesBtn.style.color = 'var(--text-secondary)';
       yesBtn.style.borderColor = 'transparent';
 
-      sizeWrapper.style.display = 'none';
-      noSizeWrapper.style.display = 'flex';
-      recalculateSummaries();
+      chipsContainer.style.display = 'none';
     }
   }
 
-  // Strategy Input Box visibility
-  function updateStrategyInputs() {
-    const markupBox = formContainer.querySelector('#strategy-markup-box');
-    const fixedBox = formContainer.querySelector('#strategy-fixed-box');
-    const manualBox = formContainer.querySelector('#strategy-manual-box');
+  function renderChips() {
+    formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
+      const sz = btn.dataset.size;
+      if (selectedSizes.has(sz)) {
+        btn.style.backgroundColor = 'var(--brand-primary)';
+        btn.style.color = '#ffffff';
+        btn.style.borderColor = 'var(--brand-primary)';
+      } else {
+        btn.style.backgroundColor = 'var(--bg-surface)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderColor = 'var(--border-color)';
+      }
+    });
+  }
+
+  function updateStrategyDisplay() {
+    const markupBox = formContainer.querySelector('#strategy-markup-input-box');
+    const fixedBox = formContainer.querySelector('#strategy-fixed-input-box');
+    const manualBox = formContainer.querySelector('#strategy-manual-info-box');
 
     if (pricingStrategy === 'markup') {
       markupBox.style.display = 'flex';
@@ -2763,63 +2519,48 @@ function renderAddProductPage(params = {}, onNavigate = null) {
       fixedBox.style.display = 'none';
       manualBox.style.display = 'block';
     }
-
-    if (hasSizes) renderSizeTable();
-    else recalculateSummaries();
   }
 
-  // Event Listeners for Toggles & Strategy Radios
-  formContainer.querySelector('#has-sizes-yes').addEventListener('click', () => {
-    hasSizes = true;
-    updateHasSizesToggle();
+  // Event Listeners
+  formContainer.querySelector('#has-sizes-yes').addEventListener('click', () => { hasSizes = true; updateToggleState(); });
+  formContainer.querySelector('#has-sizes-no').addEventListener('click', () => { hasSizes = false; updateToggleState(); });
+
+  formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const sz = btn.dataset.size;
+      if (selectedSizes.has(sz)) {
+        if (selectedSizes.size > 1) selectedSizes.delete(sz);
+        else toast.show({ message: 'At least one size must remain selected.', type: 'warning' });
+      } else {
+        selectedSizes.add(sz);
+      }
+      renderChips();
+    });
   });
 
-  formContainer.querySelector('#has-sizes-no').addEventListener('click', () => {
-    hasSizes = false;
-    updateHasSizesToggle();
-  });
-
-  formContainer.querySelectorAll('input[name="pricing-strategy"]').forEach(radio => {
+  formContainer.querySelectorAll('input[name="prod-strategy"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
       pricingStrategy = e.target.value;
-      updateStrategyInputs();
+      updateStrategyDisplay();
     });
   });
 
-  formContainer.querySelector('#input-markup-pct').addEventListener('input', (e) => {
-    markupPercentage = parseFloat(e.target.value) || 0;
-    if (hasSizes) renderSizeTable();
-    else recalculateSummaries();
+  formContainer.querySelector('#input-prod-markup').addEventListener('input', (e) => {
+    markupPct = parseFloat(e.target.value) || 0;
   });
 
-  formContainer.querySelector('#input-fixed-profit').addEventListener('input', (e) => {
-    fixedProfitUnit = parseFloat(e.target.value) || 0;
-    if (hasSizes) renderSizeTable();
-    else recalculateSummaries();
+  formContainer.querySelector('#input-prod-fixed').addEventListener('input', (e) => {
+    fixedProfitVal = parseFloat(e.target.value) || 0;
   });
 
-  formContainer.querySelector('#single-qty-input').addEventListener('input', () => recalculateSummaries());
-  formContainer.querySelector('#single-buying-input').addEventListener('input', () => recalculateSummaries());
-  formContainer.querySelector('#single-selling-input').addEventListener('input', () => recalculateSummaries());
-
-  // Add Size Row Button
-  formContainer.querySelector('#btn-add-size-row').addEventListener('click', () => {
-    const existingSizes = sizeRows.map(r => r.size);
-    const defaults = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
-    const nextSize = defaults.find(s => !existingSizes.includes(s)) || `SZ-${sizeRows.length + 1}`;
-    
-    sizeRows.push({ size: nextSize, qty: 5, buyingPrice: 200 });
-    renderSizeTable();
+  formContainer.querySelector('#cancel-add-prod-btn').addEventListener('click', () => {
+    if (onNavigate) {
+      if (returnTo === 'add-purchase') onNavigate('purchases', { action: 'add' });
+      else onNavigate('purchases');
+    }
   });
 
-  // Cancel / Back Button
-  formContainer.querySelectorAll('#cancel-add-prod-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (onNavigate) onNavigate('purchases');
-    });
-  });
-
-  // SAVE PRODUCT & RECEIVE STOCK Submit Handler
+  // Save Product Definition
   formContainer.querySelector('#save-add-prod-btn').addEventListener('click', () => {
     if (isSubmitting) return;
 
@@ -2827,101 +2568,23 @@ function renderAddProductPage(params = {}, onNavigate = null) {
     const category = formContainer.querySelector('#new-prod-cat').value;
     const brand = formContainer.querySelector('#new-prod-brand').value;
     const desc = formContainer.querySelector('#new-prod-desc').value.trim();
-    const supplier = formContainer.querySelector('#new-prod-supplier').value;
-    const purchaseDate = formContainer.querySelector('#new-prod-date').value;
-    const notes = formContainer.querySelector('#new-prod-notes').value.trim();
 
     if (!name) {
       toast.show({ message: 'Product Name is required.', type: 'danger' });
       return;
     }
 
-    let itemsPayload = [];
-    let totalUnits = 0;
-    let totalCost = 0;
-    let estimatedSellingValue = 0;
-
-    if (hasSizes) {
-      if (sizeRows.length === 0) {
-        toast.show({ message: 'Please add at least one size row.', type: 'danger' });
-        return;
-      }
-
-      for (const row of sizeRows) {
-        if (!row.size) {
-          toast.show({ message: 'Size name cannot be empty.', type: 'danger' });
-          return;
-        }
-        if (row.qty < 0 || isNaN(row.qty)) {
-          toast.show({ message: `Quantity for size ${row.size} must be a valid non-negative number.`, type: 'danger' });
-          return;
-        }
-        if (row.buyingPrice < 0 || isNaN(row.buyingPrice)) {
-          toast.show({ message: `Buying price for size ${row.size} must be a valid non-negative number.`, type: 'danger' });
-          return;
-        }
-
-        const sellPrice = row.sellingPrice || calculateSellingPrice(row.buyingPrice, row.manualSellingPrice);
-        const rowCost = row.qty * row.buyingPrice;
-        const rowValue = row.qty * sellPrice;
-
-        totalUnits += row.qty;
-        totalCost += rowCost;
-        estimatedSellingValue += rowValue;
-
-        itemsPayload.push({
-          size: row.size,
-          qty: row.qty,
-          buyingPrice: row.buyingPrice,
-          totalCost: rowCost,
-          sellingPrice: sellPrice,
-          totalValue: rowValue
-        });
-      }
-    } else {
-      const q = parseInt(formContainer.querySelector('#single-qty-input').value, 10);
-      const buy = parseFloat(formContainer.querySelector('#single-buying-input').value);
-      const sell = parseFloat(formContainer.querySelector('#single-selling-input').value);
-
-      if (isNaN(q) || q <= 0) {
-        toast.show({ message: 'Quantity purchased must be greater than 0.', type: 'danger' });
-        return;
-      }
-      if (isNaN(buy) || buy < 0) {
-        toast.show({ message: 'Buying price must be a valid non-negative amount.', type: 'danger' });
-        return;
-      }
-      if (isNaN(sell) || sell < 0) {
-        toast.show({ message: 'Selling price must be a valid non-negative amount.', type: 'danger' });
-        return;
-      }
-
-      totalUnits = q;
-      totalCost = q * buy;
-      estimatedSellingValue = q * sell;
-
-      itemsPayload.push({
-        size: 'Standard',
-        qty: q,
-        buyingPrice: buy,
-        totalCost: totalCost,
-        sellingPrice: sell,
-        totalValue: estimatedSellingValue
-      });
-    }
-
-    if (totalUnits <= 0) {
-      toast.show({ message: 'Total purchased quantity must be greater than 0.', type: 'danger' });
-      return;
-    }
-
-    // Set submitting flag to prevent double clicks
     isSubmitting = true;
     const saveBtn = formContainer.querySelector('#save-add-prod-btn');
     saveBtn.disabled = true;
-    saveBtn.innerHTML = '<i data-lucide="loader" style="width: 18px; height: 18px; animation: spin 1s linear infinite;"></i> Saving...';
+    saveBtn.innerHTML = 'Saving Product...';
 
-    const estimatedGrossProfit = estimatedSellingValue - totalCost;
+    const sizesArr = hasSizes ? Array.from(selectedSizes) : ['Standard'];
+    const itemsPayload = sizesArr.map(sz => ({
+      size: sz,
+      buyingPrice: 0,
+      sellingPrice: 0
+    }));
 
     const payload = {
       productName: name,
@@ -2930,28 +2593,14 @@ function renderAddProductPage(params = {}, onNavigate = null) {
       description: desc,
       hasSizes,
       pricingStrategy,
-      pricingValue: pricingStrategy === 'markup' ? markupPercentage : (pricingStrategy === 'fixed' ? fixedProfitUnit : 0),
-      supplier,
-      purchaseDate,
-      notes,
-      items: itemsPayload,
-      totalUnits,
-      totalCost,
-      estimatedSellingValue,
-      estimatedGrossProfit
+      pricingValue: pricingStrategy === 'markup' ? markupPct : (pricingStrategy === 'fixed' ? fixedProfitVal : 0),
+      items: itemsPayload
     };
 
     try {
-      let result;
-      if (returnTo === 'add-purchase') {
-        // Create product definition only (stock received on Add Purchase page)
-        result = store.saveProductDefinition(payload);
-        toast.show({ message: `Product '${name}' created! Continue completing purchase details.`, type: 'success' });
-      } else {
-        result = store.saveProductAndReceiveStock(payload);
-        toast.show({ message: `Product '${name}' saved successfully & ${totalUnits} units received!`, type: 'success' });
-      }
-      
+      const result = store.saveProductDefinition(payload);
+      toast.show({ message: `Product '${name}' created! Now enter purchase & size details.`, type: 'success' });
+
       if (onNavigate) {
         if (returnTo === 'add-purchase' && result && result.product) {
           onNavigate('purchases', { action: 'add', selectedProductId: result.product.id });
@@ -2960,17 +2609,17 @@ function renderAddProductPage(params = {}, onNavigate = null) {
         }
       }
     } catch (err) {
-      console.error('Error saving product and receiving stock:', err);
+      console.error('Save product error:', err);
       toast.show({ message: `Failed to save product: ${err.message}`, type: 'danger' });
       isSubmitting = false;
       saveBtn.disabled = false;
-      saveBtn.innerHTML = '<i data-lucide="check-circle" style="width: 18px; height: 18px;"></i> Save Product & Receive Stock';
+      saveBtn.innerHTML = 'Save Product';
     }
   });
 
-  // Initial render calls
-  updateHasSizesToggle();
-  updateStrategyInputs();
+  updateToggleState();
+  renderChips();
+  updateStrategyDisplay();
 
   if (window.lucide) window.lucide.createIcons();
   return container;
@@ -3904,7 +3553,7 @@ function renderPurchases(params = {}, onNavigate = null) {
   return container;
 }
 
-// ADD PURCHASE PAGE (With Draft Preservation & Single Stock Receipt)
+// ADD PURCHASE PAGE (Size-wise Purchase Details Intake & Single Stock Receipt)
 function renderAddPurchasePage(params = {}, onNavigate = null) {
   if (typeof params === 'function') {
     onNavigate = params;
@@ -3913,7 +3562,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
-  // 1. Breadcrumb Header
+  // 1. Header
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   headerDiv.appendChild(createBreadcrumb([
@@ -3926,7 +3575,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   mainCard.className = 'card';
   mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
 
-  // Restore draft state if navigating back from Create New Product
+  // Restore draft state if returning from Create New Product
   let savedDraft = null;
   try {
     const rawDraft = sessionStorage.getItem('add_purchase_draft');
@@ -3943,7 +3592,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     ? savedDraft.items
     : [];
 
-  // If returning with a newly created product
+  // If returning with newly created product
   if (params && params.selectedProductId) {
     const selectedProd = (store.data.products || []).find(p => p.id === params.selectedProductId);
     if (selectedProd) {
@@ -3954,7 +3603,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             productId: selectedProd.id,
             size: v.size || 'Standard',
             qty: 10,
-            buyingPrice: v.purchasePrice || selectedProd.purchasePrice || 0
+            buyingPrice: v.purchasePrice || selectedProd.purchasePrice || 200
           });
         });
       } else {
@@ -3962,14 +3611,18 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           productId: selectedProd.id,
           size: 'Standard',
           qty: 10,
-          buyingPrice: selectedProd.purchasePrice || 0
+          buyingPrice: selectedProd.purchasePrice || 200
         });
       }
     }
   }
 
-  // Clear draft storage after reading
+  // Clear draft key
   sessionStorage.removeItem('add_purchase_draft');
+
+  let pricingStrategy = 'markup';
+  let markupPct = 50;
+  let fixedProfitVal = 300;
 
   mainCard.innerHTML = `
     <!-- SECTION A: PURCHASE INFORMATION -->
@@ -3994,12 +3647,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       </div>
     </div>
 
-    <!-- SECTION B: PRODUCT / STOCK DETAILS -->
-    <div style="display: flex; flex-direction: column; gap: 1rem;">
+    <!-- SECTION B: PRICING METHOD & SIZE-WISE PURCHASE DETAILS -->
+    <div style="display: flex; flex-direction: column; gap: 1.25rem;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
         <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
           <i data-lucide="boxes" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
-          Product & Size-wise Items
+          Product & Size-wise Costing Intake
         </h3>
         <button type="button" id="btn-open-create-prod-modal" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
           <i data-lucide="plus-circle" style="width: 15px; height: 15px; color: var(--brand-primary);"></i>
@@ -4007,17 +3660,54 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         </button>
       </div>
 
+      <!-- Selling Price Calculation Method -->
+      <div style="display: flex; flex-direction: column; gap: 0.75rem; background: var(--bg-surface); padding: 1rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin: 0;">Selling Price Calculation Method:</label>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.65rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; font-weight: 500;">
+            <input type="radio" name="pur-pricing-strategy" value="markup" checked>
+            Percentage Markup (%)
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.65rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; font-weight: 500;">
+            <input type="radio" name="pur-pricing-strategy" value="fixed">
+            Fixed Profit Per Unit (₹)
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.65rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; font-weight: 500;">
+            <input type="radio" name="pur-pricing-strategy" value="manual">
+            Manual Selling Price
+          </label>
+        </div>
+
+        <div id="pur-strategy-input-box" style="padding-top: 0.35rem;">
+          <div id="pur-markup-box" style="display: flex; align-items: center; gap: 0.75rem; max-width: 320px;">
+            <label style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary); white-space: nowrap;">Markup Percentage (%):</label>
+            <input type="number" class="form-input" id="pur-input-markup" value="50" min="0" step="5" style="font-weight: 600;">
+          </div>
+          <div id="pur-fixed-box" style="display: none; align-items: center; gap: 0.75rem; max-width: 320px;">
+            <label style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary); white-space: nowrap;">Fixed Profit Per Unit (₹):</label>
+            <input type="number" class="form-input" id="pur-input-fixed" value="300" min="0" step="10" style="font-weight: 600;">
+          </div>
+          <div id="pur-manual-box" style="display: none; font-size: 0.8rem; color: var(--text-secondary);">
+            Enter individual selling prices directly for each size row below.
+          </div>
+        </div>
+      </div>
+
+      <!-- Items List -->
       <div id="pur-items-container" style="display: flex; flex-direction: column; gap: 0.85rem;"></div>
 
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding-top: 0.5rem;">
         <button type="button" id="btn-add-pur-item" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
           <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
-          <span>Add Another Item</span>
+          <span>Add Another Item / Size Row</span>
         </button>
 
-        <div style="display: flex; gap: 1.5rem; font-size: 0.9rem; font-weight: 600; background: var(--bg-secondary); padding: 0.65rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+        <div style="display: flex; gap: 1.5rem; font-size: 0.875rem; font-weight: 600; background: var(--bg-secondary); padding: 0.75rem 1.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); flex-wrap: wrap;">
           <div>Total Units: <span id="pur-summary-qty" style="color: var(--text-primary); font-weight: 700;">0</span></div>
           <div>Total Purchase Cost: <span id="pur-summary-cost" style="color: var(--brand-primary); font-weight: 700;">₹0</span></div>
+          <div>Est. Selling Value: <span id="pur-summary-sell" style="color: var(--status-success); font-weight: 700;">₹0</span></div>
+          <div>Est. Gross Profit: <span id="pur-summary-profit" style="color: var(--status-success); font-weight: 700;">₹0</span></div>
         </div>
       </div>
     </div>
@@ -4036,6 +3726,17 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   const itemsContainer = mainCard.querySelector('#pur-items-container');
 
+  function calculateSellingPrice(buyPrice, manualVal = null) {
+    const buy = parseFloat(buyPrice) || 0;
+    if (pricingStrategy === 'markup') {
+      return Math.round(buy * (1 + (parseFloat(markupPct) || 0) / 100));
+    } else if (pricingStrategy === 'fixed') {
+      return Math.round(buy + (parseFloat(fixedProfitVal) || 0));
+    } else {
+      return manualVal !== null ? (parseFloat(manualVal) || 0) : Math.round(buy * 1.5);
+    }
+  }
+
   function renderPurchaseItems() {
     itemsContainer.innerHTML = '';
     const productsList = store.data.products || [];
@@ -4046,17 +3747,18 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         productId: defaultP ? defaultP.id : '',
         size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
         qty: 10,
-        buyingPrice: defaultP ? (defaultP.purchasePrice || 0) : 0
+        buyingPrice: defaultP ? (defaultP.purchasePrice || 200) : 200
       });
     }
 
     let overallUnits = 0;
     let overallCost = 0;
+    let overallSellingValue = 0;
 
     purchaseItemsData.forEach((item, index) => {
       const row = document.createElement('div');
-      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1.2fr auto; gap: 0.85rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
-      if (window.innerWidth < 768) row.style.gridTemplateColumns = '1fr 1fr';
+      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1.1fr 1fr 1.1fr 1.1fr 1.1fr 1.1fr auto; gap: 0.75rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
+      if (window.innerWidth < 1000) row.style.gridTemplateColumns = '1fr 1fr';
 
       const selectedProd = productsList.find(p => p.id === item.productId) || productsList[0];
       const hasSizes = selectedProd && selectedProd.variants && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size !== 'Standard');
@@ -4069,12 +3771,17 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       }
 
       const q = parseInt(item.qty, 10) || 0;
-      const bPrice = parseFloat(item.buyingPrice) !== undefined ? parseFloat(item.buyingPrice) : (selectedProd ? (selectedProd.purchasePrice || 0) : 0);
+      const bPrice = parseFloat(item.buyingPrice) !== undefined ? parseFloat(item.buyingPrice) : (selectedProd ? (selectedProd.purchasePrice || 200) : 200);
       item.buyingPrice = bPrice;
-      const rowTotal = q * bPrice;
+      const lineCost = q * bPrice;
+
+      const sPrice = calculateSellingPrice(bPrice, item.manualSellingPrice);
+      item.sellingPrice = sPrice;
+      const lineValue = q * sPrice;
 
       overallUnits += q;
-      overallCost += rowTotal;
+      overallCost += lineCost;
+      overallSellingValue += lineValue;
 
       row.innerHTML = `
         <div class="form-group" style="margin: 0;">
@@ -4092,18 +3799,28 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         </div>
 
         <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity</label>
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Qty</label>
           <input type="number" class="form-input pur-qty-input" min="1" value="${q}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
         </div>
 
         <div class="form-group" style="margin: 0;">
           <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Buying Price (₹)</label>
-          <input type="number" class="form-input pur-price-input" min="0" value="${bPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
+          <input type="number" class="form-input pur-buying-input" min="0" value="${bPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
         </div>
 
         <div class="form-group" style="margin: 0;">
           <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Cost (₹)</label>
-          <input type="text" class="form-input" value="₹${rowTotal.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--brand-primary);">
+          <input type="text" class="form-input" value="₹${lineCost.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--brand-primary);">
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Selling Price (₹)</label>
+          <input type="number" class="form-input pur-selling-input" min="0" value="${sPrice}" ${pricingStrategy !== 'manual' ? 'readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600; background: var(--bg-surface);"' : 'style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;"'}>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Est. Value (₹)</label>
+          <input type="text" class="form-input" value="₹${lineValue.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--status-success);">
         </div>
 
         <button type="button" class="btn btn-ghost pur-remove-btn" style="padding: 0.45rem; color: var(--status-danger);" title="Remove item">
@@ -4114,7 +3831,8 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       const prodSel = row.querySelector('.pur-prod-select');
       const sizeSel = row.querySelector('.pur-size-select');
       const qtyInp = row.querySelector('.pur-qty-input');
-      const priceInp = row.querySelector('.pur-price-input');
+      const buyInp = row.querySelector('.pur-buying-input');
+      const sellInp = row.querySelector('.pur-selling-input');
       const removeBtn = row.querySelector('.pur-remove-btn');
 
       prodSel.addEventListener('change', (e) => {
@@ -4122,10 +3840,10 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         const newP = productsList.find(p => p.id === item.productId);
         if (newP && newP.variants && newP.variants.length > 0) {
           item.size = newP.variants[0].size;
-          item.buyingPrice = newP.variants[0].purchasePrice || newP.purchasePrice || 0;
+          item.buyingPrice = newP.variants[0].purchasePrice || newP.purchasePrice || 200;
         } else {
           item.size = 'Standard';
-          item.buyingPrice = newP ? (newP.purchasePrice || 0) : 0;
+          item.buyingPrice = newP ? (newP.purchasePrice || 200) : 200;
         }
         renderPurchaseItems();
       });
@@ -4145,10 +3863,17 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         renderPurchaseItems();
       });
 
-      priceInp.addEventListener('input', (e) => {
+      buyInp.addEventListener('input', (e) => {
         item.buyingPrice = parseFloat(e.target.value) || 0;
         renderPurchaseItems();
       });
+
+      if (pricingStrategy === 'manual') {
+        sellInp.addEventListener('input', (e) => {
+          item.manualSellingPrice = parseFloat(e.target.value) || 0;
+          renderPurchaseItems();
+        });
+      }
 
       removeBtn.addEventListener('click', () => {
         if (purchaseItemsData.length <= 1) {
@@ -4162,13 +3887,59 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       itemsContainer.appendChild(row);
     });
 
+    const overallProfit = overallSellingValue - overallCost;
+
     const sumQtyEl = mainCard.querySelector('#pur-summary-qty');
     const sumCostEl = mainCard.querySelector('#pur-summary-cost');
+    const sumSellEl = mainCard.querySelector('#pur-summary-sell');
+    const sumProfitEl = mainCard.querySelector('#pur-summary-profit');
+
     if (sumQtyEl) sumQtyEl.textContent = `${overallUnits} units`;
     if (sumCostEl) sumCostEl.textContent = `₹${overallCost.toLocaleString()}`;
+    if (sumSellEl) sumSellEl.textContent = `₹${overallSellingValue.toLocaleString()}`;
+    if (sumProfitEl) sumProfitEl.textContent = `₹${overallProfit.toLocaleString()}`;
 
     if (window.lucide) window.lucide.createIcons();
   }
+
+  // Strategy switching logic
+  function updateStrategyInputs() {
+    const markupBox = mainCard.querySelector('#pur-markup-box');
+    const fixedBox = mainCard.querySelector('#pur-fixed-box');
+    const manualBox = mainCard.querySelector('#pur-manual-box');
+
+    if (pricingStrategy === 'markup') {
+      markupBox.style.display = 'flex';
+      fixedBox.style.display = 'none';
+      manualBox.style.display = 'none';
+    } else if (pricingStrategy === 'fixed') {
+      markupBox.style.display = 'none';
+      fixedBox.style.display = 'flex';
+      manualBox.style.display = 'none';
+    } else {
+      markupBox.style.display = 'none';
+      fixedBox.style.display = 'none';
+      manualBox.style.display = 'block';
+    }
+    renderPurchaseItems();
+  }
+
+  mainCard.querySelectorAll('input[name="pur-pricing-strategy"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      pricingStrategy = e.target.value;
+      updateStrategyInputs();
+    });
+  });
+
+  mainCard.querySelector('#pur-input-markup').addEventListener('input', (e) => {
+    markupPct = parseFloat(e.target.value) || 0;
+    renderPurchaseItems();
+  });
+
+  mainCard.querySelector('#pur-input-fixed').addEventListener('input', (e) => {
+    fixedProfitVal = parseFloat(e.target.value) || 0;
+    renderPurchaseItems();
+  });
 
   renderPurchaseItems();
 
@@ -4179,7 +3950,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       productId: defaultP ? defaultP.id : '',
       size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
       qty: 10,
-      buyingPrice: defaultP ? (defaultP.purchasePrice || 0) : 0
+      buyingPrice: defaultP ? (defaultP.purchasePrice || 200) : 200
     });
     renderPurchaseItems();
   });
