@@ -1470,6 +1470,60 @@ class StoreManager {
     };
   }
 
+    saveProductDefinition(payload) {
+    // Saves product definition ONLY (does not create purchase or add stock)
+    let product = (this.data.products || []).find(p => p.name.toLowerCase() === payload.productName.toLowerCase());
+
+    if (!product) {
+      const newProdId = `PROD-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`;
+      product = {
+        id: newProdId,
+        name: payload.productName,
+        category: payload.category || 'General',
+        brand: payload.brand || 'Unbranded',
+        description: payload.description || '',
+        status: 'Active',
+        minStock: 5,
+        variants: [],
+        totalStock: 0
+      };
+      this.data.products.unshift(product);
+    } else {
+      if (payload.category) product.category = payload.category;
+      if (payload.brand) product.brand = payload.brand;
+      if (payload.description) product.description = payload.description;
+    }
+
+    if (!product.variants) product.variants = [];
+
+    (payload.items || []).forEach(item => {
+      const targetSize = payload.hasSizes ? (item.size || 'Standard') : 'Standard';
+      let variant = product.variants.find(v => v.size === targetSize);
+
+      if (!variant) {
+        variant = {
+          size: targetSize,
+          stock: 0,
+          purchasePrice: item.buyingPrice || 0,
+          sellingPrice: item.sellingPrice || 0,
+          damaged: 0
+        };
+        product.variants.push(variant);
+      } else {
+        if (item.buyingPrice !== undefined) variant.purchasePrice = item.buyingPrice;
+        if (item.sellingPrice !== undefined) variant.sellingPrice = item.sellingPrice;
+      }
+    });
+
+    if (product.variants.length > 0) {
+      product.sellingPrice = product.variants[0].sellingPrice || (payload.items && payload.items[0] ? payload.items[0].sellingPrice : null);
+      product.purchasePrice = product.variants[0].purchasePrice || (payload.items && payload.items[0] ? payload.items[0].buyingPrice : 0);
+    }
+
+    this.save();
+    return { product };
+  }
+
   saveProductAndReceiveStock(payload) {
     // payload: { productName, category, brand, description, hasSizes, pricingMethod, pricingValue, supplier, purchaseDate, notes, items: [...], totalUnits, totalCost, estimatedSellingValue, estimatedGrossProfit }
     let product = (this.data.products || []).find(p => p.name.toLowerCase() === payload.productName.toLowerCase());
@@ -1566,74 +1620,81 @@ class StoreManager {
   }
 
   addStockIn(purchasePayload) {
-    // purchasePayload: { supplier, date, notes, items: [ { productId, isNewProduct, newProductData, size, qty }, ... ] }
+    // purchasePayload: { supplier, date, notes, items: [ { productId, size, qty, buyingPrice, sellingPrice }, ... ] }
     let totalQty = 0;
+    let totalAmount = 0;
     const itemRecords = [];
 
     (purchasePayload.items || []).forEach(item => {
-      totalQty += item.qty;
+      const q = parseInt(item.qty, 10) || 0;
+      const buyPrice = parseFloat(item.buyingPrice) || 0;
+      const sellPrice = parseFloat(item.sellingPrice) || 0;
+      const lineCost = q * buyPrice;
 
-      let product = null;
-      if (item.isNewProduct && item.newProductData) {
-        const newProdId = `PROD-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`;
-        const sizeArr = item.newProductData.sizes || [];
-        const hasSizes = sizeArr.length > 0;
+      totalQty += q;
+      totalAmount += lineCost;
 
-        const variants = hasSizes
-          ? sizeArr.map(s => ({ size: s, stock: s === item.size ? item.qty : 0, damaged: 0 }))
-          : [{ size: 'Standard', stock: item.qty, damaged: 0 }];
-
-        product = {
-          id: newProdId,
-          name: item.newProductData.name,
-          category: item.newProductData.category || 'General',
-          brand: item.newProductData.brand || 'Unbranded',
-          sellingPrice: item.newProductData.sellingPrice !== null && item.newProductData.sellingPrice !== undefined && item.newProductData.sellingPrice !== '' ? parseFloat(item.newProductData.sellingPrice) : null,
-          purchasePrice: Math.round((parseFloat(item.newProductData.sellingPrice) || 1000) * 0.6),
-          minStock: 5,
-          status: 'Active',
-          variants: variants,
-          totalStock: item.qty
-        };
-        this.data.products.unshift(product);
-      } else {
-        product = this.data.products.find(p => p.id === item.productId || p.name.toLowerCase() === (item.productName || '').toLowerCase());
-      }
+      let product = (this.data.products || []).find(p => p.id === item.productId || (p.name && p.name.toLowerCase() === (item.productName || '').toLowerCase()));
 
       if (product) {
         if (!product.variants || product.variants.length === 0) {
-          product.variants = [{ size: 'Standard', stock: 0, damaged: 0 }];
+          product.variants = [{ size: 'Standard', stock: 0, damaged: 0, purchasePrice: buyPrice, sellingPrice: sellPrice }];
         }
 
-        let variant = product.variants.find(v => v.size === item.size);
+        const targetSize = item.size || 'Standard';
+        let variant = product.variants.find(v => v.size === targetSize);
         if (!variant) {
-          variant = { size: item.size || 'Standard', stock: 0, damaged: 0 };
+          variant = { size: targetSize, stock: 0, damaged: 0, purchasePrice: buyPrice, sellingPrice: sellPrice };
           product.variants.push(variant);
         }
 
-        variant.stock = (variant.stock || 0) + item.qty;
+        variant.stock = (variant.stock || 0) + q;
+        if (buyPrice > 0) variant.purchasePrice = buyPrice;
+        if (sellPrice > 0) variant.sellingPrice = sellPrice;
+
         product.totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+        if (sellPrice > 0) product.sellingPrice = sellPrice;
+        if (buyPrice > 0) product.purchasePrice = buyPrice;
 
         itemRecords.push({
           product: product.name,
-          size: item.size || 'Standard',
-          qty: item.qty
+          size: targetSize,
+          qty: q,
+          buyingPrice: buyPrice,
+          sellingPrice: sellPrice,
+          totalCost: lineCost
         });
       }
     });
 
     const purchaseRecord = {
       id: `PUR-${Date.now().toString().slice(-4)}`,
-      supplier: purchasePayload.supplier,
+      supplier: purchasePayload.supplier || 'General Supplier',
       date: purchasePayload.date || new Date().toISOString().split('T')[0],
       notes: purchasePayload.notes || '',
       productCount: itemRecords.length,
       totalQuantity: totalQty,
+      totalAmount: totalAmount,
       status: 'Completed',
       items: itemRecords
     };
 
     this.data.purchases.unshift(purchaseRecord);
+
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+    itemRecords.forEach(ir => {
+      this.data.stockMovements.unshift({
+        id: `MOV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+        date: new Date().toLocaleString(),
+        product: ir.product,
+        sku: `${ir.product.slice(0,3).toUpperCase()}-${ir.size}`,
+        type: 'Stock In',
+        quantity: ir.qty,
+        reference: purchaseRecord.id,
+        user: 'Manager'
+      });
+    });
+
     this.save();
     return purchaseRecord;
   }
@@ -2881,8 +2942,15 @@ function renderAddProductPage(params = {}, onNavigate = null) {
     };
 
     try {
-      const result = store.saveProductAndReceiveStock(payload);
-      toast.show({ message: `Product '${name}' saved successfully & ${totalUnits} units received!`, type: 'success' });
+      let result;
+      if (returnTo === 'add-purchase') {
+        // Create product definition only (stock received on Add Purchase page)
+        result = store.saveProductDefinition(payload);
+        toast.show({ message: `Product '${name}' created! Continue completing purchase details.`, type: 'success' });
+      } else {
+        result = store.saveProductAndReceiveStock(payload);
+        toast.show({ message: `Product '${name}' saved successfully & ${totalUnits} units received!`, type: 'success' });
+      }
       
       if (onNavigate) {
         if (returnTo === 'add-purchase' && result && result.product) {
@@ -3788,14 +3856,6 @@ function renderPurchases(params = {}, onNavigate = null) {
   const actionsDiv = document.createElement('div');
   actionsDiv.style.cssText = 'display: flex; gap: 0.75rem; align-items: center;';
 
-  const btnCreateProd = createButton({
-    text: 'Create New Product',
-    icon: 'plus-circle',
-    variant: 'secondary',
-    size: 'sm',
-    onClick: () => { if (onNavigate) onNavigate('purchases', { action: 'add-product' }); }
-  });
-
   const btnAddPurchase = createButton({
     text: 'Add Purchase',
     icon: 'plus',
@@ -3804,7 +3864,6 @@ function renderPurchases(params = {}, onNavigate = null) {
     onClick: () => { if (onNavigate) onNavigate('purchases', { action: 'add' }); }
   });
 
-  actionsDiv.appendChild(btnCreateProd);
   actionsDiv.appendChild(btnAddPurchase);
   headerDiv.appendChild(actionsDiv);
   container.appendChild(headerDiv);
@@ -3845,7 +3904,7 @@ function renderPurchases(params = {}, onNavigate = null) {
   return container;
 }
 
-// ADD PURCHASE PAGE
+// ADD PURCHASE PAGE (With Draft Preservation & Single Stock Receipt)
 function renderAddPurchasePage(params = {}, onNavigate = null) {
   if (typeof params === 'function') {
     onNavigate = params;
@@ -3854,7 +3913,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
-  // Breadcrumb Header (Purchases / Add Purchase)
+  // 1. Breadcrumb Header
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   headerDiv.appendChild(createBreadcrumb([
@@ -3867,8 +3926,24 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   mainCard.className = 'card';
   mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
 
-  const purchaseItemsData = [];
+  // Restore draft state if navigating back from Create New Product
+  let savedDraft = null;
+  try {
+    const rawDraft = sessionStorage.getItem('add_purchase_draft');
+    if (rawDraft) savedDraft = JSON.parse(rawDraft);
+  } catch (e) {
+    savedDraft = null;
+  }
 
+  const supplierVal = savedDraft && savedDraft.supplier ? savedDraft.supplier : 'Apex Apparel Ltd';
+  const dateVal = savedDraft && savedDraft.date ? savedDraft.date : new Date().toISOString().split('T')[0];
+  const notesVal = savedDraft && savedDraft.notes ? savedDraft.notes : '';
+
+  let purchaseItemsData = (savedDraft && Array.isArray(savedDraft.items) && savedDraft.items.length > 0)
+    ? savedDraft.items
+    : [];
+
+  // If returning with a newly created product
   if (params && params.selectedProductId) {
     const selectedProd = (store.data.products || []).find(p => p.id === params.selectedProductId);
     if (selectedProd) {
@@ -3893,52 +3968,65 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     }
   }
 
+  // Clear draft storage after reading
+  sessionStorage.removeItem('add_purchase_draft');
+
   mainCard.innerHTML = `
     <!-- SECTION A: PURCHASE INFORMATION -->
     <div style="display: flex; flex-direction: column; gap: 1rem;">
-      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="file-text" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
         Purchase Information
       </h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Supplier <span style="color: #ef4444;">*</span></label>
-          <input type="text" id="pur-supplier" class="form-input" placeholder="e.g. Apex Apparel Ltd" value="Apex Apparel Ltd">
+          <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Supplier <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="pur-supplier" class="form-input" placeholder="e.g. Apex Apparel Ltd" value="${supplierVal}">
         </div>
         <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Purchase Date <span style="color: #ef4444;">*</span></label>
-          <input type="date" id="pur-date" class="form-input" value="${new Date().toISOString().split('T')[0]}">
+          <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Purchase Date <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="pur-date" class="form-input" value="${dateVal}">
         </div>
         <div class="form-group" style="grid-column: 1 / -1;">
-          <label class="form-label" style="font-weight: 500;">Notes (Optional)</label>
-          <input type="text" id="pur-notes" class="form-input" placeholder="Optional purchase notes or remarks">
+          <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Notes (Optional)</label>
+          <input type="text" id="pur-notes" class="form-input" placeholder="Invoice # or purchase remarks" value="${notesVal}">
         </div>
       </div>
     </div>
 
     <!-- SECTION B: PRODUCT / STOCK DETAILS -->
     <div style="display: flex; flex-direction: column; gap: 1rem;">
-      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary);">
-          Product / Stock Details
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="boxes" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+          Product & Size-wise Items
         </h3>
-        <button type="button" id="btn-open-create-prod-modal" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem;">
-          <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+        <button type="button" id="btn-open-create-prod-modal" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
+          <i data-lucide="plus-circle" style="width: 15px; height: 15px; color: var(--brand-primary);"></i>
           <span>+ Create New Product</span>
         </button>
       </div>
 
-      <div id="pur-items-container" style="display: flex; flex-direction: column; gap: 1rem;"></div>
+      <div id="pur-items-container" style="display: flex; flex-direction: column; gap: 0.85rem;"></div>
 
-      <button type="button" id="btn-add-pur-item" class="btn btn-secondary btn-sm" style="align-self: start; display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem;">
-        <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
-        <span>Add Another Item</span>
-      </button>
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding-top: 0.5rem;">
+        <button type="button" id="btn-add-pur-item" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
+          <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+          <span>Add Another Item</span>
+        </button>
+
+        <div style="display: flex; gap: 1.5rem; font-size: 0.9rem; font-weight: 600; background: var(--bg-secondary); padding: 0.65rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <div>Total Units: <span id="pur-summary-qty" style="color: var(--text-primary); font-weight: 700;">0</span></div>
+          <div>Total Purchase Cost: <span id="pur-summary-cost" style="color: var(--brand-primary); font-weight: 700;">₹0</span></div>
+        </div>
+      </div>
     </div>
 
     <!-- SECTION C: ACTION BUTTONS -->
     <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem; margin-top: 0.5rem;">
       <button type="button" id="btn-cancel-pur" class="btn btn-secondary">Cancel</button>
-      <button type="button" id="btn-save-pur" class="btn btn-primary" style="padding: 0.65rem 1.5rem;">
+      <button type="button" id="btn-save-pur" class="btn btn-primary" style="padding: 0.65rem 1.5rem; font-weight: 600;">
+        <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
         Save & Receive Stock
       </button>
     </div>
@@ -3957,14 +4045,18 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       purchaseItemsData.push({
         productId: defaultP ? defaultP.id : '',
         size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
-        qty: 10
+        qty: 10,
+        buyingPrice: defaultP ? (defaultP.purchasePrice || 0) : 0
       });
     }
 
+    let overallUnits = 0;
+    let overallCost = 0;
+
     purchaseItemsData.forEach((item, index) => {
       const row = document.createElement('div');
-      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 0.85rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
-      if (window.innerWidth < 600) row.style.gridTemplateColumns = '1fr 1fr';
+      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1.2fr auto; gap: 0.85rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
+      if (window.innerWidth < 768) row.style.gridTemplateColumns = '1fr 1fr';
 
       const selectedProd = productsList.find(p => p.id === item.productId) || productsList[0];
       const hasSizes = selectedProd && selectedProd.variants && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size !== 'Standard');
@@ -3976,27 +4068,45 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         sizeOptionsHtml = `<option value="Standard">Standard (No sizes)</option>`;
       }
 
+      const q = parseInt(item.qty, 10) || 0;
+      const bPrice = parseFloat(item.buyingPrice) !== undefined ? parseFloat(item.buyingPrice) : (selectedProd ? (selectedProd.purchasePrice || 0) : 0);
+      item.buyingPrice = bPrice;
+      const rowTotal = q * bPrice;
+
+      overallUnits += q;
+      overallCost += rowTotal;
+
       row.innerHTML = `
         <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Product</label>
-          <select class="form-select pur-prod-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product</label>
+          <select class="form-select pur-prod-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
             ${productsList.map(p => `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}</option>`).join('')}
           </select>
         </div>
 
         <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Size</label>
-          <select class="form-select pur-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;" ${!hasSizes ? 'disabled' : ''}>
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size</label>
+          <select class="form-select pur-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;" ${!hasSizes ? 'disabled' : ''}>
             ${sizeOptionsHtml}
           </select>
         </div>
 
         <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Quantity</label>
-          <input type="number" class="form-input pur-qty-input" min="1" value="${item.qty || 1}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity</label>
+          <input type="number" class="form-input pur-qty-input" min="1" value="${q}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
         </div>
 
-        <button type="button" class="btn btn-ghost pur-remove-btn" style="padding: 0.45rem; color: var(--text-secondary);" title="Remove item">
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Buying Price (₹)</label>
+          <input type="number" class="form-input pur-price-input" min="0" value="${bPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Cost (₹)</label>
+          <input type="text" class="form-input" value="₹${rowTotal.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--brand-primary);">
+        </div>
+
+        <button type="button" class="btn btn-ghost pur-remove-btn" style="padding: 0.45rem; color: var(--status-danger);" title="Remove item">
           <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
         </button>
       `;
@@ -4004,6 +4114,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       const prodSel = row.querySelector('.pur-prod-select');
       const sizeSel = row.querySelector('.pur-size-select');
       const qtyInp = row.querySelector('.pur-qty-input');
+      const priceInp = row.querySelector('.pur-price-input');
       const removeBtn = row.querySelector('.pur-remove-btn');
 
       prodSel.addEventListener('change', (e) => {
@@ -4011,18 +4122,32 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         const newP = productsList.find(p => p.id === item.productId);
         if (newP && newP.variants && newP.variants.length > 0) {
           item.size = newP.variants[0].size;
+          item.buyingPrice = newP.variants[0].purchasePrice || newP.purchasePrice || 0;
         } else {
           item.size = 'Standard';
+          item.buyingPrice = newP ? (newP.purchasePrice || 0) : 0;
         }
         renderPurchaseItems();
       });
 
       sizeSel.addEventListener('change', (e) => {
         item.size = e.target.value;
+        const selectedP = productsList.find(p => p.id === item.productId);
+        if (selectedP && selectedP.variants) {
+          const v = selectedP.variants.find(varItem => varItem.size === item.size);
+          if (v && v.purchasePrice) item.buyingPrice = v.purchasePrice;
+        }
+        renderPurchaseItems();
       });
 
       qtyInp.addEventListener('input', (e) => {
         item.qty = parseInt(e.target.value, 10) || 0;
+        renderPurchaseItems();
+      });
+
+      priceInp.addEventListener('input', (e) => {
+        item.buyingPrice = parseFloat(e.target.value) || 0;
+        renderPurchaseItems();
       });
 
       removeBtn.addEventListener('click', () => {
@@ -4037,6 +4162,11 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       itemsContainer.appendChild(row);
     });
 
+    const sumQtyEl = mainCard.querySelector('#pur-summary-qty');
+    const sumCostEl = mainCard.querySelector('#pur-summary-cost');
+    if (sumQtyEl) sumQtyEl.textContent = `${overallUnits} units`;
+    if (sumCostEl) sumCostEl.textContent = `₹${overallCost.toLocaleString()}`;
+
     if (window.lucide) window.lucide.createIcons();
   }
 
@@ -4048,34 +4178,47 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     purchaseItemsData.push({
       productId: defaultP ? defaultP.id : '',
       size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
-      qty: 10
+      qty: 10,
+      buyingPrice: defaultP ? (defaultP.purchasePrice || 0) : 0
     });
     renderPurchaseItems();
   });
 
-  // Create New Product Modal Option
+  // Preserve Draft State & Navigate to Create New Product
   mainCard.querySelector('#btn-open-create-prod-modal').addEventListener('click', () => {
-    openCreateProductModalInline((newProd) => {
-      purchaseItemsData.push({
-        productId: newProd.id,
-        size: newProd.variants && newProd.variants.length > 0 ? newProd.variants[0].size : 'Standard',
-        qty: 10
-      });
-      renderPurchaseItems();
-    });
+    const supplier = mainCard.querySelector('#pur-supplier').value.trim();
+    const date = mainCard.querySelector('#pur-date').value;
+    const notes = mainCard.querySelector('#pur-notes').value.trim();
+
+    try {
+      sessionStorage.setItem('add_purchase_draft', JSON.stringify({
+        supplier,
+        date,
+        notes,
+        items: purchaseItemsData
+      }));
+    } catch (e) {
+      console.warn('Draft save error:', e);
+    }
+
+    if (onNavigate) {
+      onNavigate('purchases', { action: 'add-product', returnTo: 'add-purchase' });
+    }
   });
 
   mainCard.querySelector('#btn-cancel-pur').addEventListener('click', () => {
+    sessionStorage.removeItem('add_purchase_draft');
     if (onNavigate) onNavigate('purchases');
   });
 
+  // Complete Purchase & Single Stock Receipt
   mainCard.querySelector('#btn-save-pur').addEventListener('click', () => {
     const supplier = mainCard.querySelector('#pur-supplier').value.trim();
     const date = mainCard.querySelector('#pur-date').value;
     const notes = mainCard.querySelector('#pur-notes').value.trim();
 
     if (!supplier) {
-      toast.show({ message: 'Supplier is required.', type: 'danger' });
+      toast.show({ message: 'Supplier name is required.', type: 'danger' });
       return;
     }
 
@@ -4097,7 +4240,8 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       items: purchaseItemsData
     });
 
-    toast.show({ message: 'Stock received and inventory updated successfully.', type: 'success' });
+    sessionStorage.removeItem('add_purchase_draft');
+    toast.show({ message: 'Purchase recorded and stock received into inventory successfully!', type: 'success' });
     if (onNavigate) onNavigate('purchases');
   });
 
