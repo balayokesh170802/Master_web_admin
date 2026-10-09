@@ -1548,7 +1548,7 @@ class StoreManager {
     this.data.purchases.unshift(purchaseRecord);
     this.save();
     return { product, purchase: purchaseRecord };
-  },
+  }
 
   addStockIn(purchasePayload) {
     // purchasePayload: { supplier, date, notes, items: [ { productId, isNewProduct, newProductData, size, qty }, ... ] }
@@ -4515,7 +4515,7 @@ class MasterWebAdminApp {
     document.documentElement.setAttribute('data-theme', nextTheme);
     localStorage.setItem('master_web_admin_theme', nextTheme);
     this.render();
-  };
+  }
 
   navigateTo = (navId, params = {}) => {
     let newHash = '#' + navId;
@@ -4528,7 +4528,7 @@ class MasterWebAdminApp {
       history.pushState(null, '', newHash);
     }
     this.render();
-  };
+  }
 
   render() {
     if (!this.appEl) return;
