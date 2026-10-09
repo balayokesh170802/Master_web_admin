@@ -3000,7 +3000,7 @@ function renderOverview(onNavigate) {
   return container;
 }
 
-// INVENTORY PAGE (PRODUCT + STOCK SOURCE OF TRUTH)
+// INVENTORY PAGE (GROUPED PRODUCTS + EXPANDABLE SIZE DETAILS)
 function renderInventory(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
@@ -3008,6 +3008,7 @@ function renderInventory(params = {}, onNavigate = null) {
   let searchQuery = '';
   let selectedCategory = 'ALL';
   let selectedStatus = params.status || 'ALL';
+  const expandedProductIds = new Set();
 
   // 1. Breadcrumb Header
   const headerDiv = document.createElement('div');
@@ -3043,7 +3044,7 @@ function renderInventory(params = {}, onNavigate = null) {
       <div style="display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: center; flex: 1;">
         <div style="position: relative; flex: 1; min-width: 200px; max-width: 320px;">
           <i data-lucide="search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-secondary);"></i>
-          <input type="text" class="form-input search-input" placeholder="Search product or brand..." style="padding-left: 32px; font-size: 0.85rem;">
+          <input type="text" class="form-input search-input" placeholder="Search product name or brand..." style="padding-left: 32px; font-size: 0.85rem;">
         </div>
 
         <select class="form-select category-filter" style="width: auto; min-width: 140px; font-size: 0.85rem;">
@@ -3061,13 +3062,13 @@ function renderInventory(params = {}, onNavigate = null) {
       </div>
 
       <div style="font-size: 0.85rem; color: var(--text-secondary);">
-        Total: <strong id="inv-count-label" style="color: var(--text-primary);">${(store.data.products || []).length}</strong> Unique Products
+        Total: <strong id="inv-count-label" style="color: var(--text-primary);">${(store.data.products || []).length}</strong> Products
       </div>
     </div>
   `;
   container.appendChild(filtersCard);
 
-  // 3. Main Inventory Table Card
+  // 3. Main Grouped Inventory Table Card
   const tableCard = document.createElement('div');
   tableCard.className = 'card';
 
@@ -3080,9 +3081,8 @@ function renderInventory(params = {}, onNavigate = null) {
           <th>Product Name</th>
           <th>Category</th>
           <th>Brand</th>
-          <th>Size</th>
           <th>Selling Price</th>
-          <th>Current Stock</th>
+          <th>Total Stock</th>
           <th>Status</th>
           <th>Actions</th>
         </tr>
@@ -3107,62 +3107,71 @@ function renderInventory(params = {}, onNavigate = null) {
     tbody.innerHTML = '';
     const products = store.data.products || [];
 
-    // Flatten products into product-size inventory rows
-    const rows = [];
-    products.forEach(p => {
+    const filteredProducts = products.filter(p => {
       const matchQuery = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || (p.brand || '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchCat = selectedCategory === 'ALL' || p.category === selectedCategory;
 
-      if (matchQuery && matchCat) {
-        const variants = (p.variants && p.variants.length > 0) ? p.variants : [{ size: 'Standard', stock: p.totalStock || 0 }];
-        variants.forEach(v => {
-          let itemStatus = p.status || 'Active';
-          if (v.stock === 0) itemStatus = 'Out of Stock';
-          else if (v.stock <= (p.minStock || 5)) itemStatus = 'Low Stock';
+      const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+      const isLowStock = (p.variants || []).some(v => (v.stock || 0) > 0 && (v.stock || 0) <= (p.minStock || 5));
+      const isOutOfStock = totalStock === 0;
 
-          let matchStat = true;
-          if (selectedStatus === 'Active') matchStat = (p.status === 'Active');
-          else if (selectedStatus === 'Inactive') matchStat = (p.status === 'Inactive');
-          else if (selectedStatus === 'LOW') matchStat = (v.stock > 0 && v.stock <= (p.minStock || 5));
-          else if (selectedStatus === 'OUT') matchStat = (v.stock === 0);
+      let matchStat = true;
+      if (selectedStatus === 'Active') matchStat = (p.status === 'Active');
+      else if (selectedStatus === 'Inactive') matchStat = (p.status === 'Inactive');
+      else if (selectedStatus === 'LOW') matchStat = isLowStock;
+      else if (selectedStatus === 'OUT') matchStat = isOutOfStock;
 
-          if (matchStat) {
-            rows.push({
-              product: p,
-              size: v.size || 'Standard',
-              stock: v.stock || 0,
-              status: itemStatus
-            });
-          }
-        });
-      }
+      return matchQuery && matchCat && matchStat;
     });
 
-    countLabel.textContent = products.length;
+    countLabel.textContent = filteredProducts.length;
 
-    if (rows.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No inventory stock items match your criteria.</td></tr>`;
+    if (filteredProducts.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No products match your criteria.</td></tr>`;
       return;
     }
 
-    rows.forEach(r => {
-      const p = r.product;
+    filteredProducts.forEach(p => {
+      const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+      const hasSizes = p.variants && p.variants.length > 0 && p.variants.some(v => v.size !== 'Standard');
+      const isExpanded = expandedProductIds.has(p.id);
+
+      let itemStatus = p.status || 'Active';
+      if (p.status !== 'Inactive') {
+        if (totalStock === 0) itemStatus = 'Out of Stock';
+        else if ((p.variants || []).some(v => (v.stock || 0) > 0 && (v.stock || 0) <= (p.minStock || 5))) itemStatus = 'Low Stock';
+      }
+
       const isPriceSet = p.sellingPrice !== null && p.sellingPrice !== undefined && p.sellingPrice > 0;
       const priceDisplay = isPriceSet ? `₹${p.sellingPrice.toLocaleString()}` : `<span style="color: var(--text-secondary); font-style: italic;">Price Not Set</span>`;
 
+      // Main Product Row
       const tr = document.createElement('tr');
+      tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
+
+      const chevronIcon = hasSizes
+        ? `<button type="button" class="expand-toggle-btn" style="background: none; border: none; padding: 2px 4px; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; margin-right: 6px;">
+             <i data-lucide="${isExpanded ? 'chevron-down' : 'chevron-right'}" style="width: 16px; height: 16px;"></i>
+           </button>`
+        : '';
+
       tr.innerHTML = `
         <td>
-          <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">${p.name}</div>
+          <div style="display: flex; align-items: center; gap: 0.25rem;">
+            ${chevronIcon}
+            <div>
+              <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">${p.name}</div>
+              ${hasSizes ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${p.variants.length} sizes available</div>` : ''}
+            </div>
+          </div>
         </td>
         <td style="color: var(--text-secondary);">${p.category || 'General'}</td>
         <td style="color: var(--text-secondary);">${p.brand || 'Unbranded'}</td>
-        <td><span style="font-weight: 500; padding: 0.2rem 0.5rem; background: var(--bg-secondary); border-radius: 4px; font-size: 0.8rem;">${r.size}</span></td>
         <td style="font-weight: 600;">${priceDisplay}</td>
-        <td style="font-weight: 600; color: ${r.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${r.stock} units</td>
-        <td>${createBadge({ label: r.status, variant: 'secondary' }).outerHTML}</td>
+        <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${totalStock} units</td>
+        <td>${createBadge({ label: itemStatus, variant: 'secondary' }).outerHTML}</td>
         <td>
-          <div style="display: flex; gap: 0.4rem; align-items: center;">
+          <div style="display: flex; gap: 0.4rem; align-items: center;" onclick="event.stopPropagation();">
             <button type="button" class="btn btn-secondary btn-sm view-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">View</button>
             <button type="button" class="btn btn-secondary btn-sm edit-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">Edit</button>
             <button type="button" class="btn btn-secondary btn-sm adjust-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">Adjust</button>
@@ -3170,19 +3179,75 @@ function renderInventory(params = {}, onNavigate = null) {
         </td>
       `;
 
-      tr.querySelector('.view-inv-btn').addEventListener('click', () => {
+      // Expand/collapse toggle click
+      if (hasSizes) {
+        const toggleBtn = tr.querySelector('.expand-toggle-btn');
+        const handleToggle = (e) => {
+          e.stopPropagation();
+          if (expandedProductIds.has(p.id)) expandedProductIds.delete(p.id);
+          else expandedProductIds.add(p.id);
+          renderInventoryTable();
+        };
+
+        if (toggleBtn) toggleBtn.addEventListener('click', handleToggle);
+        tr.addEventListener('click', (e) => {
+          if (!e.target.closest('button')) handleToggle(e);
+        });
+      }
+
+      tr.querySelector('.view-inv-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
         openProductDetailsModal(p);
       });
 
-      tr.querySelector('.edit-inv-btn').addEventListener('click', () => {
+      tr.querySelector('.edit-inv-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
         openEditProductModal(p, () => renderInventoryTable());
       });
 
-      tr.querySelector('.adjust-inv-btn').addEventListener('click', () => {
-        openRowStockAdjustModal(p, r.size, r.stock, () => renderInventoryTable());
+      tr.querySelector('.adjust-inv-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        openRowStockAdjustModal(p, null, () => renderInventoryTable());
       });
 
       tbody.appendChild(tr);
+
+      // Expandable Size Breakdown Sub-Row
+      if (hasSizes && isExpanded) {
+        const subTr = document.createElement('tr');
+        subTr.className = 'size-breakdown-row';
+        subTr.innerHTML = `
+          <td colspan="7" style="padding: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+            <div style="padding: 0.85rem 1.25rem; display: flex; flex-direction: column; gap: 0.65rem;">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 0.775rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);">
+                  Size & Stock Breakdown for ${p.name}
+                </span>
+                <span style="font-size: 0.75rem; color: var(--text-secondary);">Click any size to adjust its stock</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center;">
+                ${p.variants.map(v => `
+                  <div class="size-stock-pill" data-size="${v.size}" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.75rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.825rem; cursor: pointer; transition: all 0.15s ease;">
+                    <span style="font-weight: 600; color: var(--text-primary);">${v.size}:</span>
+                    <span style="font-weight: 600; color: ${v.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${v.stock} units</span>
+                    ${v.stock === 0 ? '<span style="font-size: 0.7rem; color: var(--text-secondary);">(Out of Stock)</span>' : ''}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </td>
+        `;
+
+        subTr.querySelectorAll('.size-stock-pill').forEach(pill => {
+          pill.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const sz = pill.getAttribute('data-size');
+            openRowStockAdjustModal(p, sz, () => renderInventoryTable());
+          });
+        });
+
+        tbody.appendChild(subTr);
+      }
     });
 
     if (window.lucide) window.lucide.createIcons();
@@ -3290,8 +3355,8 @@ function openEditProductModal(product, onSaved) {
   };
 }
 
-// ROW MANUAL STOCK ADJUSTMENT MODAL
-function openRowStockAdjustModal(product, size, currentStock, onAdjusted) {
+// ROW MANUAL STOCK ADJUSTMENT MODAL (SIZE-SELECTABLE)
+function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null) {
   const existingModal = document.getElementById('modal-adjust-row-stock');
   if (existingModal) existingModal.remove();
 
@@ -3299,12 +3364,35 @@ function openRowStockAdjustModal(product, size, currentStock, onAdjusted) {
   modal.id = 'modal-adjust-row-stock';
   modal.className = 'modal-overlay active';
 
+  const variants = (product.variants && product.variants.length > 0) ? product.variants : [{ size: 'Standard', stock: product.totalStock || 0 }];
+  let selectedSize = initialSize || variants[0].size;
+  let selectedVariant = variants.find(v => v.size === selectedSize) || variants[0];
+
   let adjType = 'ADD';
   let adjQty = 1;
 
+  function getCurrentStock() {
+    return selectedVariant ? (selectedVariant.stock || 0) : 0;
+  }
+
   function calculateNewStock() {
-    if (adjType === 'ADD') return currentStock + adjQty;
-    return Math.max(0, currentStock - adjQty);
+    const cur = getCurrentStock();
+    if (adjType === 'ADD') return cur + adjQty;
+    return Math.max(0, cur - adjQty);
+  }
+
+  const hasSizes = variants.length > 1 || (variants.length === 1 && variants[0].size !== 'Standard');
+
+  let sizeSelectHtml = '';
+  if (hasSizes) {
+    sizeSelectHtml = `
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 500;">Select Size Variant</label>
+        <select id="adj-size-select" class="form-select">
+          ${variants.map(v => `<option value="${v.size}" ${v.size === selectedSize ? 'selected' : ''}>Size ${v.size} (Current: ${v.stock} units)</option>`).join('')}
+        </select>
+      </div>
+    `;
   }
 
   modal.innerHTML = `
@@ -3320,10 +3408,12 @@ function openRowStockAdjustModal(product, size, currentStock, onAdjusted) {
         <div style="padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); font-size: 0.875rem;">
           <div style="font-weight: 600; color: var(--text-primary); font-size: 0.95rem; margin-bottom: 4px;">${product.name}</div>
           <div style="color: var(--text-secondary); display: flex; gap: 1rem;">
-            <span>Size: <strong>${size}</strong></span>
-            <span>Current Stock: <strong>${currentStock} units</strong></span>
+            <span>Category: <strong>${product.category || 'General'}</strong></span>
+            <span>Current Stock: <strong id="adj-current-stock-label">${getCurrentStock()} units</strong></span>
           </div>
         </div>
+
+        ${sizeSelectHtml}
 
         <div class="form-group">
           <label class="form-label" style="font-weight: 500;">Adjustment Type</label>
@@ -3368,17 +3458,25 @@ function openRowStockAdjustModal(product, size, currentStock, onAdjusted) {
   modal.querySelector('.modal-close-btn').onclick = closeModal;
   modal.querySelector('.cancel-modal-btn').onclick = closeModal;
 
+  const sizeSel = modal.querySelector('#adj-size-select');
   const typeSel = modal.querySelector('#adj-type-select');
   const qtyInp = modal.querySelector('#adj-qty-input');
+  const curStockLabel = modal.querySelector('#adj-current-stock-label');
   const newStockLabel = modal.querySelector('#adj-new-stock-label');
 
   function updateCalc() {
+    if (sizeSel) {
+      selectedSize = sizeSel.value;
+      selectedVariant = variants.find(v => v.size === selectedSize) || variants[0];
+    }
     adjType = typeSel.value;
     adjQty = parseInt(qtyInp.value, 10) || 0;
-    const newStock = calculateNewStock();
-    newStockLabel.textContent = `${newStock} units`;
+
+    curStockLabel.textContent = `${getCurrentStock()} units`;
+    newStockLabel.textContent = `${calculateNewStock()} units`;
   }
 
+  if (sizeSel) sizeSel.onchange = updateCalc;
   typeSel.onchange = updateCalc;
   qtyInp.oninput = updateCalc;
 
@@ -3391,26 +3489,27 @@ function openRowStockAdjustModal(product, size, currentStock, onAdjusted) {
       return;
     }
 
-    const variant = (product.variants || []).find(v => v.size === size) || (product.variants || [])[0];
-    if (variant) {
+    if (selectedVariant) {
+      const curStock = selectedVariant.stock || 0;
       if (adjType === 'ADD') {
-        variant.stock = (variant.stock || 0) + finalQty;
+        selectedVariant.stock = curStock + finalQty;
       } else {
-        if (finalQty > variant.stock) {
-          toast.show({ message: `Cannot remove more than current stock (${variant.stock} units).`, type: 'danger' });
+        if (finalQty > curStock) {
+          toast.show({ message: `Cannot remove more than current stock (${curStock} units).`, type: 'danger' });
           return;
         }
-        variant.stock = variant.stock - finalQty;
+        selectedVariant.stock = curStock - finalQty;
       }
       product.totalStock = (product.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
       store.save();
     }
 
-    toast.show({ message: `Stock updated successfully.`, type: 'success' });
+    toast.show({ message: `Stock updated for ${product.name} (${selectedSize}).`, type: 'success' });
     closeModal();
     if (onAdjusted) onAdjusted();
   };
 }
+
 
 // PURCHASES PAGE
 function renderPurchases(params = {}, onNavigate = null) {
