@@ -1469,7 +1469,87 @@ class StoreManager {
     };
   }
 
-addStockIn(purchasePayload) {
+  saveProductAndReceiveStock(payload) {
+    // payload: { productName, category, brand, description, hasSizes, pricingMethod, pricingValue, supplier, purchaseDate, notes, items: [...], totalUnits, totalCost, estimatedSellingValue, estimatedGrossProfit }
+    let product = (this.data.products || []).find(p => p.name.toLowerCase() === payload.productName.toLowerCase());
+
+    if (!product) {
+      const newProdId = `PROD-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`;
+      product = {
+        id: newProdId,
+        name: payload.productName,
+        category: payload.category || 'General',
+        brand: payload.brand || 'Unbranded',
+        description: payload.description || '',
+        status: 'Active',
+        minStock: 5,
+        variants: [],
+        totalStock: 0
+      };
+      this.data.products.unshift(product);
+    } else {
+      if (payload.category) product.category = payload.category;
+      if (payload.brand) product.brand = payload.brand;
+      if (payload.description) product.description = payload.description;
+    }
+
+    if (!product.variants) product.variants = [];
+
+    (payload.items || []).forEach(item => {
+      const targetSize = payload.hasSizes ? (item.size || 'Standard') : 'Standard';
+      let variant = product.variants.find(v => v.size === targetSize);
+
+      if (!variant) {
+        variant = {
+          size: targetSize,
+          stock: 0,
+          purchasePrice: item.buyingPrice || 0,
+          sellingPrice: item.sellingPrice || 0,
+          damaged: 0
+        };
+        product.variants.push(variant);
+      }
+
+      variant.stock = (variant.stock || 0) + item.qty;
+      variant.purchasePrice = item.buyingPrice || variant.purchasePrice || 0;
+      variant.sellingPrice = item.sellingPrice || variant.sellingPrice || 0;
+    });
+
+    if (product.variants.length > 0) {
+      product.sellingPrice = product.variants[0].sellingPrice || (payload.items[0] ? payload.items[0].sellingPrice : null);
+      product.purchasePrice = product.variants[0].purchasePrice || (payload.items[0] ? payload.items[0].buyingPrice : 0);
+    }
+
+    product.totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+
+    const purchaseRecord = {
+      id: `PUR-${Date.now().toString().slice(-4)}`,
+      supplier: payload.supplier || 'General Supplier',
+      date: payload.purchaseDate || new Date().toISOString().split('T')[0],
+      notes: payload.notes || '',
+      productName: product.name,
+      productCount: payload.items.length,
+      totalQuantity: payload.totalUnits,
+      totalAmount: payload.totalCost,
+      estimatedSellingValue: payload.estimatedSellingValue,
+      estimatedGrossProfit: payload.estimatedGrossProfit,
+      status: 'Completed',
+      items: payload.items.map(i => ({
+        size: i.size || 'Standard',
+        qty: i.qty,
+        buyingPrice: i.buyingPrice,
+        totalCost: i.totalCost,
+        sellingPrice: i.sellingPrice,
+        totalValue: i.totalValue
+      }))
+    };
+
+    this.data.purchases.unshift(purchaseRecord);
+    this.save();
+    return { product, purchase: purchaseRecord };
+  },
+
+  addStockIn(purchasePayload) {
     // purchasePayload: { supplier, date, notes, items: [ { productId, isNewProduct, newProductData, size, qty }, ... ] }
     let totalQty = 0;
     const itemRecords = [];
@@ -1801,23 +1881,14 @@ const toast = {
 function openProductDetailsModal(productInput) {
   let product = productInput;
   if (typeof productInput === 'string') {
-    product = store.data.products.find(p => p.name.toLowerCase() === productInput.toLowerCase() || p.id.toLowerCase() === productInput.toLowerCase());
+    product = (store.data.products || []).find(p => p.name.toLowerCase() === productInput.toLowerCase() || p.id.toLowerCase() === productInput.toLowerCase());
     if (!product) product = store.data.products[0];
   }
   if (!product) return;
 
-  const unitsSold = store.data.sales.reduce((sum, s) => {
-    return sum + s.items.filter(i => i.product === product.name).reduce((iSum, i) => iSum + i.qty, 0);
-  }, 0);
-
-  const salesRevenue = store.data.sales.reduce((sum, s) => {
-    return sum + s.items.filter(i => i.product === product.name).reduce((iSum, i) => iSum + i.amount, 0);
-  }, 0);
-
-  const totalStock = product.variants.reduce((sum, v) => sum + v.stock, 0);
-  const margin = Math.round(((product.sellingPrice - product.purchasePrice) / product.sellingPrice) * 100);
-
-  const productSales = store.data.sales.filter(s => s.items.some(i => i.product === product.name));
+  const variants = product.variants || [{ size: 'Standard', stock: product.totalStock || 0, purchasePrice: product.purchasePrice || 0, sellingPrice: product.sellingPrice || 0 }];
+  const totalStock = variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+  const totalCostValue = variants.reduce((sum, v) => sum + ((v.stock || 0) * (v.purchasePrice || product.purchasePrice || 0)), 0);
 
   const modalEl = document.createElement('div');
   modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
@@ -1826,88 +1897,83 @@ function openProductDetailsModal(productInput) {
     { label: 'Inventory', target: 'inventory' },
     { label: 'Product Details' }
   ], (target, params) => {
-    modal.closeModal();
+    if (modalObj && modalObj.closeModal) modalObj.closeModal();
     if (window.appInstance) window.appInstance.navigateTo(target, params);
   });
   modalEl.appendChild(modalBreadcrumb);
 
   const innerContent = document.createElement('div');
   innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
+
+  const isPriceSet = product.sellingPrice !== null && product.sellingPrice !== undefined && product.sellingPrice > 0;
+  const priceDisplay = isPriceSet ? `₹${product.sellingPrice.toLocaleString()}` : 'Price Not Set';
+
   innerContent.innerHTML = `
-    <!-- Top Metadata Header -->
     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color);">
       <div>
         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-          <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary);">${product.name}</h3>
-          ${createBadge({ label: product.status, variant: 'success' }).outerHTML}
+          <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin: 0;">${product.name}</h3>
+          ${createBadge({ label: product.status || 'Active', variant: 'secondary' }).outerHTML}
         </div>
         <div style="font-size: 0.8rem; color: var(--text-secondary); display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-          <span>Category: <strong>${product.category}</strong></span>
-          <span>Brand: <strong>${product.brand}</strong></span>
+          <span>Category: <strong>${product.category || 'General'}</strong></span>
+          <span>Brand: <strong>${product.brand || 'Unbranded'}</strong></span>
         </div>
       </div>
     </div>
 
-    <!-- Metric Summary Grid -->
-    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem;">
-      <div style="background: var(--bg-secondary); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-        <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Selling Price</div>
-        <div style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary);">₹${product.sellingPrice.toLocaleString()}</div>
-        <div style="font-size: 0.7rem; color: var(--text-secondary);">Cost: ₹${product.purchasePrice.toLocaleString()} (${margin}% margin)</div>
-      </div>
-      <div style="background: var(--bg-secondary); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-        <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Current Stock</div>
-        <div style="font-size: 1.15rem; font-weight: 700; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${totalStock} units</div>
-        <div style="font-size: 0.7rem; color: var(--text-secondary);">Min stock level: ${product.minStock}</div>
-      </div>
-      <div style="background: var(--bg-secondary); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-        <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Units Sold</div>
-        <div style="font-size: 1.15rem; font-weight: 700; color: var(--brand-primary);">${unitsSold} units</div>
-        <div style="font-size: 0.7rem; color: var(--text-secondary);">Across ${productSales.length} bills</div>
-      </div>
-      <div style="background: var(--bg-secondary); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-        <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Sales Revenue</div>
-        <div style="font-size: 1.15rem; font-weight: 700; color: var(--status-success);">₹${salesRevenue.toLocaleString('en-IN')}</div>
-        <div style="font-size: 0.7rem; color: var(--text-secondary);">Total revenue</div>
-      </div>
-    </div>
-
-    <!-- Product Description -->
-    <div style="font-size: 0.825rem; color: var(--text-secondary); background: var(--bg-surface); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-      <strong style="color: var(--text-primary);">Description:</strong> ${product.description || 'No description provided.'}
-    </div>
-
-    <!-- Product Variants Table -->
-    <div>
-      <h4 style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-primary);">Variant Inventory Stock</h4>
+    <!-- Size & Pricing Breakdown Table -->
+    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin: 0;">Size-Wise Stock & Pricing Breakdown</h4>
       <div class="table-responsive">
-        <table class="admin-table" style="font-size: 0.825rem;">
+        <table class="admin-table">
           <thead>
             <tr>
               <th>Size</th>
-              <th>Available Stock</th>
-              <th>Damaged</th>
-              <th>Days in Stock</th>
+              <th>Current Stock</th>
+              <th>Buying Price / Unit (₹)</th>
+              <th>Selling Price / Unit (₹)</th>
+              <th>Total Stock Value (₹)</th>
             </tr>
           </thead>
           <tbody>
-            ${product.variants.map(v => `
+            ${variants.map(v => `
               <tr>
-                <td style="font-weight: 600;">${v.size === 'Standard' ? 'No Size (Standard)' : v.size}</td>
-                <td style="font-weight: 600; color: ${v.stock === 0 ? 'var(--status-danger)' : (v.stock <= product.minStock ? 'var(--status-warning)' : 'var(--text-primary)')};">${v.stock} units</td>
-                <td>${v.damaged > 0 ? `<span class="badge badge-danger">${v.damaged}</span>` : '0'}</td>
-                <td style="color: var(--text-secondary);">${v.daysInStock || 0} days</td>
+                <td><span style="font-weight: 600; padding: 0.2rem 0.5rem; background: var(--bg-secondary); border-radius: 4px; font-size: 0.8rem;">${v.size || 'Standard'}</span></td>
+                <td style="font-weight: 600; color: ${v.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${v.stock || 0} units</td>
+                <td style="color: var(--text-secondary);">₹${(v.purchasePrice || product.purchasePrice || 0).toLocaleString()}</td>
+                <td style="font-weight: 600;">${v.sellingPrice ? '₹' + v.sellingPrice.toLocaleString() : priceDisplay}</td>
+                <td style="font-weight: 600;">₹${((v.stock || 0) * (v.sellingPrice || product.sellingPrice || 0)).toLocaleString()}</td>
               </tr>
             `).join('')}
           </tbody>
         </table>
       </div>
     </div>
+
+    ${product.description ? `
+      <div style="display: flex; flex-direction: column; gap: 0.35rem; background: var(--bg-secondary); padding: 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+        <strong style="font-size: 0.85rem; color: var(--text-primary);">Description:</strong>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0; line-height: 1.4;">${product.description}</p>
+      </div>
+    ` : ''}
   `;
 
-  const closeBtn = createButton({ text: 'Close', variant: 'secondary', onClick: () => modal.closeModal() });
-  const modal = createModal({ title: `Product Details — ${product.name}`, bodyElement: modalEl, footerButtons: [closeBtn] });
+  modalEl.appendChild(innerContent);
+
+  const modalObj = createModal({
+    title: 'Product Inventory Details',
+    bodyElement: modalEl,
+    footerButtons: [
+      createButton({
+        text: 'Close',
+        variant: 'secondary',
+        onClick: () => modalObj.closeModal()
+      })
+    ]
+  });
 }
+
 
 function openSaleDetailsModal(sale) {
   const modalEl = document.createElement('div');
@@ -3513,6 +3579,9 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
 
 // PURCHASES PAGE
 function renderPurchases(params = {}, onNavigate = null) {
+  if (params && (params.action === 'add-product' || params.view === 'add-product')) {
+    return renderAddProductPage(onNavigate);
+  }
   if (params && (params.action === 'add' || params.view === 'add')) {
     return renderAddPurchasePage(onNavigate);
   }
@@ -3526,6 +3595,17 @@ function renderPurchases(params = {}, onNavigate = null) {
     { label: 'Purchases' }
   ], onNavigate));
 
+  const actionsDiv = document.createElement('div');
+  actionsDiv.style.cssText = 'display: flex; gap: 0.75rem; align-items: center;';
+
+  const btnCreateProd = createButton({
+    text: 'Create New Product',
+    icon: 'plus-circle',
+    variant: 'secondary',
+    size: 'sm',
+    onClick: () => { if (onNavigate) onNavigate('purchases', { action: 'add-product' }); }
+  });
+
   const btnAddPurchase = createButton({
     text: 'Add Purchase',
     icon: 'plus',
@@ -3533,7 +3613,10 @@ function renderPurchases(params = {}, onNavigate = null) {
     size: 'sm',
     onClick: () => { if (onNavigate) onNavigate('purchases', { action: 'add' }); }
   });
-  headerDiv.appendChild(btnAddPurchase);
+
+  actionsDiv.appendChild(btnCreateProd);
+  actionsDiv.appendChild(btnAddPurchase);
+  headerDiv.appendChild(actionsDiv);
   container.appendChild(headerDiv);
 
   const mainCard = document.createElement('div');
@@ -3545,8 +3628,9 @@ function renderPurchases(params = {}, onNavigate = null) {
           <tr>
             <th>Supplier</th>
             <th>Date</th>
-            <th>Items Count</th>
+            <th>Product / Items</th>
             <th>Total Qty</th>
+            <th>Total Cost</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -3555,8 +3639,9 @@ function renderPurchases(params = {}, onNavigate = null) {
             <tr>
               <td style="font-weight: 500; color: var(--text-primary);">${p.supplier || 'Supplier'}</td>
               <td style="color: var(--text-secondary);">${p.date || '-'}</td>
-              <td>${p.productCount || (p.items ? p.items.length : 1)} items</td>
+              <td>${p.productName ? p.productName : (p.productCount || 1) + ' items'}</td>
               <td style="font-weight: 600; color: var(--text-primary);">${p.totalQuantity || 0} units</td>
+              <td style="font-weight: 600;">₹${(p.totalAmount || 0).toLocaleString()}</td>
               <td>${createBadge({ label: p.status || 'Completed', variant: 'secondary' }).outerHTML}</td>
             </tr>
           `).join('')}
