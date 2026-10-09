@@ -1457,7 +1457,7 @@ class StoreManager {
       });
     });
 
-    const todaySales = this.data.sales.reduce((sum, s) => sum + s.totalAmount, 0);
+    const todaySales = (this.data.sales || []).reduce((sum, s) => sum + (s && s.totalAmount ? (Number(s.totalAmount) || 0) : 0), 0);
 
     return {
       todaySales,
@@ -1908,7 +1908,7 @@ function openProductDetailsModal(productInput) {
   innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
 
   const isPriceSet = product.sellingPrice !== null && product.sellingPrice !== undefined && product.sellingPrice > 0;
-  const priceDisplay = isPriceSet ? `₹${product.sellingPrice.toLocaleString()}` : 'Price Not Set';
+  const priceDisplay = isPriceSet ? `₹${(product.sellingPrice || 0).toLocaleString()}` : 'Price Not Set';
 
   innerContent.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color);">
@@ -1944,7 +1944,7 @@ function openProductDetailsModal(productInput) {
                 <td><span style="font-weight: 600; padding: 0.2rem 0.5rem; background: var(--bg-secondary); border-radius: 4px; font-size: 0.8rem;">${v.size || 'Standard'}</span></td>
                 <td style="font-weight: 600; color: ${v.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${v.stock || 0} units</td>
                 <td style="color: var(--text-secondary);">₹${(v.purchasePrice || product.purchasePrice || 0).toLocaleString()}</td>
-                <td style="font-weight: 600;">${v.sellingPrice ? '₹' + v.sellingPrice.toLocaleString() : priceDisplay}</td>
+                <td style="font-weight: 600;">${v.sellingPrice ? '₹' + (v.sellingPrice || 0).toLocaleString() : priceDisplay}</td>
                 <td style="font-weight: 600;">₹${((v.stock || 0) * (v.sellingPrice || product.sellingPrice || 0)).toLocaleString()}</td>
               </tr>
             `).join('')}
@@ -1990,8 +1990,8 @@ function openSaleDetailsModal(sale) {
   });
   modalEl.appendChild(modalBreadcrumb);
 
-  const subtotal = sale.items.reduce((sum, i) => sum + (i.price * i.qty), 0);
-  const totalDiscount = sale.items.reduce((sum, i) => sum + (i.discount || 0), 0);
+  const subtotal = (sale.items || []).reduce((sum, i) => sum + ((i.price || 0) * (i.qty || 0)), 0);
+  const totalDiscount = (sale.items || []).reduce((sum, i) => sum + (i.discount || 0), 0);
 
   const innerContent = document.createElement('div');
   innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
@@ -2030,13 +2030,13 @@ function openSaleDetailsModal(sale) {
             </tr>
           </thead>
           <tbody>
-            ${sale.items.map(i => `
+            ${(sale.items || []).map(i => `
               <tr>
                 <td style="font-weight: 600;">${i.product}</td>
                 <td style="font-weight: 600;">${i.qty}</td>
-                <td>₹${i.price.toLocaleString()}</td>
+                <td>₹${(i.price || 0).toLocaleString()}</td>
                 <td style="color: var(--text-secondary);">₹${i.discount || 0}</td>
-                <td style="font-weight: 600;">₹${i.amount.toLocaleString()}</td>
+                <td style="font-weight: 600;">₹${(i.amount || 0).toLocaleString()}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -2048,17 +2048,17 @@ function openSaleDetailsModal(sale) {
     <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.875rem;">
       <div style="display: flex; justify-content: space-between; width: 220px; color: var(--text-secondary);">
         <span>Subtotal:</span>
-        <strong>₹${subtotal.toLocaleString()}</strong>
+        <strong>₹${(subtotal || 0).toLocaleString()}</strong>
       </div>
       ${totalDiscount > 0 ? `
         <div style="display: flex; justify-content: space-between; width: 220px; color: var(--status-warning);">
           <span>Discount:</span>
-          <strong>-₹${totalDiscount.toLocaleString()}</strong>
+          <strong>-₹${(totalDiscount || 0).toLocaleString()}</strong>
         </div>
       ` : ''}
       <div style="display: flex; justify-content: space-between; width: 220px; font-size: 1.05rem; font-weight: 700; color: var(--text-primary); border-top: 1px solid var(--border-color); padding-top: 0.35rem; margin-top: 0.25rem;">
         <span>Final Total:</span>
-        <span style="color: var(--brand-primary);">₹${sale.totalAmount.toLocaleString()}</span>
+        <span style="color: var(--brand-primary);">₹${(sale.totalAmount || 0).toLocaleString()}</span>
       </div>
     </div>
   `;
@@ -2679,7 +2679,9 @@ function renderOverview(onNavigate) {
   container.className = 'page-container';
 
   const metrics = store.getMetrics();
-  const data = store.data;
+  const data = store.data || {};
+  const sales = data.sales || [];
+  const products = data.products || [];
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
@@ -2692,23 +2694,23 @@ function renderOverview(onNavigate) {
   const kpiGrid = document.createElement('div');
   kpiGrid.className = 'kpi-grid';
 
-  const lowCount = metrics.lowStockCount;
-  const outCount = metrics.outOfStockCount;
-  const totalStockUnits = metrics.totalStock;
-  const totalRevenue = data.sales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const lowCount = metrics.lowStockCount || 0;
+  const outCount = metrics.outOfStockCount || 0;
+  const totalStockUnits = metrics.totalStock || 0;
+  const totalRevenue = sales.reduce((sum, s) => sum + (s.totalAmount || 0), 0);
 
   kpiGrid.appendChild(createMetricCard({
     label: 'Total Revenue',
     value: `₹${totalRevenue.toLocaleString('en-IN')}`,
-    subtext: `<span style="color: var(--status-success); font-weight: 600;">↑ +18.4%</span> <span style="color: var(--text-secondary);">across ${data.sales.length} sales orders</span>`,
+    subtext: `<span style="color: var(--status-success); font-weight: 600;">+18.4%</span> <span style="color: var(--text-secondary);">across ${sales.length} sales orders</span>`,
     icon: 'dollar-sign',
     onClick: () => onNavigate('sales')
   }));
 
   kpiGrid.appendChild(createMetricCard({
     label: 'Total Products',
-    value: `${totalStockUnits} Units`,
-    subtext: `<span style="color: var(--text-secondary);">Across ${data.products.length} catalog products</span>`,
+    value: `${metrics.totalProducts || products.length} Products`,
+    subtext: `<span style="color: var(--text-secondary);">${totalStockUnits} total stock units</span>`,
     icon: 'package',
     onClick: () => onNavigate('inventory')
   }));
@@ -2800,62 +2802,11 @@ function renderOverview(onNavigate) {
       ],
       pointsPath: '40,100 185,75 330,58 460,32',
       areaPoly: '40,130 40,100 185,75 330,58 460,32 460,130 40,130'
-    },
-    '3M': {
-      periodLabel: '3M',
-      startRevLabel: 'Start of 3M',
-      startRevVal: '₹6,80,000',
-      endRevLabel: 'End of 3M',
-      endRevVal: '₹7,92,100',
-      revDiff: '+₹1,12,100',
-      revGrowth: '+16.5%',
-      isRevPositive: true,
-      cogs: '₹5,10,000',
-      profitLabel: 'Profit',
-      profitVal: '+₹2,82,100',
-      profitMargin: '35.6%',
-      isProfit: true,
-      yMax: '₹800k',
-      yMid: '₹700k',
-      labels: ['August', 'September', 'October'],
-      coords: [
-        { x: 50, y: 75, val: '₹6,80,000', label: 'August' },
-        { x: 250, y: 52, val: '₹7,40,000', label: 'September' },
-        { x: 450, y: 22, val: '₹7,92,100', label: 'October' }
-      ],
-      pointsPath: '50,75 250,52 450,22',
-      areaPoly: '50,130 50,75 250,52 450,22 450,130 50,130'
-    },
-    '1Y': {
-      periodLabel: '1Y',
-      startRevLabel: 'Start of Year',
-      startRevVal: '₹24,00,000',
-      endRevLabel: 'End of Year',
-      endRevVal: '₹31,45,800',
-      revDiff: '+₹7,45,800',
-      revGrowth: '+31.1%',
-      isRevPositive: true,
-      cogs: '₹20,50,000',
-      profitLabel: 'Profit',
-      profitVal: '+₹10,95,800',
-      profitMargin: '34.8%',
-      isProfit: true,
-      yMax: '₹32L',
-      yMid: '₹26L',
-      labels: ['Q1', 'Q2', 'Q3', 'Q4'],
-      coords: [
-        { x: 40, y: 80, val: '₹24,00,000', label: 'Q1' },
-        { x: 185, y: 65, val: '₹26,50,000', label: 'Q2' },
-        { x: 330, y: 45, val: '₹29,00,000', label: 'Q3' },
-        { x: 460, y: 22, val: '₹31,45,800', label: 'Q4' }
-      ],
-      pointsPath: '40,80 185,65 330,45 460,22',
-      areaPoly: '40,130 40,80 185,65 330,45 460,22 460,130 40,130'
     }
   };
 
   function renderSalesChart(periodKey) {
-    const ds = chartDatasets[periodKey];
+    const ds = chartDatasets[periodKey] || chartDatasets['1W'];
     salesTrendCard.innerHTML = `
       <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem; align-items: center; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.75rem;">
         <div>
@@ -2863,27 +2814,24 @@ function renderOverview(onNavigate) {
           <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.15rem;">Revenue performance & gross profit summary</div>
         </div>
         
-        <!-- Period Selectors: 1W, 1M, 3M, 1Y -->
         <div style="display: flex; gap: 0.2rem; background: var(--bg-secondary); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-          ${['1W', '1M', '3M', '1Y'].map(p => `
+          ${['1W', '1M'].map(p => `
             <button class="btn period-btn" data-period="${p}" style="padding: 0.25rem 0.6rem; font-size: 0.75rem; font-weight: 600; border: none; cursor: pointer;">${p}</button>
           `).join('')}
         </div>
       </div>
 
-      <!-- Financial Summary Bar -->
       <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; background: var(--bg-secondary); padding: 0.75rem 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-color); margin-bottom: 0.75rem;">
         <div>
           <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);">Total Revenue</div>
           <div style="display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.15rem; flex-wrap: wrap;">
             <span style="font-size: 1.45rem; font-weight: 700; color: var(--text-primary); letter-spacing: -0.02em;">${ds.endRevVal}</span>
             <span style="font-size: 0.825rem; font-weight: 600; color: ${ds.isRevPositive ? 'var(--status-success)' : 'var(--status-danger)'}; display: inline-flex; align-items: center; gap: 0.25rem;">
-              ${ds.isRevPositive ? '↑' : '↓'} ${ds.revDiff} (${ds.revGrowth}) <span style="color: var(--text-secondary); font-weight: 400;">· ${ds.periodLabel}</span>
+              ${ds.isRevPositive ? '↑' : '↓'} ${ds.revDiff} (${ds.revGrowth}) <span style="color: var(--text-secondary); font-weight: 400;">vs ${ds.periodLabel}</span>
             </span>
           </div>
         </div>
 
-        <!-- Profit / Loss Box -->
         <div style="text-align: right;">
           <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);">${ds.profitLabel}</div>
           <div style="font-size: 1.15rem; font-weight: 700; color: ${ds.isProfit ? 'var(--status-success)' : 'var(--status-danger)'}; margin-top: 0.15rem;">
@@ -2895,13 +2843,11 @@ function renderOverview(onNavigate) {
         </div>
       </div>
 
-      <!-- Start vs End Period Benchmarks -->
       <div style="display: flex; justify-content: space-between; font-size: 0.775rem; color: var(--text-secondary); margin-bottom: 0.35rem; padding: 0 0.25rem;">
         <div>${ds.startRevLabel}: <strong style="color: var(--text-primary); font-weight: 600;">${ds.startRevVal}</strong></div>
         <div>${ds.endRevLabel}: <strong style="color: var(--text-primary); font-weight: 600;">${ds.endRevVal}</strong></div>
       </div>
 
-      <!-- Perfectly Aligned SVG Chart Canvas -->
       <div style="position: relative; height: 160px; display: flex; align-items: stretch; margin-top: 0.25rem;">
         <div style="display: flex; flex-direction: column; justify-content: space-between; font-size: 0.7rem; color: var(--text-secondary); padding-right: 0.6rem; width: 45px; text-align: right; font-weight: 500; height: 130px;">
           <span>${ds.yMax}</span>
@@ -2968,13 +2914,14 @@ function renderOverview(onNavigate) {
   topSellingCard.style.justifyContent = 'space-between';
 
   const topSellingMap = {};
-  data.sales.forEach(s => {
-    s.items.forEach(item => {
-      if (!topSellingMap[item.product]) {
-        topSellingMap[item.product] = { name: item.product, units: 0, revenue: 0 };
+  sales.forEach(s => {
+    (s.items || []).forEach(item => {
+      const pName = item.product || item.productName || 'Product';
+      if (!topSellingMap[pName]) {
+        topSellingMap[pName] = { name: pName, units: 0, revenue: 0 };
       }
-      topSellingMap[item.product].units += item.qty;
-      topSellingMap[item.product].revenue += item.amount;
+      topSellingMap[pName].units += (item.qty || 0);
+      topSellingMap[pName].revenue += (item.amount || item.total || 0);
     });
   });
   const topSellingList = Object.values(topSellingMap)
@@ -3001,7 +2948,7 @@ function renderOverview(onNavigate) {
                 <div style="font-size: 0.75rem; color: var(--text-secondary);">${p.units} sold</div>
               </div>
             </div>
-            <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">₹${p.revenue.toLocaleString('en-IN')}</div>
+            <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">₹${(p.revenue || 0).toLocaleString('en-IN')}</div>
           </div>
         `).join('')}
       </div>
@@ -3010,7 +2957,7 @@ function renderOverview(onNavigate) {
 
   topSellingCard.querySelectorAll('.top-selling-item').forEach(item => {
     item.addEventListener('click', () => {
-      onNavigate('products', { openProduct: item.dataset.productName });
+      onNavigate('inventory', { openProduct: item.dataset.productName });
     });
   });
 
@@ -3022,7 +2969,7 @@ function renderOverview(onNavigate) {
   // Section 4: RECENT SALES HISTORY
   const salesHistoryCard = document.createElement('div');
   salesHistoryCard.className = 'card';
-  const salesList = data.sales.slice(0, 5);
+  const salesList = sales.slice(0, 5);
 
   salesHistoryCard.innerHTML = `
     <div class="card-header">
@@ -3048,12 +2995,12 @@ function renderOverview(onNavigate) {
         <tbody>
           ${salesList.map(s => `
             <tr>
-              <td style="font-weight: 600; color: var(--text-primary);">${s.customer}</td>
-              <td style="color: var(--text-secondary); font-size: 0.8rem;">${s.date}</td>
-              <td style="color: var(--text-secondary);">${s.itemCount} item${s.itemCount > 1 ? 's' : ''}</td>
-              <td style="font-weight: 600; color: var(--text-primary);">₹${s.totalAmount.toLocaleString()}</td>
-              <td>${createBadge({ label: s.paymentMethod, variant: 'secondary' }).outerHTML}</td>
-              <td>${createBadge({ label: s.status, variant: 'success' }).outerHTML}</td>
+              <td style="font-weight: 600; color: var(--text-primary);">${s.customer || 'Walk-in Customer'}</td>
+              <td style="color: var(--text-secondary); font-size: 0.8rem;">${s.date || '-'}</td>
+              <td style="color: var(--text-secondary);">${s.itemCount || (s.items ? s.items.length : 1)} item${(s.itemCount || 1) > 1 ? 's' : ''}</td>
+              <td style="font-weight: 600; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
+              <td>${createBadge({ label: s.paymentMethod || 'Cash', variant: 'secondary' }).outerHTML}</td>
+              <td>${createBadge({ label: s.status || 'Completed', variant: 'secondary' }).outerHTML}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -3066,9 +3013,7 @@ function renderOverview(onNavigate) {
 
   if (window.lucide) window.lucide.createIcons();
   return container;
-}
-
-// INVENTORY PAGE (GROUPED PRODUCTS + EXPANDABLE SIZE DETAILS)
+}// INVENTORY PAGE (GROUPED PRODUCTS + EXPANDABLE SIZE DETAILS)
 function renderInventory(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
@@ -3211,7 +3156,7 @@ function renderInventory(params = {}, onNavigate = null) {
       }
 
       const isPriceSet = p.sellingPrice !== null && p.sellingPrice !== undefined && p.sellingPrice > 0;
-      const priceDisplay = isPriceSet ? `₹${p.sellingPrice.toLocaleString()}` : `<span style="color: var(--text-secondary); font-style: italic;">Price Not Set</span>`;
+      const priceDisplay = isPriceSet ? `₹${(p.sellingPrice || 0).toLocaleString()}` : `<span style="color: var(--text-secondary); font-style: italic;">Price Not Set</span>`;
 
       // Main Product Row
       const tr = document.createElement('tr');
@@ -4424,7 +4369,7 @@ function renderCustomers(onNavigate = null) {
               <td style="color: var(--text-secondary);">${c.phone}</td>
               <td>${c.ordersCount} purchases</td>
               <td style="color: var(--text-secondary);">${c.lastPurchase}</td>
-              <td style="font-weight: 600; color: var(--brand-primary);">₹${c.totalSpend.toLocaleString()}</td>
+              <td style="font-weight: 600; color: var(--brand-primary);">₹${(c.totalSpend || 0).toLocaleString()}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -4445,13 +4390,13 @@ function renderReports(onNavigate = null) {
   const metrics = store.getMetrics();
   const data = store.data;
 
-  let totalRevenue = data.sales.reduce((sum, s) => sum + s.totalAmount, 0);
+  let totalRevenue = (data.sales || []).reduce((sum, s) => sum + (s && s.totalAmount ? (Number(s.totalAmount) || 0) : 0), 0);
   let totalCogs = 0;
-  data.sales.forEach(s => {
-    s.items.forEach(item => {
-      const prod = data.products.find(p => p.name === item.product);
-      const unitCost = prod ? prod.purchasePrice : (item.price * 0.5);
-      totalCogs += item.qty * unitCost;
+  (data.sales || []).forEach(s => {
+    (s.items || []).forEach(item => {
+      const prod = (data.products || []).find(p => p && p.name === item.product);
+      const unitCost = prod ? (prod.purchasePrice || 0) : ((item.price || 0) * 0.5);
+      totalCogs += (item.qty || 0) * unitCost;
     });
   });
   let grossProfit = totalRevenue - totalCogs;
