@@ -2230,7 +2230,12 @@ function createTopbar(activeTitle, onThemeToggle) {
 // ==========================================
 
 // ADD NEW PRODUCT PAGE (Full Purchase & Costing Workflow)
-function renderAddProductPage(onNavigate = null) {
+function renderAddProductPage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+  const returnTo = (params && params.returnTo) || null;
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -2238,17 +2243,23 @@ function renderAddProductPage(onNavigate = null) {
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   
-  const breadcrumb = createBreadcrumb([
-    { label: 'Purchases', target: 'purchases' },
-    { label: 'Add New Product' }
-  ], onNavigate);
+  const breadcrumbItems = returnTo === 'add-purchase'
+    ? [{ label: 'Purchases', target: 'purchases' }, { label: 'Add Purchase', target: 'purchases', params: { action: 'add' } }, { label: 'Create New Product' }]
+    : [{ label: 'Purchases', target: 'purchases' }, { label: 'Add New Product' }];
+
+  const breadcrumb = createBreadcrumb(breadcrumbItems, onNavigate);
 
   const backBtn = createButton({
-    text: 'Back to Purchases',
+    text: returnTo === 'add-purchase' ? 'Back to Add Purchase' : 'Back to Purchases',
     icon: 'arrow-left',
     variant: 'secondary',
     size: 'sm',
-    onClick: () => { if (onNavigate) onNavigate('purchases'); }
+    onClick: () => {
+      if (onNavigate) {
+        if (returnTo === 'add-purchase') onNavigate('purchases', { action: 'add' });
+        else onNavigate('purchases');
+      }
+    }
   });
 
   headerDiv.appendChild(breadcrumb);
@@ -2874,7 +2885,11 @@ function renderAddProductPage(onNavigate = null) {
       toast.show({ message: `Product '${name}' saved successfully & ${totalUnits} units received!`, type: 'success' });
       
       if (onNavigate) {
-        onNavigate('purchases');
+        if (returnTo === 'add-purchase' && result && result.product) {
+          onNavigate('purchases', { action: 'add', selectedProductId: result.product.id });
+        } else {
+          onNavigate('purchases');
+        }
       }
     } catch (err) {
       console.error('Error saving product and receiving stock:', err);
@@ -3755,10 +3770,10 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
 // PURCHASES PAGE
 function renderPurchases(params = {}, onNavigate = null) {
   if (params && (params.action === 'add-product' || params.view === 'add-product')) {
-    return renderAddProductPage(onNavigate);
+    return renderAddProductPage(params, onNavigate);
   }
   if (params && (params.action === 'add' || params.view === 'add')) {
-    return renderAddPurchasePage(onNavigate);
+    return renderAddPurchasePage(params, onNavigate);
   }
 
   const container = document.createElement('div');
@@ -3831,7 +3846,11 @@ function renderPurchases(params = {}, onNavigate = null) {
 }
 
 // ADD PURCHASE PAGE
-function renderAddPurchasePage(onNavigate = null) {
+function renderAddPurchasePage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -3849,6 +3868,30 @@ function renderAddPurchasePage(onNavigate = null) {
   mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
 
   const purchaseItemsData = [];
+
+  if (params && params.selectedProductId) {
+    const selectedProd = (store.data.products || []).find(p => p.id === params.selectedProductId);
+    if (selectedProd) {
+      const variants = selectedProd.variants || [];
+      if (variants.length > 0) {
+        variants.forEach(v => {
+          purchaseItemsData.push({
+            productId: selectedProd.id,
+            size: v.size || 'Standard',
+            qty: 10,
+            buyingPrice: v.purchasePrice || selectedProd.purchasePrice || 0
+          });
+        });
+      } else {
+        purchaseItemsData.push({
+          productId: selectedProd.id,
+          size: 'Standard',
+          qty: 10,
+          buyingPrice: selectedProd.purchasePrice || 0
+        });
+      }
+    }
+  }
 
   mainCard.innerHTML = `
     <!-- SECTION A: PURCHASE INFORMATION -->
