@@ -1546,6 +1546,21 @@ class StoreManager {
     };
 
     this.data.purchases.unshift(purchaseRecord);
+
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+    (payload.items || []).forEach(item => {
+      this.data.stockMovements.unshift({
+        id: `MOV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+        date: new Date().toLocaleString(),
+        product: product.name,
+        sku: `${product.name.slice(0,3).toUpperCase()}-${item.size || 'STD'}`,
+        type: 'Stock In',
+        quantity: item.qty,
+        reference: purchaseRecord.id,
+        user: 'Manager'
+      });
+    });
+
     this.save();
     return { product, purchase: purchaseRecord };
   }
@@ -2214,50 +2229,80 @@ function createTopbar(activeTitle, onThemeToggle) {
 // 4. PAGE RENDERERS
 // ==========================================
 
+// ADD NEW PRODUCT PAGE (Full Purchase & Costing Workflow)
 function renderAddProductPage(onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
-  // 1. Breadcrumb Header (Products / Add Product)
+  // 1. Header (Breadcrumb: Purchases / Add New Product)
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
-
+  
   const breadcrumb = createBreadcrumb([
-    { label: 'Inventory', target: 'inventory' },
-    { label: 'Add Product' }
+    { label: 'Purchases', target: 'purchases' },
+    { label: 'Add New Product' }
   ], onNavigate);
 
+  const backBtn = createButton({
+    text: 'Back to Purchases',
+    icon: 'arrow-left',
+    variant: 'secondary',
+    size: 'sm',
+    onClick: () => { if (onNavigate) onNavigate('purchases'); }
+  });
+
   headerDiv.appendChild(breadcrumb);
+  headerDiv.appendChild(backBtn);
   container.appendChild(headerDiv);
 
   // 2. Main Form Card
   const mainCard = document.createElement('div');
   mainCard.className = 'card';
-  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%;';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
 
-  const catOptions = store.data.categories.length > 0 ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
-  const brandOptions = store.data.brands.length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
-  const allSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+  const catOptions = (store.data.categories || []).length > 0 ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
+  const brandOptions = (store.data.brands || []).length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+  const supplierOptions = (store.data.suppliers || []).length > 0 ? store.data.suppliers.map(s => s.name) : ['Apex Apparel Ltd', 'SilkRoute Fabrics', 'Urban Thread Co'];
 
   let hasSizes = true;
-  let selectedSizes = new Set(['S', 'M', 'L', 'XL']);
-  let sizeStockMap = { 'S': 5, 'M': 10, 'L': 8, 'XL': 3 };
-  let sizeDamagedMap = { 'S': 0, 'M': 0, 'L': 0, 'XL': 0 };
+  let pricingStrategy = 'markup'; // 'markup', 'fixed', 'manual'
+  let markupPercentage = 50;
+  let fixedProfitUnit = 300;
+
+  // Initial Size Rows State
+  let sizeRows = [
+    { size: 'S', qty: 5, buyingPrice: 200 },
+    { size: 'M', qty: 10, buyingPrice: 220 },
+    { size: 'L', qty: 10, buyingPrice: 220 },
+    { size: 'XL', qty: 5, buyingPrice: 240 }
+  ];
+
+  // Non-size product initial state
+  let singleQty = 20;
+  let singleBuyingPrice = 500;
+  let singleSellingPriceManual = 750;
+
+  let isSubmitting = false;
 
   const formContainer = document.createElement('div');
-  formContainer.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+  formContainer.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem;';
+
+  const todayStr = new Date().toISOString().split('T')[0];
 
   formContainer.innerHTML = `
-    <!-- Basic Information -->
-    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Basic Information</h4>
+    <!-- Section 1: Basic Product Information -->
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="package" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Basic Product Information
+      </h4>
       
       <div class="form-group">
         <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Product Name *</label>
-        <input type="text" class="form-input" id="new-prod-name" placeholder="e.g. Linen Casual Shirt">
+        <input type="text" class="form-input" id="new-prod-name" placeholder="e.g. Linen Casual Shirt" style="font-size: 0.9rem;">
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
           <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Category *</label>
           <select class="form-select" id="new-prod-cat">
@@ -2270,124 +2315,337 @@ function renderAddProductPage(onNavigate = null) {
             ${brandOptions.map(b => `<option value="${b}">${b}</option>`).join('')}
           </select>
         </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Description (Optional)</label>
+        <textarea class="form-textarea" id="new-prod-desc" rows="2" placeholder="Product fabric, fit, or details..."></textarea>
+      </div>
+    </div>
+
+    <!-- Section 2: Purchase & Supplier Information -->
+    <div style="display: flex; flex-direction: column; gap: 1rem; background: var(--bg-secondary); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="truck" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Supplier & Purchase Details
+      </h4>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Status</label>
-          <select class="form-select" id="new-prod-status">
-            <option value="Active" selected>Active</option>
-            <option value="Inactive">Inactive</option>
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Supplier *</label>
+          <select class="form-select" id="new-prod-supplier">
+            ${supplierOptions.map(s => `<option value="${s}">${s}</option>`).join('')}
           </select>
         </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Date *</label>
+          <input type="date" class="form-input" id="new-prod-date" value="${todayStr}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Notes / Reference (Optional)</label>
+        <input type="text" class="form-input" id="new-prod-notes" placeholder="Invoice # or batch notes">
       </div>
     </div>
 
-    <!-- Pricing -->
-    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0;">Pricing</h4>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Purchase Price (₹) *</label>
-          <input type="number" class="form-input" id="new-prod-cost" placeholder="e.g. 500" min="0">
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Selling Price (₹) *</label>
-          <input type="number" class="form-input" id="new-prod-price" placeholder="e.g. 1299" min="0">
-        </div>
-      </div>
-    </div>
+    <!-- Section 3: Size Management & Pricing Strategy -->
+    <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="calculator" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Costing & Selling Price Strategy
+      </h4>
 
-    <!-- Product Sizes & Initial Stock -->
-    <div style="display: flex; flex-direction: column; gap: 0.85rem; background: var(--bg-secondary); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
-      <div>
-        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">Product Sizes & Initial Stock</h4>
-        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">Add the available sizes and enter the opening stock for each size.</p>
-      </div>
-
-      <!-- Question: Does this product have sizes? [Yes] [No] -->
-      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
-        <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Does this product have sizes?</span>
-        <div style="display: flex; gap: 0.35rem; background: var(--bg-surface); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-          <button type="button" class="btn btn-sm" id="has-sizes-yes" style="padding: 0.25rem 0.85rem; font-weight: 600;">Yes</button>
-          <button type="button" class="btn btn-sm" id="has-sizes-no" style="padding: 0.25rem 0.85rem; font-weight: 600;">No</button>
+      <!-- Size Toggle -->
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; background: var(--bg-surface); padding: 0.85rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+        <div>
+          <span style="font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">Does this product have size variants?</span>
+          <p style="font-size: 0.775rem; color: var(--text-secondary); margin: 0;">Enable size-wise quantities and prices (e.g., S, M, L, XL).</p>
+        </div>
+        <div style="display: flex; gap: 0.35rem; background: var(--bg-secondary); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <button type="button" class="btn btn-sm" id="has-sizes-yes" style="padding: 0.3rem 1rem; font-weight: 600;">Yes (Size-wise)</button>
+          <button type="button" class="btn btn-sm" id="has-sizes-no" style="padding: 0.3rem 1rem; font-weight: 600;">No (Single Item)</button>
         </div>
       </div>
 
-      <!-- Size-Based Section -->
-      <div id="size-based-section" style="display: flex; flex-direction: column; gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Select Available Sizes:</label>
-          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;" id="size-chips-box">
-            ${allSizes.map(s => `
-              <button type="button" class="size-chip-btn" data-size="${s}" style="padding: 0.35rem 0.75rem; font-size: 0.825rem; font-weight: 600; border-radius: var(--radius-sm); cursor: pointer; transition: all 0.15s ease;">
-                ${s}
-              </button>
-            `).join('')}
+      <!-- Strategy Selector -->
+      <div style="display: flex; flex-direction: column; gap: 0.75rem; background: var(--bg-surface); padding: 1rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); margin: 0;">Selling Price Calculation Method:</label>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.65rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; font-weight: 500;">
+            <input type="radio" name="pricing-strategy" value="markup" checked>
+            Percentage Markup (%)
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.65rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; font-weight: 500;">
+            <input type="radio" name="pricing-strategy" value="fixed">
+            Fixed Profit Per Unit (₹)
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; padding: 0.65rem 0.85rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); cursor: pointer; font-size: 0.85rem; font-weight: 500;">
+            <input type="radio" name="pricing-strategy" value="manual">
+            Manual Selling Price
+          </label>
+        </div>
+
+        <!-- Strategy Inputs -->
+        <div id="strategy-input-container" style="padding-top: 0.5rem;">
+          <div id="strategy-markup-box" style="display: flex; align-items: center; gap: 0.75rem; max-width: 320px;">
+            <label style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary); white-space: nowrap;">Markup Percentage (%):</label>
+            <input type="number" class="form-input" id="input-markup-pct" value="50" min="0" step="5" style="font-weight: 600;">
+          </div>
+          <div id="strategy-fixed-box" style="display: none; align-items: center; gap: 0.75rem; max-width: 320px;">
+            <label style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary); white-space: nowrap;">Fixed Profit Per Unit (₹):</label>
+            <input type="number" class="form-input" id="input-fixed-profit" value="300" min="0" step="10" style="font-weight: 600;">
+          </div>
+          <div id="strategy-manual-box" style="display: none; font-size: 0.8rem; color: var(--text-secondary);">
+            Enter individual selling prices directly in the table below.
           </div>
         </div>
+      </div>
 
-        <!-- Generated Size Stock Table -->
+      <!-- Section 4: Costing Table (Size-based) -->
+      <div id="size-table-wrapper" style="display: flex; flex-direction: column; gap: 0.75rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">Size-wise Quantity & Cost Breakdown</span>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-size-row" style="font-weight: 600;">
+            <i data-lucide="plus" style="width: 14px; height: 14px;"></i> Add Size Row
+          </button>
+        </div>
+
         <div class="table-responsive" style="background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
           <table class="admin-table" style="font-size: 0.85rem;">
             <thead>
               <tr>
-                <th style="width: 30%;">Size</th>
-                <th style="width: 35%;">Available Stock (Units)</th>
-                <th style="width: 35%;">Damaged Stock (Units)</th>
+                <th style="width: 15%;">Size</th>
+                <th style="width: 18%;">Qty Purchased</th>
+                <th style="width: 20%;">Buying Price / Unit (₹)</th>
+                <th style="width: 18%;">Total Buying Cost (₹)</th>
+                <th style="width: 20%;">Selling Price / Unit (₹)</th>
+                <th style="width: 18%;">Total Selling Value (₹)</th>
+                <th style="width: 8%; text-align: center;">Action</th>
               </tr>
             </thead>
-            <tbody id="size-stock-tbody"></tbody>
+            <tbody id="size-table-tbody"></tbody>
           </table>
         </div>
       </div>
 
-      <!-- Non-Size Product Section -->
-      <div id="no-size-section" style="display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Initial Available Stock *</label>
-          <input type="number" class="form-input" id="single-stock-input" value="25" min="0" placeholder="e.g. 25">
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Initial Damaged Stock</label>
-          <input type="number" class="form-input" id="single-damaged-input" value="0" min="0" placeholder="e.g. 0" style="color: var(--status-danger);">
-        </div>
-      </div>
-
-      <!-- Total Initial Stock Display -->
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.9rem;">
-        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: center;">
-          <div>
-            <span style="font-weight: 600; color: var(--text-secondary);">Total Available Stock: </span>
-            <span style="font-size: 1.15rem; font-weight: 700; color: var(--brand-primary);" id="total-stock-display">0 units</span>
+      <!-- Section 4 (Alt): Non-size Product Inputs -->
+      <div id="no-size-wrapper" style="display: none; flex-direction: column; gap: 1rem; background: var(--bg-surface); padding: 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+        <span style="font-size: 0.875rem; font-weight: 600; color: var(--text-primary);">Single Item Purchase & Pricing</span>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Quantity Purchased *</label>
+            <input type="number" class="form-input" id="single-qty-input" value="20" min="1" style="font-weight: 600;">
           </div>
-          <div>
-            <span style="font-weight: 600; color: var(--text-secondary);">Total Damaged Stock: </span>
-            <span style="font-size: 1.15rem; font-weight: 700; color: var(--status-danger);" id="total-damaged-display">0 units</span>
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Buying Price / Unit (₹) *</label>
+            <input type="number" class="form-input" id="single-buying-input" value="500" min="0" style="font-weight: 600;">
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Total Buying Cost (₹)</label>
+            <input type="text" class="form-input" id="single-total-cost-display" readonly style="background: var(--bg-secondary); font-weight: 700; color: var(--brand-primary);">
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Selling Price / Unit (₹) *</label>
+            <input type="number" class="form-input" id="single-selling-input" value="750" min="0" style="font-weight: 600;">
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary);">Total Selling Value (₹)</label>
+            <input type="text" class="form-input" id="single-total-selling-display" readonly style="background: var(--bg-secondary); font-weight: 700; color: var(--status-success);">
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Description -->
-    <div class="form-group">
-      <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Description</label>
-      <textarea class="form-textarea" id="new-prod-desc" rows="3" placeholder="Enter product description (optional)"></textarea>
+    <!-- Section 5: Real-Time Financial Summaries -->
+    <div style="display: flex; flex-direction: column; gap: 0.75rem; background: var(--bg-secondary); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+      <div style="display: flex; align-items: center; justify-content: space-between;">
+        <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin: 0;">Financial Summary (Calculated Real-Time)</h4>
+        <span style="font-size: 0.75rem; color: var(--text-secondary); font-style: italic;">*Estimated gross profit before operational expenses.</span>
+      </div>
+
+      <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+        <div class="kpi-card">
+          <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Units Purchased</div>
+          <div style="font-size: 1.35rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;" id="summary-total-units">0</div>
+        </div>
+        <div class="kpi-card">
+          <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Purchase Cost</div>
+          <div style="font-size: 1.35rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;" id="summary-total-cost">₹0</div>
+        </div>
+        <div class="kpi-card">
+          <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Est. Selling Value</div>
+          <div style="font-size: 1.35rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;" id="summary-selling-value">₹0</div>
+        </div>
+        <div class="kpi-card">
+          <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Est. Gross Profit</div>
+          <div style="font-size: 1.35rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;" id="summary-gross-profit">₹0</div>
+        </div>
+      </div>
     </div>
 
-    <!-- Action Buttons Bar -->
+    <!-- Section 6: Action Buttons -->
     <div style="display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
-      <button type="button" class="btn btn-secondary" id="cancel-add-prod-btn">Cancel</button>
-      <button type="button" class="btn btn-primary" id="save-add-prod-btn" style="padding: 0.55rem 1.25rem; font-weight: 600;">Create Product</button>
+      <button type="button" class="btn btn-secondary" id="cancel-add-prod-btn">Back to Purchases</button>
+      <button type="button" class="btn btn-primary" id="save-add-prod-btn" style="padding: 0.65rem 1.5rem; font-weight: 600; font-size: 0.9rem;">
+        <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
+        Save Product & Receive Stock
+      </button>
     </div>
   `;
 
   mainCard.appendChild(formContainer);
   container.appendChild(mainCard);
 
-  // Interactive Logic
-  function updateToggleButtons() {
+  // Helper: Calculate Selling Price based on strategy & buying price
+  function calculateSellingPrice(buyingPrice, manualVal = null) {
+    const buy = parseFloat(buyingPrice) || 0;
+    if (pricingStrategy === 'markup') {
+      return Math.round(buy * (1 + (parseFloat(markupPercentage) || 0) / 100));
+    } else if (pricingStrategy === 'fixed') {
+      return Math.round(buy + (parseFloat(fixedProfitUnit) || 0));
+    } else {
+      return manualVal !== null ? (parseFloat(manualVal) || 0) : Math.round(buy * 1.5);
+    }
+  }
+
+  // Render Size Rows Table
+  function renderSizeTable() {
+    const tbody = formContainer.querySelector('#size-table-tbody');
+    tbody.innerHTML = '';
+
+    if (sizeRows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--status-warning-text); padding: 1.25rem;">No size rows added. Click "+ Add Size Row" above.</td></tr>`;
+      recalculateSummaries();
+      return;
+    }
+
+    sizeRows.forEach((row, idx) => {
+      const buyPrice = parseFloat(row.buyingPrice) || 0;
+      const qty = parseInt(row.qty, 10) || 0;
+      const rowCost = qty * buyPrice;
+
+      const sellPrice = calculateSellingPrice(buyPrice, row.manualSellingPrice);
+      row.sellingPrice = sellPrice;
+      const rowSellingValue = qty * sellPrice;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>
+          <input type="text" class="form-input row-size-input" value="${row.size}" style="max-width: 90px; font-weight: 600;">
+        </td>
+        <td>
+          <input type="number" class="form-input row-qty-input" value="${qty}" min="0" style="max-width: 100px; font-weight: 600;">
+        </td>
+        <td>
+          <input type="number" class="form-input row-buying-input" value="${buyPrice}" min="0" style="max-width: 120px; font-weight: 600;">
+        </td>
+        <td style="font-weight: 700; color: var(--brand-primary);">
+          ₹${rowCost.toLocaleString()}
+        </td>
+        <td>
+          <input type="number" class="form-input row-selling-input" value="${sellPrice}" min="0" ${pricingStrategy !== 'manual' ? 'readonly style="background: var(--bg-secondary); max-width: 120px; font-weight: 600;"' : 'style="max-width: 120px; font-weight: 600;"'}>
+        </td>
+        <td style="font-weight: 700; color: var(--status-success);">
+          ₹${rowSellingValue.toLocaleString()}
+        </td>
+        <td style="text-align: center;">
+          <button type="button" class="btn btn-sm btn-icon row-remove-btn" title="Remove Row" style="color: var(--status-danger);">
+            <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+          </button>
+        </td>
+      `;
+
+      // Input change listeners
+      tr.querySelector('.row-size-input').addEventListener('input', (e) => {
+        row.size = e.target.value.trim().toUpperCase() || 'STD';
+      });
+
+      tr.querySelector('.row-qty-input').addEventListener('input', (e) => {
+        row.qty = parseInt(e.target.value, 10) || 0;
+        renderSizeTable();
+      });
+
+      tr.querySelector('.row-buying-input').addEventListener('input', (e) => {
+        row.buyingPrice = parseFloat(e.target.value) || 0;
+        renderSizeTable();
+      });
+
+      if (pricingStrategy === 'manual') {
+        tr.querySelector('.row-selling-input').addEventListener('input', (e) => {
+          row.manualSellingPrice = parseFloat(e.target.value) || 0;
+          renderSizeTable();
+        });
+      }
+
+      tr.querySelector('.row-remove-btn').addEventListener('click', () => {
+        sizeRows.splice(idx, 1);
+        renderSizeTable();
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+    recalculateSummaries();
+  }
+
+  // Recalculate Financial Summaries Real-Time
+  function recalculateSummaries() {
+    let totalUnits = 0;
+    let totalCost = 0;
+    let totalSellingValue = 0;
+
+    if (hasSizes) {
+      sizeRows.forEach(row => {
+        const q = parseInt(row.qty, 10) || 0;
+        const buy = parseFloat(row.buyingPrice) || 0;
+        const sell = row.sellingPrice || calculateSellingPrice(buy, row.manualSellingPrice);
+
+        totalUnits += q;
+        totalCost += (q * buy);
+        totalSellingValue += (q * sell);
+      });
+    } else {
+      const q = parseInt(formContainer.querySelector('#single-qty-input').value, 10) || 0;
+      const buy = parseFloat(formContainer.querySelector('#single-buying-input').value) || 0;
+
+      let sell = 0;
+      if (pricingStrategy === 'manual') {
+        sell = parseFloat(formContainer.querySelector('#single-selling-input').value) || 0;
+      } else {
+        sell = calculateSellingPrice(buy);
+        const sellInput = formContainer.querySelector('#single-selling-input');
+        if (sellInput) sellInput.value = sell;
+      }
+
+      totalUnits = q;
+      totalCost = q * buy;
+      totalSellingValue = q * sell;
+
+      const costDisp = formContainer.querySelector('#single-total-cost-display');
+      const sellDisp = formContainer.querySelector('#single-total-selling-display');
+      if (costDisp) costDisp.value = `₹${totalCost.toLocaleString()}`;
+      if (sellDisp) sellDisp.value = `₹${totalSellingValue.toLocaleString()}`;
+    }
+
+    const grossProfit = totalSellingValue - totalCost;
+
+    formContainer.querySelector('#summary-total-units').textContent = `${totalUnits} units`;
+    formContainer.querySelector('#summary-total-cost').textContent = `₹${totalCost.toLocaleString()}`;
+    formContainer.querySelector('#summary-selling-value').textContent = `₹${totalSellingValue.toLocaleString()}`;
+    formContainer.querySelector('#summary-gross-profit').textContent = `₹${grossProfit.toLocaleString()}`;
+  }
+
+  // Toggle Has Sizes (Yes/No)
+  function updateHasSizesToggle() {
     const yesBtn = formContainer.querySelector('#has-sizes-yes');
     const noBtn = formContainer.querySelector('#has-sizes-no');
-    const sizeSection = formContainer.querySelector('#size-based-section');
-    const noSizeSection = formContainer.querySelector('#no-size-section');
+    const sizeWrapper = formContainer.querySelector('#size-table-wrapper');
+    const noSizeWrapper = formContainer.querySelector('#no-size-wrapper');
 
     if (hasSizes) {
       yesBtn.style.backgroundColor = 'var(--brand-primary)';
@@ -2397,8 +2655,9 @@ function renderAddProductPage(onNavigate = null) {
       noBtn.style.color = 'var(--text-secondary)';
       noBtn.style.borderColor = 'transparent';
 
-      sizeSection.style.display = 'flex';
-      noSizeSection.style.display = 'none';
+      sizeWrapper.style.display = 'flex';
+      noSizeWrapper.style.display = 'none';
+      renderSizeTable();
     } else {
       noBtn.style.backgroundColor = 'var(--brand-primary)';
       noBtn.style.color = '#ffffff';
@@ -2407,259 +2666,228 @@ function renderAddProductPage(onNavigate = null) {
       yesBtn.style.color = 'var(--text-secondary)';
       yesBtn.style.borderColor = 'transparent';
 
-      sizeSection.style.display = 'none';
-      noSizeSection.style.display = 'flex';
+      sizeWrapper.style.display = 'none';
+      noSizeWrapper.style.display = 'flex';
+      recalculateSummaries();
     }
-    renderSizeStockTable();
   }
 
-  function renderSizeChips() {
-    formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
-      const s = btn.dataset.size;
-      if (selectedSizes.has(s)) {
-        btn.style.backgroundColor = 'var(--brand-primary)';
-        btn.style.color = '#ffffff';
-        btn.style.borderColor = 'var(--brand-primary)';
-      } else {
-        btn.style.backgroundColor = 'var(--bg-surface)';
-        btn.style.color = 'var(--text-secondary)';
-        btn.style.borderColor = 'var(--border-color)';
-      }
+  // Strategy Input Box visibility
+  function updateStrategyInputs() {
+    const markupBox = formContainer.querySelector('#strategy-markup-box');
+    const fixedBox = formContainer.querySelector('#strategy-fixed-box');
+    const manualBox = formContainer.querySelector('#strategy-manual-box');
+
+    if (pricingStrategy === 'markup') {
+      markupBox.style.display = 'flex';
+      fixedBox.style.display = 'none';
+      manualBox.style.display = 'none';
+    } else if (pricingStrategy === 'fixed') {
+      markupBox.style.display = 'none';
+      fixedBox.style.display = 'flex';
+      manualBox.style.display = 'none';
+    } else {
+      markupBox.style.display = 'none';
+      fixedBox.style.display = 'none';
+      manualBox.style.display = 'block';
+    }
+
+    if (hasSizes) renderSizeTable();
+    else recalculateSummaries();
+  }
+
+  // Event Listeners for Toggles & Strategy Radios
+  formContainer.querySelector('#has-sizes-yes').addEventListener('click', () => {
+    hasSizes = true;
+    updateHasSizesToggle();
+  });
+
+  formContainer.querySelector('#has-sizes-no').addEventListener('click', () => {
+    hasSizes = false;
+    updateHasSizesToggle();
+  });
+
+  formContainer.querySelectorAll('input[name="pricing-strategy"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      pricingStrategy = e.target.value;
+      updateStrategyInputs();
     });
-  }
+  });
 
-  function renderSizeStockTable() {
-    const tbody = formContainer.querySelector('#size-stock-tbody');
+  formContainer.querySelector('#input-markup-pct').addEventListener('input', (e) => {
+    markupPercentage = parseFloat(e.target.value) || 0;
+    if (hasSizes) renderSizeTable();
+    else recalculateSummaries();
+  });
 
-    if (hasSizes) {
-      tbody.innerHTML = '';
-      if (selectedSizes.size === 0) {
-        tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--status-warning-text); padding: 1rem;">Please select at least one size above.</td></tr>`;
-        recalcTotal();
-        return;
-      }
+  formContainer.querySelector('#input-fixed-profit').addEventListener('input', (e) => {
+    fixedProfitUnit = parseFloat(e.target.value) || 0;
+    if (hasSizes) renderSizeTable();
+    else recalculateSummaries();
+  });
 
-      Array.from(selectedSizes).forEach(sz => {
-        const qty = sizeStockMap[sz] !== undefined ? sizeStockMap[sz] : 5;
-        const dmg = sizeDamagedMap[sz] !== undefined ? sizeDamagedMap[sz] : 0;
-        sizeStockMap[sz] = qty;
-        sizeDamagedMap[sz] = dmg;
+  formContainer.querySelector('#single-qty-input').addEventListener('input', () => recalculateSummaries());
+  formContainer.querySelector('#single-buying-input').addEventListener('input', () => recalculateSummaries());
+  formContainer.querySelector('#single-selling-input').addEventListener('input', () => recalculateSummaries());
 
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td style="font-weight: 600; color: var(--text-primary);">${sz}</td>
-          <td>
-            <input type="number" class="form-input size-stock-input" data-size="${sz}" value="${qty}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600;">
-          </td>
-          <td>
-            <input type="number" class="form-input size-damaged-input" data-size="${sz}" value="${dmg}" min="0" placeholder="0" style="max-width: 140px; padding: 0.35rem 0.65rem; font-weight: 600; color: var(--status-danger);">
-          </td>
-        `;
+  // Add Size Row Button
+  formContainer.querySelector('#btn-add-size-row').addEventListener('click', () => {
+    const existingSizes = sizeRows.map(r => r.size);
+    const defaults = ['S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+    const nextSize = defaults.find(s => !existingSizes.includes(s)) || `SZ-${sizeRows.length + 1}`;
+    
+    sizeRows.push({ size: nextSize, qty: 5, buyingPrice: 200 });
+    renderSizeTable();
+  });
 
-        tr.querySelector('.size-stock-input').addEventListener('input', (e) => {
-          const parsed = parseInt(e.target.value, 10);
-          sizeStockMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
-          recalcTotal();
-        });
-
-        tr.querySelector('.size-damaged-input').addEventListener('input', (e) => {
-          const parsed = parseInt(e.target.value, 10);
-          sizeDamagedMap[sz] = isNaN(parsed) || parsed < 0 ? 0 : parsed;
-          recalcTotal();
-        });
-
-        tbody.appendChild(tr);
-      });
-      recalcTotal();
-    } else {
-      recalcTotal();
-    }
-  }
-
-  function recalcTotal() {
-    const totalDisplay = formContainer.querySelector('#total-stock-display');
-    const totalDamagedDisplay = formContainer.querySelector('#total-damaged-display');
-
-    if (hasSizes) {
-      let totalStock = 0;
-      let totalDamaged = 0;
-      selectedSizes.forEach(sz => {
-        totalStock += (sizeStockMap[sz] || 0);
-        totalDamaged += (sizeDamagedMap[sz] || 0);
-      });
-      if (totalDisplay) totalDisplay.textContent = `${totalStock} units`;
-      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${totalDamaged} units`;
-    } else {
-      const singleInput = formContainer.querySelector('#single-stock-input');
-      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
-      const parsedStock = singleInput ? parseInt(singleInput.value, 10) : 0;
-      const parsedDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
-      const stockQty = isNaN(parsedStock) || parsedStock < 0 ? 0 : parsedStock;
-      const dmgQty = isNaN(parsedDmg) || parsedDmg < 0 ? 0 : parsedDmg;
-      if (totalDisplay) totalDisplay.textContent = `${stockQty} units`;
-      if (totalDamagedDisplay) totalDamagedDisplay.textContent = `${dmgQty} units`;
-    }
-  }
-
-  formContainer.querySelector('#has-sizes-yes').addEventListener('click', () => { hasSizes = true; updateToggleButtons(); });
-  formContainer.querySelector('#has-sizes-no').addEventListener('click', () => { hasSizes = false; updateToggleButtons(); });
-
-  formContainer.querySelectorAll('.size-chip-btn').forEach(btn => {
+  // Cancel / Back Button
+  formContainer.querySelectorAll('#cancel-add-prod-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const s = btn.dataset.size;
-      if (selectedSizes.has(s)) {
-        selectedSizes.delete(s);
-      } else {
-        selectedSizes.add(s);
-        if (sizeStockMap[s] === undefined) sizeStockMap[s] = 5;
-      }
-      renderSizeChips();
-      renderSizeStockTable();
+      if (onNavigate) onNavigate('purchases');
     });
   });
 
-  formContainer.querySelector('#single-stock-input').addEventListener('input', () => recalcTotal());
-  const singleDmgEl = formContainer.querySelector('#single-damaged-input');
-  if (singleDmgEl) singleDmgEl.addEventListener('input', () => recalcTotal());
-  formContainer.querySelector('#cancel-add-prod-btn').addEventListener('click', () => {
-    if (onNavigate) onNavigate('inventory');
-  });
-
+  // SAVE PRODUCT & RECEIVE STOCK Submit Handler
   formContainer.querySelector('#save-add-prod-btn').addEventListener('click', () => {
+    if (isSubmitting) return;
+
     const name = formContainer.querySelector('#new-prod-name').value.trim();
     const category = formContainer.querySelector('#new-prod-cat').value;
     const brand = formContainer.querySelector('#new-prod-brand').value;
-    const costStr = formContainer.querySelector('#new-prod-cost').value;
-    const priceStr = formContainer.querySelector('#new-prod-price').value;
-    const status = formContainer.querySelector('#new-prod-status').value;
     const desc = formContainer.querySelector('#new-prod-desc').value.trim();
+    const supplier = formContainer.querySelector('#new-prod-supplier').value;
+    const purchaseDate = formContainer.querySelector('#new-prod-date').value;
+    const notes = formContainer.querySelector('#new-prod-notes').value.trim();
 
     if (!name) {
-      toast.show({ message: 'Product Name is required', type: 'danger' });
-      return;
-    }
-    if (!costStr || isNaN(costStr) || parseFloat(costStr) <= 0) {
-      toast.show({ message: 'Valid Purchase Price is required', type: 'danger' });
-      return;
-    }
-    if (!priceStr || isNaN(priceStr) || parseFloat(priceStr) <= 0) {
-      toast.show({ message: 'Valid Selling Price is required', type: 'danger' });
+      toast.show({ message: 'Product Name is required.', type: 'danger' });
       return;
     }
 
-    const purchasePrice = parseFloat(costStr);
-    const sellingPrice = parseFloat(priceStr);
-
-    if (sellingPrice < purchasePrice) {
-      const confirmLoss = confirm(`Warning: Selling Price (₹${sellingPrice}) is lower than Purchase Price (₹${purchasePrice}). Do you still want to save?`);
-      if (!confirmLoss) return;
-    }
-
-    let variants = [];
-    let totalInitialStock = 0;
-    const prefix = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 3) || 'PRD';
+    let itemsPayload = [];
+    let totalUnits = 0;
+    let totalCost = 0;
+    let estimatedSellingValue = 0;
 
     if (hasSizes) {
-      if (selectedSizes.size === 0) {
-        toast.show({ message: 'Please select at least one size for size-based product', type: 'danger' });
+      if (sizeRows.length === 0) {
+        toast.show({ message: 'Please add at least one size row.', type: 'danger' });
         return;
       }
 
-      let hasInvalidStock = false;
-      Array.from(selectedSizes).forEach(sz => {
-        const stockVal = sizeStockMap[sz];
-        if (stockVal === undefined || isNaN(stockVal) || stockVal < 0) {
-          hasInvalidStock = true;
+      for (const row of sizeRows) {
+        if (!row.size) {
+          toast.show({ message: 'Size name cannot be empty.', type: 'danger' });
+          return;
         }
-      });
-
-      if (hasInvalidStock) {
-        toast.show({ message: 'Initial stock values must be valid whole numbers (0 or greater)', type: 'danger' });
-        return;
-      }
-
-      let totalInitialDamaged = 0;
-      variants = Array.from(selectedSizes).map(sz => {
-        const st = sizeStockMap[sz] || 0;
-        const dmg = sizeDamagedMap[sz] || 0;
-        totalInitialStock += st;
-        totalInitialDamaged += dmg;
-
-        if (dmg > 0 && Array.isArray(store.data.damagedStockRegister)) {
-          store.data.damagedStockRegister.unshift({
-            id: `DMG-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-            product: name,
-            sku: `${prefix}-${sz}`,
-            size: sz,
-            qty: dmg,
-            reason: "Initial Stock Audit - Damaged Intake",
-            date: new Date().toISOString().split('T')[0]
-          });
+        if (row.qty < 0 || isNaN(row.qty)) {
+          toast.show({ message: `Quantity for size ${row.size} must be a valid non-negative number.`, type: 'danger' });
+          return;
+        }
+        if (row.buyingPrice < 0 || isNaN(row.buyingPrice)) {
+          toast.show({ message: `Buying price for size ${row.size} must be a valid non-negative number.`, type: 'danger' });
+          return;
         }
 
-        return {
-          sku: `${prefix}-${sz}`,
-          size: sz,
-          stock: st,
-          damaged: dmg,
-          daysInStock: 0
-        };
-      });
-    } else {
-      const singleVal = parseInt(formContainer.querySelector('#single-stock-input').value, 10);
-      const singleDmgInput = formContainer.querySelector('#single-damaged-input');
-      const singleDmg = singleDmgInput ? parseInt(singleDmgInput.value, 10) : 0;
-      if (isNaN(singleVal) || singleVal < 0) {
-        toast.show({ message: 'Initial stock must be a valid whole number (0 or greater)', type: 'danger' });
-        return;
-      }
-      const dmgVal = isNaN(singleDmg) || singleDmg < 0 ? 0 : singleDmg;
-      totalInitialStock = singleVal;
+        const sellPrice = row.sellingPrice || calculateSellingPrice(row.buyingPrice, row.manualSellingPrice);
+        const rowCost = row.qty * row.buyingPrice;
+        const rowValue = row.qty * sellPrice;
 
-      if (dmgVal > 0 && Array.isArray(store.data.damagedStockRegister)) {
-        store.data.damagedStockRegister.unshift({
-          id: `DMG-${Date.now()}-${Math.floor(Math.random()*1000)}`,
-          product: name,
-          sku: `${prefix}-STD`,
-          size: 'Standard',
-          qty: dmgVal,
-          reason: "Initial Stock Audit - Damaged Intake",
-          date: new Date().toISOString().split('T')[0]
+        totalUnits += row.qty;
+        totalCost += rowCost;
+        estimatedSellingValue += rowValue;
+
+        itemsPayload.push({
+          size: row.size,
+          qty: row.qty,
+          buyingPrice: row.buyingPrice,
+          totalCost: rowCost,
+          sellingPrice: sellPrice,
+          totalValue: rowValue
         });
       }
+    } else {
+      const q = parseInt(formContainer.querySelector('#single-qty-input').value, 10);
+      const buy = parseFloat(formContainer.querySelector('#single-buying-input').value);
+      const sell = parseFloat(formContainer.querySelector('#single-selling-input').value);
 
-      variants = [
-        {
-          sku: `${prefix}-STD`,
-          size: 'Standard',
-          stock: singleVal,
-          damaged: dmgVal,
-          daysInStock: 0
-        }
-      ];
+      if (isNaN(q) || q <= 0) {
+        toast.show({ message: 'Quantity purchased must be greater than 0.', type: 'danger' });
+        return;
+      }
+      if (isNaN(buy) || buy < 0) {
+        toast.show({ message: 'Buying price must be a valid non-negative amount.', type: 'danger' });
+        return;
+      }
+      if (isNaN(sell) || sell < 0) {
+        toast.show({ message: 'Selling price must be a valid non-negative amount.', type: 'danger' });
+        return;
+      }
+
+      totalUnits = q;
+      totalCost = q * buy;
+      estimatedSellingValue = q * sell;
+
+      itemsPayload.push({
+        size: 'Standard',
+        qty: q,
+        buyingPrice: buy,
+        totalCost: totalCost,
+        sellingPrice: sell,
+        totalValue: estimatedSellingValue
+      });
     }
 
-    const newProduct = {
-      id: `PROD-${Date.now().toString().slice(-4)}`,
-      name: name,
-      category: category,
-      brand: brand,
+    if (totalUnits <= 0) {
+      toast.show({ message: 'Total purchased quantity must be greater than 0.', type: 'danger' });
+      return;
+    }
+
+    // Set submitting flag to prevent double clicks
+    isSubmitting = true;
+    const saveBtn = formContainer.querySelector('#save-add-prod-btn');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i data-lucide="loader" style="width: 18px; height: 18px; animation: spin 1s linear infinite;"></i> Saving...';
+
+    const estimatedGrossProfit = estimatedSellingValue - totalCost;
+
+    const payload = {
+      productName: name,
+      category,
+      brand,
       description: desc,
-      purchasePrice: purchasePrice,
-      sellingPrice: sellingPrice,
-      minStock: 10,
-      supplier: "Apex Apparel Ltd",
-      status: status,
-      variants: variants
+      hasSizes,
+      pricingStrategy,
+      pricingValue: pricingStrategy === 'markup' ? markupPercentage : (pricingStrategy === 'fixed' ? fixedProfitUnit : 0),
+      supplier,
+      purchaseDate,
+      notes,
+      items: itemsPayload,
+      totalUnits,
+      totalCost,
+      estimatedSellingValue,
+      estimatedGrossProfit
     };
 
-    store.addProduct(newProduct);
-    toast.show({ message: `Successfully created product "${name}" with total initial stock of ${totalInitialStock} units`, type: 'success' });
-    if (onNavigate) onNavigate('inventory');
+    try {
+      const result = store.saveProductAndReceiveStock(payload);
+      toast.show({ message: `Product '${name}' saved successfully & ${totalUnits} units received!`, type: 'success' });
+      
+      if (onNavigate) {
+        onNavigate('purchases');
+      }
+    } catch (err) {
+      console.error('Error saving product and receiving stock:', err);
+      toast.show({ message: `Failed to save product: ${err.message}`, type: 'danger' });
+      isSubmitting = false;
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i data-lucide="check-circle" style="width: 18px; height: 18px;"></i> Save Product & Receive Stock';
+    }
   });
 
-  updateToggleButtons();
-  renderSizeChips();
+  // Initial render calls
+  updateHasSizesToggle();
+  updateStrategyInputs();
 
   if (window.lucide) window.lucide.createIcons();
   return container;
