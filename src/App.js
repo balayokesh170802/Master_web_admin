@@ -1442,15 +1442,16 @@ class StoreManager {
     let lowStockCount = 0;
     let outOfStockCount = 0;
 
-    this.data.products.forEach(p => {
-      p.variants.forEach(v => {
+    (this.data.products || []).forEach(p => {
+      const variants = (p.variants && (p.variants || []).length > 0) ? p.variants : [{ size: 'Standard', stock: p.totalStock || p.stock || 0, damaged: 0 }];
+      variants.forEach(v => {
         totalStock += (v.stock || 0);
         damagedStockCount += (v.damaged || 0);
         stockValue += ((v.stock || 0) * (p.purchasePrice || 0));
 
-        if (v.stock === 0) {
+        if ((v.stock || 0) === 0) {
           outOfStockCount++;
-        } else if (v.stock <= p.minStock) {
+        } else if ((v.stock || 0) <= (p.minStock || 5)) {
           lowStockCount++;
         }
       });
@@ -1717,8 +1718,9 @@ class StoreManager {
   }
 
   adjustStock(sku, newStock, reason) {
-    for (let p of this.data.products) {
-      let v = p.variants.find(v => v.sku === sku);
+    for (let p of (this.data.products || [])) {
+      const variants = p.variants || [];
+      let v = variants.find(v => v.sku === sku);
       if (v) {
         let diff = newStock - v.stock;
         v.stock = newStock;
@@ -3199,7 +3201,7 @@ function renderInventory(params = {}, onNavigate = null) {
 
     filteredProducts.forEach(p => {
       const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-      const hasSizes = p.variants && p.variants.length > 0 && p.variants.some(v => v.size !== 'Standard');
+      const hasSizes = p.variants && (p.variants || []).length > 0 && p.variants.some(v => v.size !== 'Standard');
       const isExpanded = expandedProductIds.has(p.id);
 
       let itemStatus = p.status || 'Active';
@@ -3227,7 +3229,7 @@ function renderInventory(params = {}, onNavigate = null) {
             ${chevronIcon}
             <div>
               <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">${p.name}</div>
-              ${hasSizes ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${p.variants.length} sizes available</div>` : ''}
+              ${hasSizes ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${(p.variants || []).length} sizes available</div>` : ''}
             </div>
           </div>
         </td>
@@ -3292,7 +3294,7 @@ function renderInventory(params = {}, onNavigate = null) {
                 <span style="font-size: 0.75rem; color: var(--text-secondary);">Click any size to adjust its stock</span>
               </div>
               <div style="display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center;">
-                ${p.variants.map(v => `
+                ${(p.variants || []).map(v => `
                   <div class="size-stock-pill" data-size="${v.size}" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.75rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.825rem; cursor: pointer; transition: all 0.15s ease;">
                     <span style="font-weight: 600; color: var(--text-primary);">${v.size}:</span>
                     <span style="font-weight: 600; color: ${v.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${v.stock} units</span>
@@ -3753,7 +3755,7 @@ function renderAddPurchasePage(onNavigate = null) {
 
       let sizeOptionsHtml = '';
       if (hasSizes) {
-        sizeOptionsHtml = selectedProd.variants.map(v => `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}</option>`).join('');
+        sizeOptionsHtml = (selectedProd.variants || []).map(v => `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}</option>`).join('');
       } else {
         sizeOptionsHtml = `<option value="Standard">Standard (No sizes)</option>`;
       }
@@ -4213,8 +4215,8 @@ function renderAddSalePage(onNavigate = null) {
       let availStock = 0;
 
       if (hasSizes) {
-        sizeOptionsHtml = selectedProd.variants.map(v => `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}</option>`).join('');
-        const selectedVariant = selectedProd.variants.find(v => v.size === item.size) || selectedProd.variants[0];
+        sizeOptionsHtml = (selectedProd.variants || []).map(v => `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}</option>`).join('');
+        const selectedVariant = (selectedProd.variants || []).find(v => v.size === item.size) || (selectedProd.variants || [])[0];
         if (selectedVariant) {
           availStock = selectedVariant.stock || 0;
           item.size = selectedVariant.size;
