@@ -2475,9 +2475,10 @@ function openSaleDetailsModal(saleInput) {
   const custName = sale.customer || sale.customerName || 'Walk-in Customer';
   let custId = sale.customerId || '';
   let custPhone = sale.phone || sale.customerPhone || '';
+  let matchedCustomer = null;
 
   if (custName && custName !== 'Walk-in Customer') {
-    const matchedCustomer = (store.data.customers || []).find(c => 
+    matchedCustomer = (store.data.customers || []).find(c => 
       (c.name && c.name.toLowerCase() === custName.toLowerCase()) ||
       (custPhone && custPhone !== '-' && c.phone && c.phone === custPhone)
     );
@@ -2502,6 +2503,7 @@ function openSaleDetailsModal(saleInput) {
   const items = Array.isArray(sale.items) && sale.items.length > 0 ? sale.items : [];
   let calculatedSubtotal = 0;
   let calculatedItemDiscount = 0;
+  let totalUnits = 0;
 
   const itemRowsHtml = items.length > 0 ? items.map((i, idx) => {
     const prodName = i.product || i.productName || i.name || 'Unnamed Product';
@@ -2519,34 +2521,37 @@ function openSaleDetailsModal(saleInput) {
     const qty = Number(i.qty !== undefined ? i.qty : (i.quantity || 1)) || 0;
     const unitPrice = Number(i.price !== undefined ? i.price : (i.sellingPrice || 0)) || 0;
     const itemDiscount = Number(i.discount || 0) || 0;
-    const itemTotal = i.amount !== undefined ? Number(i.amount) : ((unitPrice * qty) - itemDiscount);
+    const itemSubtotal = unitPrice * qty;
+    const itemTotal = i.amount !== undefined ? Number(i.amount) : (itemSubtotal - itemDiscount);
 
-    calculatedSubtotal += (unitPrice * qty);
+    totalUnits += qty;
+    calculatedSubtotal += itemSubtotal;
     calculatedItemDiscount += itemDiscount;
 
     return `
-      <tr style="border-bottom: 1px solid var(--border-color);">
-        <td style="font-weight: 600; color: var(--text-secondary); text-align: center; padding: 0.65rem 0.75rem;">${idx + 1}</td>
-        <td style="padding: 0.65rem 0.75rem;">
-          <div style="font-weight: 600; color: var(--text-primary); font-size: 0.85rem;">${prodName}</div>
-          ${i.sku ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">SKU: ${i.sku}</div>` : ''}
+      <tr style="border-bottom: 1px solid var(--border-color); transition: background-color 0.15s ease;">
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center; padding: 0.75rem 0.5rem; vertical-align: middle;">${idx + 1}</td>
+        <td style="padding: 0.75rem; vertical-align: middle;">
+          <div style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">${prodName}</div>
+          ${i.sku ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px; font-family: monospace;">SKU: ${i.sku}</div>` : ''}
         </td>
-        <td style="padding: 0.65rem 0.75rem;">
-          <span style="display: inline-block; padding: 0.15rem 0.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.8rem; font-weight: 500;">
+        <td style="padding: 0.75rem; text-align: center; vertical-align: middle;">
+          <span style="display: inline-block; padding: 0.2rem 0.55rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.785rem; font-weight: 600; color: var(--text-primary);">
             ${sizeDisplay}
           </span>
         </td>
-        <td style="font-weight: 600; color: var(--text-primary); text-align: center; padding: 0.65rem 0.75rem; font-size: 0.85rem;">${qty}</td>
-        <td style="color: var(--text-secondary); font-size: 0.85rem; padding: 0.65rem 0.75rem;">₹${unitPrice.toLocaleString('en-IN')}</td>
-        <td style="color: ${itemDiscount > 0 ? 'var(--status-warning)' : 'var(--text-secondary)'}; font-size: 0.85rem; padding: 0.65rem 0.75rem;">
-          ${itemDiscount > 0 ? `₹${itemDiscount.toLocaleString('en-IN')}` : '—'}
+        <td style="font-weight: 600; color: var(--text-primary); text-align: center; padding: 0.75rem; font-size: 0.875rem; vertical-align: middle;">${qty}</td>
+        <td style="color: var(--text-primary); font-size: 0.875rem; text-align: right; padding: 0.75rem; vertical-align: middle;">₹${unitPrice.toLocaleString('en-IN')}</td>
+        <td style="color: var(--text-secondary); font-size: 0.875rem; text-align: right; padding: 0.75rem; vertical-align: middle;">₹${itemSubtotal.toLocaleString('en-IN')}</td>
+        <td style="color: ${itemDiscount > 0 ? 'var(--status-warning, #f59e0b)' : 'var(--text-secondary)'}; font-size: 0.875rem; text-align: right; padding: 0.75rem; vertical-align: middle; font-weight: ${itemDiscount > 0 ? '600' : 'normal'};">
+          ${itemDiscount > 0 ? `-₹${itemDiscount.toLocaleString('en-IN')}` : '—'}
         </td>
-        <td style="font-weight: 700; color: var(--text-primary); text-align: right; padding: 0.65rem 0.75rem; font-size: 0.85rem;">₹${itemTotal.toLocaleString('en-IN')}</td>
+        <td style="font-weight: 700; color: var(--text-primary); text-align: right; padding: 0.75rem; font-size: 0.875rem; vertical-align: middle;">₹${itemTotal.toLocaleString('en-IN')}</td>
       </tr>
     `;
   }).join('') : `
     <tr>
-      <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 1.5rem; font-size: 0.85rem;">No itemized products recorded for this sale.</td>
+      <td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem; font-size: 0.875rem;">No itemized products recorded for this sale.</td>
     </tr>
   `;
 
@@ -2555,15 +2560,24 @@ function openSaleDetailsModal(saleInput) {
   const overallDiscount = (sale.discount !== undefined && sale.discount !== null) ? Number(sale.discount) : calculatedItemDiscount;
   const otherCharges = Number(sale.tax || sale.otherCharges || sale.charges || 0) || 0;
   const finalTotal = sale.totalAmount !== undefined ? Number(sale.totalAmount) : Math.max(0, subtotal - overallDiscount + otherCharges);
+  const totalItemsCount = items.length;
+  const totalUnitsCount = totalUnits > 0 ? totalUnits : (Number(sale.itemCount) || items.length);
 
-  // 5. Build Modal DOM Elements
+  // 5. Additional Sale Information Check
+  const notes = sale.notes || sale.note || '';
+  const staff = sale.staff || sale.cashier || sale.salesperson || '';
+  const paymentRef = sale.paymentReference || sale.paymentRef || sale.transactionId || '';
+  const returnStatus = sale.returnStatus || sale.refundStatus || '';
+  const hasAdditionalInfo = Boolean(notes || staff || paymentRef || returnStatus);
+
+  // 6. Build Modal DOM Elements
   const modalEl = document.createElement('div');
-  modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
+  modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%;';
 
   let modalObj;
   const modalBreadcrumb = createBreadcrumb([
     { label: 'Sales', target: 'sales' },
-    { label: 'Sale Details' }
+    { label: `Sale Details (${saleRef})` }
   ], (target, params) => {
     if (modalObj && modalObj.closeModal) modalObj.closeModal();
     if (window.appInstance) window.appInstance.navigateTo(target, params);
@@ -2571,54 +2585,129 @@ function openSaleDetailsModal(saleInput) {
   modalEl.appendChild(modalBreadcrumb);
 
   const innerContent = document.createElement('div');
-  innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
+  innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%;';
   innerContent.innerHTML = `
-    <!-- Top Details Overview Grid -->
-    <div style="background: var(--bg-secondary); padding: 0.85rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; font-size: 0.85rem;">
-      <div>
-        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Customer</div>
-        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.15rem; display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
-          <span>${custName}</span>
-          ${custId ? `<span class="badge badge-secondary" style="font-size: 0.7rem; padding: 0.1rem 0.4rem;">${custId}</span>` : ''}
+    <!-- 1. Top Sale Summary KPI Cards -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.85rem;">
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
+        <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">Invoice / Bill ID</div>
+        <div style="font-weight: 700; font-size: 1.05rem; color: var(--text-primary); margin-top: 0.25rem; font-family: monospace;">${saleRef}</div>
+        <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 0.25rem; display: flex; align-items: center; gap: 0.35rem;">
+          <i data-lucide="calendar" style="width: 12px; height: 12px;"></i>
+          <span>${saleDate}</span>
         </div>
-        ${custPhone && custPhone !== '-' ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.1rem;">${custPhone}</div>` : ''}
       </div>
-      <div>
-        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Invoice / Bill ID</div>
-        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.15rem;">${saleRef}</div>
-        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.1rem;">${sale.itemCount || items.reduce((s, it) => s + (it.qty || 1), 0)} items</div>
+
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
+        <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">Total Payable</div>
+        <div style="font-weight: 700; font-size: 1.25rem; color: var(--brand-primary); margin-top: 0.2rem;">₹${finalTotal.toLocaleString('en-IN')}</div>
+        <div style="margin-top: 0.25rem;">
+          ${createBadge({ label: paymentStatus, variant: statusBadgeVariant }).outerHTML}
+        </div>
       </div>
-      <div>
-        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Sale Date</div>
-        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.15rem;">${saleDate}</div>
+
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
+        <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">Items & Units Sold</div>
+        <div style="font-weight: 700; font-size: 1.15rem; color: var(--text-primary); margin-top: 0.2rem;">
+          ${totalUnitsCount} <span style="font-size: 0.825rem; font-weight: 500; color: var(--text-secondary);">Units</span>
+        </div>
+        <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 0.25rem;">
+          ${totalItemsCount} line item${totalItemsCount === 1 ? '' : 's'}
+        </div>
       </div>
-      <div>
-        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Payment Method</div>
-        <div style="margin-top: 0.2rem;">${createBadge({ label: paymentMethod, variant: 'secondary' }).outerHTML}</div>
-      </div>
-      <div>
-        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Payment Status</div>
-        <div style="margin-top: 0.2rem;">${createBadge({ label: paymentStatus, variant: statusBadgeVariant }).outerHTML}</div>
+
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
+        <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">Payment Method</div>
+        <div style="font-weight: 600; font-size: 0.95rem; color: var(--text-primary); margin-top: 0.25rem; display: flex; align-items: center; gap: 0.4rem;">
+          <i data-lucide="credit-card" style="width: 15px; height: 15px; color: var(--text-secondary);"></i>
+          <span>${paymentMethod}</span>
+        </div>
+        <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 0.3rem;">
+          ${createBadge({ label: paymentMethod, variant: 'secondary' }).outerHTML}
+        </div>
       </div>
     </div>
 
-    <!-- Itemized Products Table -->
-    <div>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-        <h4 style="font-size: 0.875rem; font-weight: 600; margin: 0; color: var(--text-primary);">Itemized Bill Details</h4>
-        <span style="font-size: 0.75rem; color: var(--text-secondary);">${items.length} product${items.length === 1 ? '' : 's'}</span>
+    <!-- 2. Dedicated Customer Details Section -->
+    <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem 1.25rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="user" style="width: 16px; height: 16px; color: var(--brand-primary);"></i>
+          <h4 style="margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em;">Customer Details</h4>
+        </div>
+        ${custId ? `<span class="badge badge-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.55rem; font-weight: 600;"><i data-lucide="tag" style="width: 11px; height: 11px; margin-right: 4px; display: inline-block; vertical-align: -1px;"></i>ID: ${custId}</span>` : ''}
       </div>
-      <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);">
-        <table class="admin-table" style="font-size: 0.825rem; margin: 0;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.85rem 1.25rem; font-size: 0.85rem;">
+        <div>
+          <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Customer Name</div>
+          <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.2rem; font-size: 0.95rem;">${custName}</div>
+        </div>
+        <div>
+          <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Customer ID</div>
+          <div style="font-weight: 500; color: var(--text-primary); margin-top: 0.2rem; font-family: monospace;">${custId ? custId : '—'}</div>
+        </div>
+        <div>
+          <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Phone Number</div>
+          <div style="font-weight: 500; color: ${custPhone && custPhone !== '-' ? 'var(--text-primary)' : 'var(--text-secondary)'}; margin-top: 0.2rem;">
+            ${custPhone && custPhone !== '-' ? custPhone : '—'}
+          </div>
+        </div>
+        ${matchedCustomer && matchedCustomer.ordersCount !== undefined ? `
+          <div>
+            <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Total Orders</div>
+            <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.2rem;">${matchedCustomer.ordersCount} orders</div>
+          </div>
+        ` : ''}
+        ${matchedCustomer && matchedCustomer.totalSpend !== undefined ? `
+          <div>
+            <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Lifetime Spend</div>
+            <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.2rem;">₹${Number(matchedCustomer.totalSpend).toLocaleString('en-IN')}</div>
+          </div>
+        ` : ''}
+        ${matchedCustomer && matchedCustomer.lastPurchase ? `
+          <div>
+            <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Last Purchase</div>
+            <div style="font-weight: 500; color: var(--text-primary); margin-top: 0.2rem;">${matchedCustomer.lastPurchase}</div>
+          </div>
+        ` : ''}
+        ${matchedCustomer && matchedCustomer.email ? `
+          <div>
+            <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Email</div>
+            <div style="font-weight: 500; color: var(--text-primary); margin-top: 0.2rem;">${matchedCustomer.email}</div>
+          </div>
+        ` : ''}
+        ${matchedCustomer && matchedCustomer.address ? `
+          <div>
+            <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Address</div>
+            <div style="font-weight: 500; color: var(--text-primary); margin-top: 0.2rem;">${matchedCustomer.address}</div>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+
+    <!-- 3. Itemized Bill Details Table -->
+    <div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="shopping-bag" style="width: 16px; height: 16px; color: var(--brand-primary);"></i>
+          <h4 style="font-size: 0.9rem; font-weight: 600; margin: 0; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em;">Itemized Bill Details</h4>
+        </div>
+        <span style="font-size: 0.775rem; color: var(--text-secondary); font-weight: 500;">
+          ${items.length} line item${items.length === 1 ? '' : 's'} (${totalUnitsCount} total units)
+        </span>
+      </div>
+      <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-surface); overflow-x: auto;">
+        <table class="admin-table" style="font-size: 0.85rem; margin: 0; width: 100%; border-collapse: collapse;">
           <thead>
-            <tr style="background: var(--bg-secondary);">
-              <th style="width: 5%; text-align: center; padding: 0.6rem 0.75rem;">#</th>
-              <th style="width: 32%; padding: 0.6rem 0.75rem;">Product</th>
-              <th style="width: 13%; padding: 0.6rem 0.75rem;">Size</th>
-              <th style="width: 10%; text-align: center; padding: 0.6rem 0.75rem;">Qty</th>
-              <th style="width: 14%; padding: 0.6rem 0.75rem;">Price / Unit</th>
-              <th style="width: 12%; padding: 0.6rem 0.75rem;">Discount</th>
-              <th style="width: 14%; text-align: right; padding: 0.6rem 0.75rem;">Total</th>
+            <tr style="background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+              <th style="width: 5%; text-align: center; padding: 0.7rem 0.5rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">#</th>
+              <th style="width: 27%; text-align: left; padding: 0.7rem 0.75rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Product Name</th>
+              <th style="width: 12%; text-align: center; padding: 0.7rem 0.75rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Size / Variant</th>
+              <th style="width: 8%; text-align: center; padding: 0.7rem 0.5rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Quantity</th>
+              <th style="width: 12%; text-align: right; padding: 0.7rem 0.75rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Price / Unit</th>
+              <th style="width: 12%; text-align: right; padding: 0.7rem 0.75rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Item Subtotal</th>
+              <th style="width: 10%; text-align: right; padding: 0.7rem 0.75rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Discount</th>
+              <th style="width: 14%; text-align: right; padding: 0.7rem 0.75rem; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Final Total</th>
             </tr>
           </thead>
           <tbody>
@@ -2628,27 +2717,104 @@ function openSaleDetailsModal(saleInput) {
       </div>
     </div>
 
-    <!-- Financial Summary -->
-    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.875rem;">
-      <div style="display: flex; justify-content: space-between; width: 250px; color: var(--text-secondary);">
-        <span>Items Subtotal:</span>
-        <strong style="color: var(--text-primary);">₹${subtotal.toLocaleString('en-IN')}</strong>
+    <!-- 4. Lower Two-Column Section: Additional Sale Information & Bill Calculation Summary -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; align-items: start;">
+      <!-- Left Column: Additional Sale Information -->
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.15rem 1.25rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+          <i data-lucide="file-text" style="width: 16px; height: 16px; color: var(--brand-primary);"></i>
+          <h4 style="margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em;">Additional Sale Information</h4>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 0.65rem; font-size: 0.85rem;">
+          ${notes ? `
+            <div>
+              <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Notes / Remarks</div>
+              <div style="color: var(--text-primary); margin-top: 0.15rem; font-style: italic;">"${notes}"</div>
+            </div>
+          ` : ''}
+          ${staff ? `
+            <div>
+              <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Staff / Cashier</div>
+              <div style="color: var(--text-primary); font-weight: 500; margin-top: 0.15rem;">${staff}</div>
+            </div>
+          ` : ''}
+          ${paymentRef ? `
+            <div>
+              <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Payment Reference</div>
+              <div style="color: var(--text-primary); font-family: monospace; font-size: 0.8rem; margin-top: 0.15rem;">${paymentRef}</div>
+            </div>
+          ` : ''}
+          ${returnStatus ? `
+            <div>
+              <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Return / Refund Status</div>
+              <div style="margin-top: 0.2rem;"><span class="badge badge-warning">${returnStatus}</span></div>
+            </div>
+          ` : ''}
+          ${!hasAdditionalInfo ? `
+            <div style="color: var(--text-secondary); font-size: 0.825rem; line-height: 1.6;">
+              <div style="display: flex; justify-content: space-between; padding: 0.2rem 0;">
+                <span style="color: var(--text-secondary);">Sales Channel:</span>
+                <span style="font-weight: 500; color: var(--text-primary);">Point of Sale (In-Store)</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 0.2rem 0;">
+                <span style="color: var(--text-secondary);">Terminal:</span>
+                <span style="font-weight: 500; color: var(--text-primary);">Master Admin Register</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding: 0.2rem 0;">
+                <span style="color: var(--text-secondary);">Fulfillment Status:</span>
+                <span style="font-weight: 500; color: var(--status-success, #10b981);">Fulfilled & Delivered</span>
+              </div>
+            </div>
+          ` : ''}
+        </div>
       </div>
-      ${overallDiscount > 0 ? `
-        <div style="display: flex; justify-content: space-between; width: 250px; color: var(--status-warning);">
-          <span>Discount:</span>
-          <strong>-₹${overallDiscount.toLocaleString('en-IN')}</strong>
+
+      <!-- Right Column: Bill Calculation Summary -->
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.15rem 1.25rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+          <i data-lucide="calculator" style="width: 16px; height: 16px; color: var(--brand-primary);"></i>
+          <h4 style="margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em;">Bill Calculation Summary</h4>
         </div>
-      ` : ''}
-      ${otherCharges > 0 ? `
-        <div style="display: flex; justify-content: space-between; width: 250px; color: var(--text-secondary);">
-          <span>Other Charges / Tax:</span>
-          <strong>+₹${otherCharges.toLocaleString('en-IN')}</strong>
+        <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.875rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; color: var(--text-secondary);">
+            <span>Items Subtotal:</span>
+            <strong style="color: var(--text-primary);">₹${subtotal.toLocaleString('en-IN')}</strong>
+          </div>
+          ${overallDiscount > 0 ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--status-warning, #f59e0b);">
+              <span>Discount:</span>
+              <strong>-₹${overallDiscount.toLocaleString('en-IN')}</strong>
+            </div>
+          ` : ''}
+          ${otherCharges > 0 ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--text-secondary);">
+              <span>Additional Charges / Taxes:</span>
+              <strong style="color: var(--text-primary);">+₹${otherCharges.toLocaleString('en-IN')}</strong>
+            </div>
+          ` : ''}
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 0.65rem; margin-top: 0.35rem; font-size: 1.05rem; font-weight: 700;">
+            <span style="color: var(--text-primary);">Final Total:</span>
+            <span style="color: var(--brand-primary); font-size: 1.2rem;">₹${finalTotal.toLocaleString('en-IN')}</span>
+          </div>
+          ${sale.amountPaid !== undefined && sale.amountPaid !== null ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--text-secondary); padding-top: 0.25rem;">
+              <span>Amount Paid:</span>
+              <strong style="color: var(--text-primary);">₹${Number(sale.amountPaid).toLocaleString('en-IN')}</strong>
+            </div>
+          ` : ''}
+          ${sale.balanceDue !== undefined && sale.balanceDue !== null ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--status-warning, #f59e0b);">
+              <span>Balance Due:</span>
+              <strong>₹${Number(sale.balanceDue).toLocaleString('en-IN')}</strong>
+            </div>
+          ` : ''}
+          ${sale.changeReturned !== undefined && sale.changeReturned !== null ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--text-secondary);">
+              <span>Change Returned:</span>
+              <strong style="color: var(--text-primary);">₹${Number(sale.changeReturned).toLocaleString('en-IN')}</strong>
+            </div>
+          ` : ''}
         </div>
-      ` : ''}
-      <div style="display: flex; justify-content: space-between; width: 250px; font-size: 1.05rem; font-weight: 700; color: var(--text-primary); border-top: 1px solid var(--border-color); padding-top: 0.35rem; margin-top: 0.25rem;">
-        <span>Final Total:</span>
-        <span style="color: var(--brand-primary);">₹${finalTotal.toLocaleString('en-IN')}</span>
       </div>
     </div>
   `;
@@ -2679,9 +2845,20 @@ function openSaleDetailsModal(saleInput) {
   if (modalObj && modalObj.overlay) {
     const mc = modalObj.overlay.querySelector('.modal-content');
     if (mc) {
-      mc.style.maxWidth = '720px';
-      mc.style.width = '94%';
+      mc.style.maxWidth = '840px';
+      mc.style.width = '95%';
+      mc.style.maxHeight = '90vh';
+      mc.style.display = 'flex';
+      mc.style.flexDirection = 'column';
+      mc.style.overflow = 'hidden';
     }
+    const mb = modalObj.overlay.querySelector('.modal-body');
+    if (mb) {
+      mb.style.overflowY = 'auto';
+      mb.style.flex = '1';
+      mb.style.padding = '1.25rem 1.5rem';
+    }
+    if (window.lucide) window.lucide.createIcons();
   }
 }
 
