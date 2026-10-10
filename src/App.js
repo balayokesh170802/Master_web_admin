@@ -3877,11 +3877,10 @@ function renderInventory(params = {}, onNavigate = null) {
         <thead>
           <tr>
             <th style="width: 5%; text-align: center;">S.No</th>
-            <th style="width: 25%;">Product Name</th>
-            <th style="width: 13%;">Category</th>
-            <th style="width: 13%;">Brand</th>
-            <th style="width: 14%;">Selling Price</th>
-            <th style="width: 12%;">Total Available Stock</th>
+            <th style="width: 30%;">Product Name</th>
+            <th style="width: 14%;">Category</th>
+            <th style="width: 14%;">Brand</th>
+            <th style="width: 13%;">Total Available Stock</th>
             <th style="width: 10%;">Stock Status</th>
             <th style="width: 14%; text-align: right;">Actions</th>
           </tr>
@@ -4060,8 +4059,6 @@ function renderInventory(params = {}, onNavigate = null) {
         statusBadge = createBadge({ label: 'In Stock', variant: 'success' });
       }
 
-      const priceInfo = getProductPriceInfo(p);
-
       // Subtitle under Total Available Stock for products with sizes
       let stockSubtitle = '';
       if (hasSizes) {
@@ -4097,7 +4094,6 @@ function renderInventory(params = {}, onNavigate = null) {
         </td>
         <td style="color: var(--text-secondary);">${p.category || 'General'}</td>
         <td style="color: var(--text-secondary);">${p.brand || 'Unbranded'}</td>
-        <td style="font-weight: 600; color: var(--text-primary);">${priceInfo.display}</td>
         <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">
           <div>${totalStock} units</div>
           ${stockSubtitle}
@@ -4198,7 +4194,7 @@ function renderInventory(params = {}, onNavigate = null) {
         }).join('');
 
         subTr.innerHTML = `
-          <td colspan="8" style="padding: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+          <td colspan="7" style="padding: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
             <div style="padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
               <div style="display: flex; align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
