@@ -4139,6 +4139,25 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
   let adjType = 'ADD';
   let adjQty = 1;
 
+  const ADD_STOCK_REASONS = [
+    'Found Stock',
+    'Stock Correction / Audit',
+    'Supplier Extra Stock',
+    'Opening Stock',
+    'Manual Stock Update',
+    'Other'
+  ];
+
+  const REMOVE_STOCK_REASONS = [
+    'Damaged Stock',
+    'Missing / Lost Stock',
+    'Stock Correction / Audit',
+    'Expired Stock',
+    'Manual Stock Update',
+    'Other'
+  ];
+  // Support legacy reason identifiers: 'Damaged Stock (Write-off)', 'Missing / Discrepancy'
+
   function getCurrentStock() {
     return selectedVariant ? Math.max(0, Number(selectedVariant.stock) || 0) : 0;
   }
@@ -4248,13 +4267,7 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
             Reason for Adjustment <span style="color: var(--status-danger);">*</span>
           </label>
           <select id="adj-reason-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
-            <option value="Stock Correction / Audit" selected>Stock Correction / Audit</option>
-            <option value="Damaged Stock (Write-off)">Damaged Stock (Write-off)</option>
-            <option value="Missing / Lost Stock">Missing / Discrepancy</option>
-            <option value="Found Stock">Found Stock</option>
-            <option value="Manual Stock Update">Manual Stock Update</option>
-            <option value="Customer Return">Customer Return</option>
-            <option value="Other">Other</option>
+            ${ADD_STOCK_REASONS.map(r => `<option value="${r}">${r}</option>`).join('')}
           </select>
         </div>
 
@@ -4284,11 +4297,30 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
 
   const sizeSel = modal.querySelector('#adj-size-select');
   const typeSel = modal.querySelector('#adj-type-select');
+  const reasonSel = modal.querySelector('#adj-reason-select');
   const qtyInp = modal.querySelector('#adj-qty-input');
   const curStockLabel = modal.querySelector('#adj-current-stock-label');
   const newStockLabel = modal.querySelector('#adj-new-stock-label');
   const qtyErrorEl = modal.querySelector('#adj-qty-error');
   const saveBtn = modal.querySelector('.save-modal-btn');
+
+  function updateReasonOptions(type) {
+    if (!reasonSel) return;
+    const currentVal = reasonSel.value;
+    const reasonsList = (type === 'ADD') ? ADD_STOCK_REASONS : REMOVE_STOCK_REASONS;
+
+    reasonSel.innerHTML = reasonsList.map(r => `<option value="${r}">${r}</option>`).join('');
+
+    // If currently selected reason is valid for the newly selected adjustment type, retain it; otherwise reset to first option
+    if (reasonsList.includes(currentVal)) {
+      reasonSel.value = currentVal;
+    } else {
+      reasonSel.value = reasonsList[0];
+    }
+  }
+
+  // Initialize dynamic reason options for initial adjustment type
+  updateReasonOptions(adjType);
 
   function updateCalc() {
     if (sizeSel) {
@@ -4334,7 +4366,10 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
   }
 
   if (sizeSel) sizeSel.onchange = updateCalc;
-  typeSel.onchange = updateCalc;
+  typeSel.onchange = () => {
+    updateReasonOptions(typeSel.value);
+    updateCalc();
+  };
   qtyInp.oninput = updateCalc;
 
   let isSaving = false;
