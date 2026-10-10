@@ -3678,14 +3678,13 @@ function renderPurchases(params = {}, onNavigate = null) {
       <table class="admin-table" style="font-size: 0.875rem;">
         <thead>
           <tr>
-            <th style="width: 14%;">Purchase ID</th>
-            <th style="width: 18%;">Supplier</th>
-            <th style="width: 12%;">Date</th>
-            <th style="width: 20%;">Products / Items</th>
-            <th style="width: 12%;">Units (Rec / Ord)</th>
-            <th style="width: 12%;">Total Cost</th>
+            <th style="width: 8%; text-align: center;">S.No</th>
+            <th style="width: 22%;">Supplier</th>
+            <th style="width: 14%;">Date</th>
+            <th style="width: 16%;">Units (Rec / Ord)</th>
+            <th style="width: 14%;">Total Cost</th>
             <th style="width: 12%;">Status</th>
-            <th style="width: 16%; text-align: right;">Actions</th>
+            <th style="width: 14%; text-align: right;">Actions</th>
           </tr>
         </thead>
         <tbody id="pur-table-tbody"></tbody>
@@ -3723,11 +3722,11 @@ function renderPurchases(params = {}, onNavigate = null) {
     });
 
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No purchases found matching filter.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No purchases found matching filter.</td></tr>`;
       return;
     }
 
-    filtered.forEach(p => {
+    filtered.forEach((p, index) => {
       const tr = document.createElement('tr');
       tr.style.cursor = 'pointer';
 
@@ -3741,10 +3740,6 @@ function renderPurchases(params = {}, onNavigate = null) {
       // Calculate total ordered and total received
       const totalOrdered = p.totalQuantity || (p.items || []).reduce((s, i) => s + (i.qty || 0), 0);
       const totalReceived = p.totalReceived !== undefined ? p.totalReceived : (p.items || []).reduce((s, i) => s + (i.receivedQty || (status === 'Completed' || status === 'Received' ? (i.qty || 0) : 0)), 0);
-
-      const itemsSummary = (p.items && p.items.length > 0)
-        ? p.items.map(i => `${i.product || 'Item'} (${i.size || 'Std'})`).slice(0, 2).join(', ') + (p.items.length > 2 ? ` +${p.items.length - 2} more` : '')
-        : (p.productName || 'General Items');
 
       // Row Actions according to Status:
       // Draft: Approve, Edit, Delete
@@ -3793,10 +3788,9 @@ function renderPurchases(params = {}, onNavigate = null) {
       }
 
       tr.innerHTML = `
-        <td style="font-weight: 700; color: var(--brand-primary);">${p.id || '-'}</td>
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
         <td style="font-weight: 600; color: var(--text-primary);">${p.supplier || 'Supplier'}</td>
         <td style="color: var(--text-secondary);">${p.date || '-'}</td>
-        <td style="color: var(--text-primary); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${itemsSummary}</td>
         <td style="font-weight: 600; color: var(--text-primary);">
           ${status === 'Partially Received' ? `<span style="color: var(--brand-primary);">${totalReceived}</span> / ${totalOrdered}` : `${totalOrdered} units`}
         </td>
