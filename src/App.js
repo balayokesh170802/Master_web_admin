@@ -4073,7 +4073,7 @@ function renderInventory(params = {}, onNavigate = null) {
 
       // Main Product Row
       const tr = document.createElement('tr');
-      tr.style.cssText = 'transition: background-color 0.15s ease;';
+      tr.style.cssText = hasSizes ? 'cursor: pointer; transition: background-color 0.15s ease;' : 'transition: background-color 0.15s ease;';
 
       const chevronIcon = hasSizes
         ? `<button type="button" class="expand-toggle-btn" title="${isExpanded ? 'Collapse sizes' : 'Expand sizes'}" style="background: none; border: none; padding: 2px 4px; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; border-radius: 4px; transition: color 0.15s ease;">
@@ -4117,17 +4117,31 @@ function renderInventory(params = {}, onNavigate = null) {
         </td>
       `;
 
-      // Expand/collapse toggle click
-      if (hasSizes) {
-        const toggleBtn = tr.querySelector('.expand-toggle-btn');
-        const handleToggle = (e) => {
-          e.stopPropagation();
-          if (expandedProductIds.has(p.id)) expandedProductIds.delete(p.id);
-          else expandedProductIds.add(p.id);
-          renderInventoryTable();
-        };
+      // Expand/collapse toggle helper
+      const toggleExpand = () => {
+        if (!hasSizes) return;
+        if (expandedProductIds.has(p.id)) expandedProductIds.delete(p.id);
+        else expandedProductIds.add(p.id);
+        renderInventoryTable();
+      };
 
-        if (toggleBtn) toggleBtn.addEventListener('click', handleToggle);
+      // Expand/collapse when clicking anywhere on parent product row
+      if (hasSizes) {
+        tr.addEventListener('click', (e) => {
+          // Do not toggle if click originated on an action button or inside action controls
+          if (e.target.closest('.table-action-btn') || e.target.closest('.row-actions-box')) {
+            return;
+          }
+          toggleExpand();
+        });
+
+        const toggleBtn = tr.querySelector('.expand-toggle-btn');
+        if (toggleBtn) {
+          toggleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleExpand();
+          });
+        }
       }
 
       tr.querySelector('.view-inv-btn').addEventListener('click', (e) => {
