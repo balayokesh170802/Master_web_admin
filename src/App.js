@@ -2288,13 +2288,15 @@ function openProductDetailsModal(productInput) {
 
   const isPriceSet = product.sellingPrice !== null && product.sellingPrice !== undefined && product.sellingPrice > 0;
   const priceDisplay = isPriceSet ? `₹${(product.sellingPrice || 0).toLocaleString()}` : 'Price Not Set';
+  const stockInfo = typeof getProductStockStatus === 'function' ? getProductStockStatus(product) : { label: product.status || 'Active', variant: 'secondary' };
 
   innerContent.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color);">
       <div>
         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
           <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin: 0;">${product.name}</h3>
-          ${createBadge({ label: product.status || 'Active', variant: 'secondary' }).outerHTML}
+          ${createBadge({ label: stockInfo.label, variant: stockInfo.variant }).outerHTML}
+          ${product.status === 'Inactive' ? createBadge({ label: 'Inactive', variant: 'secondary' }).outerHTML : ''}
         </div>
         <div style="font-size: 0.8rem; color: var(--text-secondary); display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
           <span>Category: <strong>${product.category || 'General'}</strong></span>
@@ -3343,7 +3345,163 @@ function renderOverview(onNavigate) {
 
   if (window.lucide) window.lucide.createIcons();
   return container;
-}// INVENTORY PAGE (GROUPED PRODUCTS + EXPANDABLE SIZE DETAILS)
+}
+
+// HELPER: CALCULATE OVERALL PRODUCT STOCK STATUS ACCORDING TO SIZE-WISE RULES
+function getProductStockStatus(product) {
+  if (!product) {
+    return {
+      status: 'OUT_OF_STOCK',
+      label: 'Out of Stock',
+      variant: 'danger',
+      totalStock: 0,
+      hasSizes: false,
+      totalSizes: 0,
+      availableSizes: 0,
+      outOfStockSizes: 0
+    };
+  }
+
+  if (product.status === 'Inactive') {
+    return {
+      status: 'Inactive',
+      label: 'Inactive',
+      variant: 'secondary',
+      totalStock: 0,
+      hasSizes: false,
+      totalSizes: 0,
+      availableSizes: 0,
+      outOfStockSizes: 0
+    };
+  }
+
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  const hasSizes = variants.length > 0 && variants.some(v => v.size && v.size !== 'Standard');
+  const threshold = Number(product.minStock) || 5;
+
+  if (hasSizes) {
+    const totalSizes = variants.length;
+    let availableSizes = 0;
+    let outOfStockSizes = 0;
+    let totalStock = 0;
+    let hasLowStockSize = false;
+
+    variants.forEach(v => {
+      const stock = Math.max(0, Number(v.stock) || 0);
+      totalStock += stock;
+      if (stock === 0) {
+        outOfStockSizes++;
+      } else {
+        availableSizes++;
+        if (stock <= threshold) {
+          hasLowStockSize = true;
+        }
+      }
+    });
+
+    // Priority rules:
+    // 1. If all sizes have zero stock, show Out of Stock.
+    if (outOfStockSizes === totalSizes || totalStock === 0) {
+      return {
+        status: 'OUT_OF_STOCK',
+        label: 'Out of Stock',
+        variant: 'danger',
+        totalStock,
+        hasSizes: true,
+        totalSizes,
+        availableSizes,
+        outOfStockSizes
+      };
+    }
+
+    // 2. If some sizes have stock and others have zero stock, show Partial Stock.
+    if (availableSizes > 0 && outOfStockSizes > 0) {
+      return {
+        status: 'PARTIAL_STOCK',
+        label: 'Partial Stock',
+        variant: 'warning',
+        totalStock,
+        hasSizes: true,
+        totalSizes,
+        availableSizes,
+        outOfStockSizes
+      };
+    }
+
+    // 3. If no sizes are out of stock but at least one size is at or below the low-stock threshold, show Low Stock.
+    if (hasLowStockSize) {
+      return {
+        status: 'LOW_STOCK',
+        label: 'Low Stock',
+        variant: 'warning',
+        totalStock,
+        hasSizes: true,
+        totalSizes,
+        availableSizes,
+        outOfStockSizes: 0
+      };
+    }
+
+    // 4. Otherwise, show In Stock.
+    return {
+      status: 'IN_STOCK',
+      label: 'In Stock',
+      variant: 'success',
+      totalStock,
+      hasSizes: true,
+      totalSizes,
+      availableSizes,
+      outOfStockSizes: 0
+    };
+  } else {
+    // Products Without Sizes:
+    // Retain existing individual-product status logic: In Stock, Low Stock, Out of Stock.
+    // Do not display Partial Stock for products without sizes.
+    const totalStock = variants.length > 0
+      ? variants.reduce((sum, v) => sum + Math.max(0, Number(v.stock) || 0), 0)
+      : Math.max(0, Number(product.stock || product.totalStock) || 0);
+
+    if (totalStock === 0) {
+      return {
+        status: 'OUT_OF_STOCK',
+        label: 'Out of Stock',
+        variant: 'danger',
+        totalStock: 0,
+        hasSizes: false,
+        totalSizes: 0,
+        availableSizes: 0,
+        outOfStockSizes: 0
+      };
+    }
+
+    if (totalStock <= threshold) {
+      return {
+        status: 'LOW_STOCK',
+        label: 'Low Stock',
+        variant: 'warning',
+        totalStock,
+        hasSizes: false,
+        totalSizes: 0,
+        availableSizes: 0,
+        outOfStockSizes: 0
+      };
+    }
+
+    return {
+      status: 'IN_STOCK',
+      label: 'In Stock',
+      variant: 'success',
+      totalStock,
+      hasSizes: false,
+      totalSizes: 0,
+      availableSizes: 0,
+      outOfStockSizes: 0
+    };
+  }
+}
+window.getProductStockStatus = getProductStockStatus;
+
+// INVENTORY PAGE (GROUPED PRODUCTS + EXPANDABLE SIZE DETAILS)
 function renderInventory(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
@@ -3351,30 +3509,50 @@ function renderInventory(params = {}, onNavigate = null) {
   let searchQuery = '';
   let selectedCategory = 'ALL';
   let selectedBrand = 'ALL';
-  let selectedStatus = params.status || 'ALL';
+  let selectedStatus = 'ALL';
+  if (params && params.status) {
+    if (params.status === 'LOW' || params.status === 'LOW_STOCK') selectedStatus = 'LOW';
+    else if (params.status === 'OUT' || params.status === 'OUT_OF_STOCK') selectedStatus = 'OUT';
+    else if (params.status === 'PARTIAL' || params.status === 'PARTIAL_STOCK') selectedStatus = 'PARTIAL_STOCK';
+    else if (params.status === 'IN_STOCK' || params.status === 'Active') selectedStatus = 'IN_STOCK';
+    else selectedStatus = params.status;
+  }
   let selectedSort = 'name-asc';
   const expandedProductIds = new Set();
 
-  // 1. Breadcrumb Header
+  // 1. Breadcrumb Header with Product Count Badge
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
 
   let invBreadcrumbItems = [
     { label: 'Inventory' }
   ];
-  if (params && params.status === 'LOW') {
+  if (selectedStatus === 'LOW') {
     invBreadcrumbItems = [
       { label: 'Inventory', target: 'inventory' },
       { label: 'Low Stock' }
     ];
-  } else if (params && params.status === 'OUT') {
+  } else if (selectedStatus === 'OUT') {
     invBreadcrumbItems = [
       { label: 'Inventory', target: 'inventory' },
       { label: 'Out of Stock' }
     ];
+  } else if (selectedStatus === 'PARTIAL_STOCK') {
+    invBreadcrumbItems = [
+      { label: 'Inventory', target: 'inventory' },
+      { label: 'Partial Stock' }
+    ];
   }
 
   headerDiv.appendChild(createBreadcrumb(invBreadcrumbItems, onNavigate));
+
+  // Dynamic Product Count Badge
+  const countBadge = document.createElement('div');
+  countBadge.id = 'inv-count-badge';
+  countBadge.style.cssText = 'display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-secondary);';
+  countBadge.innerHTML = `<span>Showing:</span><span class="badge badge-secondary" id="inv-count-num" style="font-weight: 600;">${(store.data.products || []).length} products</span>`;
+  headerDiv.appendChild(countBadge);
+
   container.appendChild(headerDiv);
 
   // 2. Main Card with Controls & Inventory Table (Standardized with Purchases UI)
@@ -3402,9 +3580,10 @@ function renderInventory(params = {}, onNavigate = null) {
           ${allBrands.map(b => `<option value="${b}">${b}</option>`).join('')}
         </select>
 
-        <select class="form-select status-filter" style="width: auto; min-width: 135px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+        <select class="form-select status-filter" style="width: auto; min-width: 145px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           <option value="ALL" ${selectedStatus === 'ALL' ? 'selected' : ''}>All Stock Status</option>
-          <option value="Active" ${selectedStatus === 'Active' || selectedStatus === 'IN_STOCK' ? 'selected' : ''}>In Stock</option>
+          <option value="IN_STOCK" ${selectedStatus === 'IN_STOCK' ? 'selected' : ''}>In Stock</option>
+          <option value="PARTIAL_STOCK" ${selectedStatus === 'PARTIAL_STOCK' ? 'selected' : ''}>Partial Stock</option>
           <option value="LOW" ${selectedStatus === 'LOW' ? 'selected' : ''}>Low Stock</option>
           <option value="OUT" ${selectedStatus === 'OUT' ? 'selected' : ''}>Out of Stock</option>
           <option value="Inactive" ${selectedStatus === 'Inactive' ? 'selected' : ''}>Inactive</option>
@@ -3505,24 +3684,33 @@ function renderInventory(params = {}, onNavigate = null) {
       const matchCat = selectedCategory === 'ALL' || p.category === selectedCategory;
       const matchBrand = selectedBrand === 'ALL' || (p.brand || 'Unbranded') === selectedBrand;
 
-      const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-      const isLowStock = (p.variants || []).some(v => (v.stock || 0) > 0 && (v.stock || 0) <= (p.minStock || 5)) || (totalStock > 0 && totalStock <= (p.minStock || 5));
-      const isOutOfStock = totalStock === 0;
-      const isInStock = totalStock > 0 && !isLowStock;
+      const stockInfo = getProductStockStatus(p);
 
       let matchStat = true;
       if (selectedStatus === 'Active' || selectedStatus === 'IN_STOCK') {
-        matchStat = (p.status !== 'Inactive') && isInStock;
+        matchStat = (p.status !== 'Inactive') && stockInfo.status === 'IN_STOCK';
+      } else if (selectedStatus === 'PARTIAL_STOCK' || selectedStatus === 'PARTIAL') {
+        matchStat = (p.status !== 'Inactive') && stockInfo.status === 'PARTIAL_STOCK';
+      } else if (selectedStatus === 'LOW' || selectedStatus === 'LOW_STOCK') {
+        matchStat = (p.status !== 'Inactive') && stockInfo.status === 'LOW_STOCK';
+      } else if (selectedStatus === 'OUT' || selectedStatus === 'OUT_OF_STOCK') {
+        matchStat = (p.status !== 'Inactive') && stockInfo.status === 'OUT_OF_STOCK';
       } else if (selectedStatus === 'Inactive') {
         matchStat = (p.status === 'Inactive');
-      } else if (selectedStatus === 'LOW') {
-        matchStat = (p.status !== 'Inactive') && isLowStock;
-      } else if (selectedStatus === 'OUT') {
-        matchStat = (p.status !== 'Inactive') && isOutOfStock;
       }
 
       return matchQuery && matchCat && matchBrand && matchStat;
     });
+
+    // Update displayed product count after filtering
+    const countNumEl = container.querySelector('#inv-count-num');
+    if (countNumEl) {
+      if (filteredProducts.length === products.length) {
+        countNumEl.textContent = `${products.length} products`;
+      } else {
+        countNumEl.textContent = `${filteredProducts.length} of ${products.length} products`;
+      }
+    }
 
     // Sorting
     filteredProducts.sort((a, b) => {
@@ -3546,25 +3734,37 @@ function renderInventory(params = {}, onNavigate = null) {
     }
 
     filteredProducts.forEach((p, index) => {
-      const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-      const hasSizes = Array.isArray(p.variants) && p.variants.length > 0 && p.variants.some(v => v.size !== 'Standard');
+      const stockInfo = getProductStockStatus(p);
+      const totalStock = stockInfo.totalStock;
+      const hasSizes = stockInfo.hasSizes;
       const isExpanded = expandedProductIds.has(p.id);
-
-      const isLowStock = (p.variants || []).some(v => (v.stock || 0) > 0 && (v.stock || 0) <= (p.minStock || 5)) || (totalStock > 0 && totalStock <= (p.minStock || 5));
-      const isOutOfStock = totalStock === 0;
 
       let statusBadge;
       if (p.status === 'Inactive') {
         statusBadge = createBadge({ label: 'Inactive', variant: 'secondary' });
-      } else if (isOutOfStock) {
+      } else if (stockInfo.status === 'OUT_OF_STOCK') {
         statusBadge = createBadge({ label: 'Out of Stock', variant: 'danger' });
-      } else if (isLowStock) {
+      } else if (stockInfo.status === 'PARTIAL_STOCK') {
+        statusBadge = createBadge({ label: 'Partial Stock', variant: 'warning' });
+      } else if (stockInfo.status === 'LOW_STOCK') {
         statusBadge = createBadge({ label: 'Low Stock', variant: 'warning' });
       } else {
         statusBadge = createBadge({ label: 'In Stock', variant: 'success' });
       }
 
       const priceInfo = getProductPriceInfo(p);
+
+      // Subtitle under Total Available Stock for products with sizes
+      let stockSubtitle = '';
+      if (hasSizes) {
+        if (stockInfo.outOfStockSizes > 0) {
+          const isAllOut = stockInfo.outOfStockSizes === stockInfo.totalSizes;
+          const color = isAllOut ? 'var(--status-danger-text)' : 'var(--status-warning-text)';
+          stockSubtitle = `<div style="font-size: 0.75rem; font-weight: 500; color: ${color}; margin-top: 2px;">${stockInfo.outOfStockSizes} ${stockInfo.outOfStockSizes === 1 ? 'size' : 'sizes'} out of stock</div>`;
+        } else {
+          stockSubtitle = `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">All sizes in stock</div>`;
+        }
+      }
 
       // Main Product Row
       const tr = document.createElement('tr');
@@ -3583,14 +3783,17 @@ function renderInventory(params = {}, onNavigate = null) {
             ${chevronIcon}
             <div>
               <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">${p.name}</div>
-              ${hasSizes ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${(p.variants || []).length} sizes available</div>` : ''}
+              ${hasSizes ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${stockInfo.totalSizes} size variants</div>` : ''}
             </div>
           </div>
         </td>
         <td style="color: var(--text-secondary);">${p.category || 'General'}</td>
         <td style="color: var(--text-secondary);">${p.brand || 'Unbranded'}</td>
         <td style="font-weight: 600; color: var(--text-primary);">${priceInfo.display}</td>
-        <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${totalStock} units</td>
+        <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">
+          <div>${totalStock} units</div>
+          ${stockSubtitle}
+        </td>
         <td>${statusBadge.outerHTML}</td>
         <td style="text-align: right;">
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
@@ -3698,7 +3901,7 @@ function renderInventory(params = {}, onNavigate = null) {
                   </span>
                   <span style="font-size: 0.8rem; color: var(--text-secondary);">&mdash; ${p.name}</span>
                 </div>
-                <span style="font-size: 0.75rem; color: var(--text-secondary);">Total Available: <strong>${totalStock} units</strong> across ${variantsList.length} sizes</span>
+                <span style="font-size: 0.75rem; color: var(--text-secondary);">Total Available: <strong>${totalStock} units</strong> across ${variantsList.length} sizes${stockInfo.outOfStockSizes > 0 ? ` (${stockInfo.outOfStockSizes} out of stock)` : ''}</span>
               </div>
 
               <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);">
