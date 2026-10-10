@@ -4149,30 +4149,39 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
     return cur - adjQty;
   }
 
-  // Size UI depends on whether this is an Expanded Size Row click or Main Row click
+  // Size UI: Target Size single aligned row (Expanded Size Row) or compact dropdown (Main Row)
   let sizeSectionHtml = '';
   if (isSizePreselected) {
-    // Expanded Size Row: Hide the selector because size is known; show explicit read-only display
+    // Expanded Size Row: Hide the selector because size is known; show single aligned row
     sizeSectionHtml = `
-      <div style="padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-surface); display: flex; justify-content: space-between; align-items: center;">
-        <div style="display: flex; align-items: center; gap: 0.6rem;">
-          <span style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Target Size:</span>
-          <span class="badge badge-secondary" style="font-weight: 700; font-size: 0.875rem; padding: 0.25rem 0.65rem;">Size ${selectedSize}</span>
+      <div style="padding: 0.55rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface); display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Target Size:</span>
+          <span class="badge badge-secondary" style="font-weight: 700; font-size: 0.8rem; padding: 0.15rem 0.55rem;">Size ${selectedSize}</span>
         </div>
-        <span style="font-size: 0.825rem; color: var(--text-secondary);">Current Stock: <strong id="adj-current-stock-label" style="color: var(--brand-primary); font-size: 0.95rem;">${getCurrentStock()} units</strong></span>
+        <div style="font-size: 0.8rem; color: var(--text-secondary);">
+          Current Stock: <strong id="adj-current-stock-label" style="color: var(--brand-primary); font-weight: 700; font-size: 0.875rem;">${getCurrentStock()} units</strong>
+        </div>
       </div>
     `;
   } else if (hasSizes) {
     // Main Inventory Row with multiple sizes: Display size selector with current stock per size
     sizeSectionHtml = `
-      <div class="form-group">
-        <label class="form-label" style="font-weight: 500;">Select Size Variant <span style="color: var(--status-danger); font-size: 0.8rem;">*</span></label>
-        <select id="adj-size-select" class="form-select">
-          ${variants.map(v => `<option value="${v.size}" ${v.size === selectedSize ? 'selected' : ''}>Size ${v.size} (Current: ${v.stock || 0} units)</option>`).join('')}
+      <div class="form-group" style="margin: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin: 0; color: var(--text-primary);">
+            Select Size Variant <span style="color: var(--status-danger);">*</span>
+          </label>
+          <span style="font-size: 0.775rem; color: var(--text-secondary);">
+            Current: <strong id="adj-current-stock-label" style="color: var(--brand-primary); font-weight: 600;">${getCurrentStock()} units</strong>
+          </span>
+        </div>
+        <select id="adj-size-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+          ${variants.map(v => `<option value="${v.size}" ${v.size === selectedSize ? 'selected' : ''}>Size ${v.size} (${v.stock || 0} units available)</option>`).join('')}
         </select>
       </div>
     `;
-  } // If no sizes, sizeSectionHtml remains empty
+  }
 
   const modal = document.createElement('div');
   modal.id = 'modal-adjust-row-stock';
@@ -4181,52 +4190,64 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
   const totalProductStock = (liveProduct.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
 
   modal.innerHTML = `
-    <div class="modal-content" style="max-width: 490px; width: 95%;">
-      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
-        <div>
-          <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Manual Stock Correction / Adjustment</h3>
-          <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 2px;">
-            ${isSizePreselected ? `Adjusting specific size variant for ${liveProduct.name}` : `Adjust stock for ${liveProduct.name}`}
+    <div class="modal-content" style="max-width: 460px; width: 92%; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; padding: 0; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-surface); box-shadow: var(--shadow-md);">
+      
+      <!-- 1. Header (Pinned at top) -->
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: flex-start; padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--border-color); background: var(--bg-surface);">
+        <div style="flex: 1; padding-right: 0.75rem;">
+          <h3 style="margin: 0; font-size: 1.05rem; font-weight: 600; color: var(--text-primary); line-height: 1.3;">Manual Stock Correction / Adjustment</h3>
+          <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 3px; line-height: 1.3;">
+            ${isSizePreselected ? `Adjusting stock for ${liveProduct.name} (Size ${selectedSize})` : `Adjust stock for ${liveProduct.name}`}
           </div>
         </div>
-        <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">
-          <i data-lucide="x" style="width: 20px; height: 20px;"></i>
+        <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; transition: color 0.15s ease;" title="Close">
+          <i data-lucide="x" style="width: 18px; height: 18px;"></i>
         </button>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <!-- 2. Scrollable Body Content -->
+      <div style="padding: 1rem 1.15rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.85rem; flex: 1;">
+        
         <!-- Product Overview Box -->
-        <div style="padding: 0.85rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); font-size: 0.875rem;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <div style="font-weight: 600; color: var(--text-primary); font-size: 0.95rem;">${liveProduct.name}</div>
-            ${liveProduct.brand ? `<span style="font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-surface); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-color);">${liveProduct.brand}</span>` : ''}
+        <div style="padding: 0.65rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-secondary); font-size: 0.825rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <div style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px;">${liveProduct.name}</div>
+            ${liveProduct.brand ? `<span style="font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-surface); padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 500;">${liveProduct.brand}</span>` : ''}
           </div>
-          <div style="color: var(--text-secondary); display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.825rem;">
-            <span>Category: <strong style="color: var(--text-primary);">${liveProduct.category || 'General'}</strong></span>
-            <span>Total Available: <strong style="color: var(--text-primary);">${totalProductStock} units</strong></span>
-            ${!isSizePreselected ? `<span>Selected Variant Stock: <strong id="adj-current-stock-label" style="color: var(--brand-primary);">${getCurrentStock()} units</strong></span>` : ''}
+          <div style="display: flex; justify-content: space-between; align-items: center; color: var(--text-secondary); font-size: 0.8rem;">
+            <span>Category: <strong style="color: var(--text-primary); font-weight: 500;">${liveProduct.category || 'General'}</strong></span>
+            <span>Total Available: <strong style="color: var(--text-primary); font-weight: 600;">${totalProductStock} units</strong></span>
           </div>
         </div>
 
         ${sizeSectionHtml}
 
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Adjustment Type <span style="color: var(--status-danger); font-size: 0.8rem;">*</span></label>
-          <select id="adj-type-select" class="form-select">
+        <!-- Adjustment Type Field -->
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+            Adjustment Type <span style="color: var(--status-danger);">*</span>
+          </label>
+          <select id="adj-type-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
             <option value="ADD" selected>Add Stock (+)</option>
             <option value="REMOVE">Remove Stock (−)</option>
           </select>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Quantity <span style="color: var(--status-danger); font-size: 0.8rem;">*</span></label>
-          <input type="number" id="adj-qty-input" class="form-input" min="1" step="1" value="1" placeholder="Enter positive whole number">
-          <div id="adj-qty-error" style="font-size: 0.775rem; color: var(--status-danger); margin-top: 4px; display: none;"></div>
+        <!-- Quantity Field -->
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+            Quantity <span style="color: var(--status-danger);">*</span>
+          </label>
+          <input type="number" id="adj-qty-input" class="form-input" min="1" step="1" value="1" placeholder="Enter positive whole number" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+          <div id="adj-qty-error" style="font-size: 0.75rem; color: var(--status-danger); margin-top: 3px; display: none;"></div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Reason for Adjustment <span style="color: var(--status-danger); font-size: 0.8rem;">*</span></label>
-          <select id="adj-reason-select" class="form-select">
+        <!-- Reason Field -->
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+            Reason for Adjustment <span style="color: var(--status-danger);">*</span>
+          </label>
+          <select id="adj-reason-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
             <option value="Stock Correction / Audit" selected>Stock Correction / Audit</option>
             <option value="Damaged Stock (Write-off)">Damaged Stock (Write-off)</option>
             <option value="Missing / Lost Stock">Missing / Discrepancy</option>
@@ -4237,16 +4258,20 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
           </select>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.9rem; background: var(--bg-surface);">
-          <span style="color: var(--text-secondary);">Calculated New Stock:</span>
+        <!-- Calculated New Stock Card -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.85rem; background: var(--bg-surface);">
+          <span style="color: var(--text-secondary); font-weight: 500;">Calculated New Stock:</span>
           <strong id="adj-new-stock-label" style="font-size: 1.1rem; color: var(--text-primary); font-weight: 700;">${calculateNewStock()} units</strong>
         </div>
+
       </div>
 
-      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-        <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
-        <button type="button" class="btn btn-primary save-modal-btn">Save Adjustment</button>
+      <!-- 3. Footer Actions (Pinned at bottom) -->
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; align-items: center; gap: 0.65rem; padding: 0.85rem 1.15rem; border-top: 1px solid var(--border-color); background: var(--bg-surface);">
+        <button type="button" class="btn btn-secondary cancel-modal-btn" style="padding: 0.45rem 1rem; font-size: 0.85rem;">Cancel</button>
+        <button type="button" class="btn btn-primary save-modal-btn" style="padding: 0.45rem 1.15rem; font-size: 0.85rem;">Save Adjustment</button>
       </div>
+
     </div>
   `;
 
