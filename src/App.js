@@ -2725,7 +2725,7 @@ function renderPaginationBar({
   totalItems,
   currentPage,
   pageSize,
-  pageSizeOptions = [10, 25, 50],
+  pageSizeOptions = [5, 10, 25, 50],
   itemName = 'records',
   onPageChange,
   onPageSizeChange,
@@ -2766,7 +2766,7 @@ function renderPaginationBar({
   const sizeSelect = container.querySelector(`.${prefixClass}page-size-select`);
   if (sizeSelect && onPageSizeChange) {
     sizeSelect.addEventListener('change', (e) => {
-      onPageSizeChange(parseInt(e.target.value, 10) || 10);
+      onPageSizeChange(parseInt(e.target.value, 10) || 5);
     });
   }
 
@@ -3495,7 +3495,7 @@ function renderOverview(onNavigate) {
   salesHistoryCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
 
   let overviewSalesPage = 1;
-  let overviewSalesPageSize = 10;
+  let overviewSalesPageSize = 5;
 
   salesHistoryCard.innerHTML = `
     <div class="card-header">
@@ -3564,7 +3564,7 @@ function renderOverview(onNavigate) {
       totalItems: sales.length,
       currentPage: overviewSalesPage,
       pageSize: overviewSalesPageSize,
-      pageSizeOptions: [10, 25, 50],
+      pageSizeOptions: [5, 10, 25, 50],
       itemName: 'sales',
       onPageChange: (newPage) => {
         overviewSalesPage = newPage;
@@ -3783,7 +3783,7 @@ function renderInventory(params = {}, onNavigate = null) {
   }
   let selectedSort = 'name-asc';
   let invCurrentPage = 1;
-  let invPageSize = 10;
+  let invPageSize = 5;
   const expandedProductIds = new Set();
 
   // 1. Breadcrumb Header with Product Count Badge
@@ -4252,7 +4252,7 @@ function renderInventory(params = {}, onNavigate = null) {
       totalItems: filteredProducts.length,
       currentPage: invCurrentPage,
       pageSize: invPageSize,
-      pageSizeOptions: [10, 25, 50],
+      pageSizeOptions: [5, 10, 25, 50],
       itemName: 'products',
       onPageChange: (newPage) => {
         invCurrentPage = newPage;
@@ -4804,7 +4804,7 @@ function renderPurchases(params = {}, onNavigate = null) {
   let currentFilter = 'all'; // 'all', 'draft', 'approved', 'partially-received', 'received'
   let searchQuery = '';
   let purCurrentPage = 1;
-  let purPageSize = 10;
+  let purPageSize = 5;
 
   mainCard.innerHTML = `
     <!-- Top Filter Bar -->
@@ -5049,7 +5049,7 @@ This action cannot be undone.`);
       totalItems: filtered.length,
       currentPage: purCurrentPage,
       pageSize: purPageSize,
-      pageSizeOptions: [10, 25, 50],
+      pageSizeOptions: [5, 10, 25, 50],
       itemName: 'purchases',
       onPageChange: (newPage) => {
         purCurrentPage = newPage;
@@ -6049,7 +6049,7 @@ function renderSales(params = {}, onNavigate = null) {
   let currentFilter = 'all'; // 'all', 'paid', 'pending'
   let searchQuery = '';
   let salesCurrentPage = 1;
-  let salesPageSize = 10;
+  let salesPageSize = 5;
 
   // 1. Header (Breadcrumb + "+ Add Sale" button)
   const headerDiv = document.createElement('div');
@@ -6206,7 +6206,7 @@ function renderSales(params = {}, onNavigate = null) {
       totalItems: filtered.length,
       currentPage: salesCurrentPage,
       pageSize: salesPageSize,
-      pageSizeOptions: [10, 25, 50],
+      pageSizeOptions: [5, 10, 25, 50],
       itemName: 'sales',
       onPageChange: (newPage) => {
         salesCurrentPage = newPage;
