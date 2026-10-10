@@ -3283,6 +3283,7 @@ function renderInventory(params = {}, onNavigate = null) {
     <table class="admin-table">
       <thead>
         <tr>
+          <th style="width: 6%; text-align: center;">S.No</th>
           <th>Product Name</th>
           <th>Category</th>
           <th>Brand</th>
@@ -3332,11 +3333,11 @@ function renderInventory(params = {}, onNavigate = null) {
     countLabel.textContent = filteredProducts.length;
 
     if (filteredProducts.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No products match your criteria.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No products match your criteria.</td></tr>`;
       return;
     }
 
-    filteredProducts.forEach(p => {
+    filteredProducts.forEach((p, index) => {
       const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
       const hasSizes = p.variants && (p.variants || []).length > 0 && p.variants.some(v => v.size !== 'Standard');
       const isExpanded = expandedProductIds.has(p.id);
@@ -3361,6 +3362,7 @@ function renderInventory(params = {}, onNavigate = null) {
         : '';
 
       tr.innerHTML = `
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
         <td>
           <div style="display: flex; align-items: center; gap: 0.25rem;">
             ${chevronIcon}
@@ -3422,7 +3424,7 @@ function renderInventory(params = {}, onNavigate = null) {
         const subTr = document.createElement('tr');
         subTr.className = 'size-breakdown-row';
         subTr.innerHTML = `
-          <td colspan="7" style="padding: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+          <td colspan="8" style="padding: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
             <div style="padding: 0.85rem 1.25rem; display: flex; flex-direction: column; gap: 0.65rem;">
               <div style="display: flex; align-items: center; justify-content: space-between;">
                 <span style="font-size: 0.775rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);">
@@ -4987,6 +4989,7 @@ function renderSales(params = {}, onNavigate = null) {
     <table class="admin-table">
       <thead>
         <tr>
+          <th style="width: 6%; text-align: center;">S.No</th>
           <th>Customer</th>
           <th>Date</th>
           <th>Items</th>
@@ -4996,8 +4999,9 @@ function renderSales(params = {}, onNavigate = null) {
         </tr>
       </thead>
       <tbody>
-        ${(store.data.sales || []).map(s => `
+        ${(store.data.sales || []).map((s, index) => `
           <tr>
+            <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
             <td style="font-weight: 600; color: var(--text-primary);">${s.customer || 'Walk-in Customer'}</td>
             <td style="color: var(--text-secondary);">${s.date || '-'}</td>
             <td>${s.itemCount || (s.items ? s.items.length : 1)} items</td>
@@ -5367,6 +5371,7 @@ function renderCustomers(onNavigate = null) {
       <table class="admin-table">
         <thead>
           <tr>
+            <th style="width: 6%; text-align: center;">S.No</th>
             <th>Customer ID</th>
             <th>Customer Name</th>
             <th>Phone</th>
@@ -5376,8 +5381,9 @@ function renderCustomers(onNavigate = null) {
           </tr>
         </thead>
         <tbody>
-          ${store.data.customers.map(c => `
+          ${(store.data.customers || []).map((c, index) => `
             <tr>
+              <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
               <td style="font-family: monospace; color: var(--text-secondary);">${c.id}</td>
               <td style="font-weight: 600;">${c.name}</td>
               <td style="color: var(--text-secondary);">${c.phone}</td>
