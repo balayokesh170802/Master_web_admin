@@ -1613,6 +1613,184 @@ class StoreManager {
     return { product, purchase: purchaseRecord };
   }
 
+    savePurchaseDraft(payload, existingId = null) {
+    // Saves purchase as Draft WITHOUT updating inventory stock
+    let totalQty = 0;
+    let totalAmount = 0;
+    const itemRecords = [];
+
+    (payload.items || []).forEach(item => {
+      const q = parseInt(item.qty, 10) || 0;
+      const buyPrice = parseFloat(item.buyingPrice) || 0;
+      const sellPrice = parseFloat(item.sellingPrice) || 0;
+      const lineCost = q * buyPrice;
+
+      totalQty += q;
+      totalAmount += lineCost;
+
+      let prodName = item.productName || item.product || '';
+      if (!prodName && item.productId) {
+        const found = (this.data.products || []).find(p => p.id === item.productId);
+        if (found) prodName = found.name;
+      }
+
+      itemRecords.push({
+        productId: item.productId || '',
+        product: prodName || 'Standard Item',
+        size: item.size || 'Standard',
+        qty: q,
+        buyingPrice: buyPrice,
+        sellingPrice: sellPrice,
+        totalCost: lineCost,
+        receivedQty: item.receivedQty || 0
+      });
+    });
+
+    let purchaseRecord;
+    if (existingId) {
+      purchaseRecord = (this.data.purchases || []).find(p => p.id === existingId);
+      if (purchaseRecord) {
+        purchaseRecord.supplier = payload.supplier;
+        purchaseRecord.date = payload.date;
+        purchaseRecord.notes = payload.notes || '';
+        purchaseRecord.items = itemRecords;
+        purchaseRecord.productCount = itemRecords.length;
+        purchaseRecord.totalQuantity = totalQty;
+        purchaseRecord.totalAmount = totalAmount;
+      }
+    }
+
+    if (!purchaseRecord) {
+      const newId = `PUR-${Date.now().toString().slice(-4)}`;
+      purchaseRecord = {
+        id: newId,
+        supplier: payload.supplier || 'General Supplier',
+        date: payload.date || new Date().toISOString().split('T')[0],
+        notes: payload.notes || '',
+        productCount: itemRecords.length,
+        totalQuantity: totalQty,
+        totalAmount: totalAmount,
+        status: 'Draft',
+        receivedQuantity: 0,
+        items: itemRecords,
+        receiptHistory: []
+      };
+      if (!Array.isArray(this.data.purchases)) this.data.purchases = [];
+      this.data.purchases.unshift(purchaseRecord);
+    }
+
+    this.save();
+    return purchaseRecord;
+  }
+
+  approvePurchase(purchaseId) {
+    const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
+    if (!purchase) throw new Error('Purchase not found');
+    if (purchase.status !== 'Draft') throw new Error('Only Draft purchases can be approved');
+
+    purchase.status = 'Approved';
+    purchase.approvedAt = new Date().toISOString();
+    this.save();
+    return purchase;
+  }
+
+  receivePurchaseStock(purchaseId, receivedQuantitiesMap, receiptDate, notes = '') {
+    const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
+    if (!purchase) throw new Error('Purchase not found');
+    if (purchase.status !== 'Approved' && purchase.status !== 'Partially Received') {
+      throw new Error('Only Approved or Partially Received purchases can be received');
+    }
+
+    let totalNewlyReceived = 0;
+    const receiptEventItems = [];
+
+    (purchase.items || []).forEach((item, index) => {
+      const newlyReceived = parseInt(receivedQuantitiesMap[index], 10) || 0;
+      if (newlyReceived > 0) {
+        totalNewlyReceived += newlyReceived;
+        item.receivedQty = (item.receivedQty || 0) + newlyReceived;
+
+        // Increase Inventory Stock for the specific product and size
+        let product = (this.data.products || []).find(p => p.id === item.productId || (p.name && p.name.toLowerCase() === item.product.toLowerCase()));
+        if (product) {
+          if (!product.variants || product.variants.length === 0) {
+            product.variants = [{ size: item.size || 'Standard', stock: 0, damaged: 0, purchasePrice: item.buyingPrice || 0, sellingPrice: item.sellingPrice || 0 }];
+          }
+
+          const targetSize = item.size || 'Standard';
+          let variant = product.variants.find(v => v.size === targetSize);
+          if (!variant) {
+            variant = { size: targetSize, stock: 0, damaged: 0, purchasePrice: item.buyingPrice || 0, sellingPrice: item.sellingPrice || 0 };
+            product.variants.push(variant);
+          }
+
+          variant.stock = (variant.stock || 0) + newlyReceived;
+          if (item.buyingPrice > 0) variant.purchasePrice = item.buyingPrice;
+          if (item.sellingPrice > 0) variant.sellingPrice = item.sellingPrice;
+
+          product.totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+          if (item.sellingPrice > 0) product.sellingPrice = item.sellingPrice;
+          if (item.buyingPrice > 0) product.purchasePrice = item.buyingPrice;
+        }
+
+        // Log Stock Movement
+        if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+        this.data.stockMovements.unshift({
+          id: `MOV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+          date: receiptDate || new Date().toLocaleString(),
+          product: item.product,
+          sku: `${(item.product || 'PRD').slice(0,3).toUpperCase()}-${item.size || 'STD'}`,
+          type: 'Stock In',
+          quantity: newlyReceived,
+          reference: purchase.id,
+          user: 'Manager'
+        });
+
+        receiptEventItems.push({
+          product: item.product,
+          size: item.size,
+          quantityReceived: newlyReceived
+        });
+      }
+    });
+
+    if (totalNewlyReceived <= 0) {
+      throw new Error('Please enter at least 1 unit to receive.');
+    }
+
+    // Determine final status
+    const totalOrdered = (purchase.items || []).reduce((s, i) => s + (i.qty || 0), 0);
+    const totalReceivedAll = (purchase.items || []).reduce((s, i) => s + (i.receivedQty || 0), 0);
+    purchase.totalReceived = totalReceivedAll;
+
+    if (totalReceivedAll >= totalOrdered) {
+      purchase.status = 'Received';
+    } else {
+      purchase.status = 'Partially Received';
+    }
+
+    if (!Array.isArray(purchase.receiptHistory)) purchase.receiptHistory = [];
+    purchase.receiptHistory.unshift({
+      date: receiptDate || new Date().toISOString().split('T')[0],
+      totalReceived: totalNewlyReceived,
+      notes: notes || '',
+      items: receiptEventItems
+    });
+
+    this.save();
+    return purchase;
+  }
+
+  deleteDraftPurchase(purchaseId) {
+    const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
+    if (!purchase) throw new Error('Purchase not found');
+    if (purchase.status !== 'Draft') throw new Error('Only Draft purchases can be deleted');
+
+    this.data.purchases = this.data.purchases.filter(p => p.id !== purchaseId);
+    this.save();
+    return true;
+  }
+
   addStockIn(purchasePayload) {
     // purchasePayload: { supplier, date, notes, items: [ { productId, size, qty, buyingPrice, sellingPrice }, ... ] }
     let totalQty = 0;
@@ -3436,17 +3614,19 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
 
 
 // PURCHASES PAGE
+// PURCHASES PAGE (Draft -> Approved -> Received Workflow)
 function renderPurchases(params = {}, onNavigate = null) {
   if (params && (params.action === 'add-product' || params.view === 'add-product')) {
     return renderAddProductPage(params, onNavigate);
   }
-  if (params && (params.action === 'add' || params.view === 'add')) {
+  if (params && (params.action === 'add' || params.view === 'add' || params.action === 'edit')) {
     return renderAddPurchasePage(params, onNavigate);
   }
 
   const container = document.createElement('div');
   container.className = 'page-container';
 
+  // 1. Header (Breadcrumb & "+ Add Purchase" button)
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   headerDiv.appendChild(createBreadcrumb([
@@ -3468,43 +3648,669 @@ function renderPurchases(params = {}, onNavigate = null) {
   headerDiv.appendChild(actionsDiv);
   container.appendChild(headerDiv);
 
+  // 2. Main Card with Status Filters & Purchases Table
   const mainCard = document.createElement('div');
   mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+
+  let currentFilter = 'all'; // 'all', 'draft', 'approved', 'partially-received', 'received'
+  let searchQuery = '';
+
   mainCard.innerHTML = `
-    <div class="table-responsive">
-      <table class="admin-table">
+    <!-- Top Filter Bar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+      <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;" id="pur-status-filters">
+        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="all" style="font-weight: 600;">All Purchases</button>
+        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="draft" style="font-weight: 600;">Draft</button>
+        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="approved" style="font-weight: 600;">Approved</button>
+        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="partially-received" style="font-weight: 600;">Partially Received</button>
+        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="received" style="font-weight: 600;">Received</button>
+      </div>
+
+      <div class="search-input-wrapper" style="max-width: 280px; width: 100%;">
+        <i data-lucide="search" class="search-icon"></i>
+        <input type="text" class="form-input search-input" id="pur-search-input" placeholder="Search supplier, ID, product..." style="padding-left: 2.25rem; font-size: 0.85rem;">
+      </div>
+    </div>
+
+    <!-- Purchases Table Container -->
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+      <table class="admin-table" style="font-size: 0.875rem;">
         <thead>
           <tr>
-            <th>Supplier</th>
-            <th>Date</th>
-            <th>Product / Items</th>
-            <th>Total Qty</th>
-            <th>Total Cost</th>
-            <th>Status</th>
+            <th style="width: 14%;">Purchase ID</th>
+            <th style="width: 18%;">Supplier</th>
+            <th style="width: 12%;">Date</th>
+            <th style="width: 20%;">Products / Items</th>
+            <th style="width: 12%;">Units (Rec / Ord)</th>
+            <th style="width: 12%;">Total Cost</th>
+            <th style="width: 12%;">Status</th>
+            <th style="width: 16%; text-align: right;">Actions</th>
           </tr>
         </thead>
-        <tbody>
-          ${(store.data.purchases || []).map(p => `
-            <tr>
-              <td style="font-weight: 500; color: var(--text-primary);">${p.supplier || 'Supplier'}</td>
-              <td style="color: var(--text-secondary);">${p.date || '-'}</td>
-              <td>${p.productName ? p.productName : (p.productCount || 1) + ' items'}</td>
-              <td style="font-weight: 600; color: var(--text-primary);">${p.totalQuantity || 0} units</td>
-              <td style="font-weight: 600;">₹${(p.totalAmount || 0).toLocaleString()}</td>
-              <td>${createBadge({ label: p.status || 'Completed', variant: 'secondary' }).outerHTML}</td>
-            </tr>
-          `).join('')}
-        </tbody>
+        <tbody id="pur-table-tbody"></tbody>
       </table>
     </div>
   `;
+
   container.appendChild(mainCard);
+
+  function renderPurchasesTable() {
+    const tbody = mainCard.querySelector('#pur-table-tbody');
+    tbody.innerHTML = '';
+
+    const allPurchases = store.data.purchases || [];
+
+    const filtered = allPurchases.filter(p => {
+      const statusLower = (p.status || 'completed').toLowerCase();
+      
+      // Filter logic
+      if (currentFilter === 'draft' && statusLower !== 'draft') return false;
+      if (currentFilter === 'approved' && statusLower !== 'approved') return false;
+      if (currentFilter === 'partially-received' && statusLower !== 'partially received' && statusLower !== 'partially-received') return false;
+      if (currentFilter === 'received' && statusLower !== 'received' && statusLower !== 'completed') return false;
+
+      // Search query
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const idMatch = (p.id || '').toLowerCase().includes(query);
+        const suppMatch = (p.supplier || '').toLowerCase().includes(query);
+        const prodMatch = (p.productName || '').toLowerCase().includes(query) || (p.items || []).some(i => (i.product || '').toLowerCase().includes(query));
+        if (!idMatch && !suppMatch && !prodMatch) return false;
+      }
+
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No purchases found matching filter.</td></tr>`;
+      return;
+    }
+
+    filtered.forEach(p => {
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+
+      const status = p.status || 'Completed';
+      let badgeVariant = 'secondary';
+      if (status === 'Draft') badgeVariant = 'warning';
+      else if (status === 'Approved') badgeVariant = 'info';
+      else if (status === 'Partially Received') badgeVariant = 'warning';
+      else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+
+      // Calculate total ordered and total received
+      const totalOrdered = p.totalQuantity || (p.items || []).reduce((s, i) => s + (i.qty || 0), 0);
+      const totalReceived = p.totalReceived !== undefined ? p.totalReceived : (p.items || []).reduce((s, i) => s + (i.receivedQty || (status === 'Completed' || status === 'Received' ? (i.qty || 0) : 0)), 0);
+
+      const itemsSummary = (p.items && p.items.length > 0)
+        ? p.items.map(i => `${i.product || 'Item'} (${i.size || 'Std'})`).slice(0, 2).join(', ') + (p.items.length > 2 ? ` +${p.items.length - 2} more` : '')
+        : (p.productName || 'General Items');
+
+      // Row Actions according to Status:
+      // Draft: Approve, Edit, Delete
+      // Approved: Receive
+      // Partially Received: Receive Remaining
+      // Received: View
+      let actionsHtml = '';
+      if (status === 'Draft') {
+        actionsHtml = `
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            <button type="button" class="btn btn-sm btn-primary action-approve-btn" title="Approve Purchase" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
+              <i data-lucide="check" style="width: 13px; height: 13px;"></i> Approve
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary action-edit-btn" title="Edit Draft" style="padding: 0.25rem 0.5rem; font-size: 0.775rem;">
+              <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-ghost action-delete-btn" title="Delete Draft" style="padding: 0.25rem 0.5rem; color: var(--status-danger); font-size: 0.775rem;">
+              <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
+            </button>
+          </div>
+        `;
+      } else if (status === 'Approved') {
+        actionsHtml = `
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            <button type="button" class="btn btn-sm btn-primary action-receive-btn" style="padding: 0.25rem 0.75rem; font-size: 0.775rem; font-weight: 600;">
+              <i data-lucide="package-check" style="width: 14px; height: 14px;"></i> Receive
+            </button>
+          </div>
+        `;
+      } else if (status === 'Partially Received') {
+        actionsHtml = `
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            <button type="button" class="btn btn-sm btn-primary action-receive-btn" style="padding: 0.25rem 0.65rem; font-size: 0.775rem; font-weight: 600;">
+              <i data-lucide="package-check" style="width: 14px; height: 14px;"></i> Receive Remaining
+            </button>
+          </div>
+        `;
+      } else {
+        actionsHtml = `
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            <button type="button" class="btn btn-sm btn-secondary action-view-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
+              <i data-lucide="eye" style="width: 13px; height: 13px;"></i> View
+            </button>
+          </div>
+        `;
+      }
+
+      tr.innerHTML = `
+        <td style="font-weight: 700; color: var(--brand-primary);">${p.id || '-'}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">${p.supplier || 'Supplier'}</td>
+        <td style="color: var(--text-secondary);">${p.date || '-'}</td>
+        <td style="color: var(--text-primary); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${itemsSummary}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">
+          ${status === 'Partially Received' ? `<span style="color: var(--brand-primary);">${totalReceived}</span> / ${totalOrdered}` : `${totalOrdered} units`}
+        </td>
+        <td style="font-weight: 700; color: var(--text-primary);">₹${(p.totalAmount || 0).toLocaleString()}</td>
+        <td>${createBadge({ label: status, variant: badgeVariant }).outerHTML}</td>
+        <td>${actionsHtml}</td>
+      `;
+
+      // Row Click -> Open View Details Modal
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('.row-actions-box')) return; // do not trigger if button clicked
+        openViewPurchaseModal(p, onNavigate, () => renderPurchasesTable());
+      });
+
+      // Draft Actions
+      const approveBtn = tr.querySelector('.action-approve-btn');
+      if (approveBtn) {
+        approveBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const confirmed = confirm(`Approve purchase order ${p.id} from "${p.supplier}"?
+
+Status will change to Approved. Stock will remain unchanged until goods are received.`);
+          if (confirmed) {
+            try {
+              store.approvePurchase(p.id);
+              toast.show({ message: `Purchase ${p.id} approved! You can now receive stock.`, type: 'success' });
+              renderPurchasesTable();
+            } catch (err) {
+              toast.show({ message: err.message, type: 'danger' });
+            }
+          }
+        });
+      }
+
+      const editBtn = tr.querySelector('.action-edit-btn');
+      if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (onNavigate) onNavigate('purchases', { action: 'edit', purchaseId: p.id });
+        });
+      }
+
+      const deleteBtn = tr.querySelector('.action-delete-btn');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const confirmed = confirm(`Delete draft purchase order ${p.id}?
+
+This action cannot be undone.`);
+          if (confirmed) {
+            try {
+              store.deleteDraftPurchase(p.id);
+              toast.show({ message: `Draft purchase ${p.id} deleted.`, type: 'info' });
+              renderPurchasesTable();
+            } catch (err) {
+              toast.show({ message: err.message, type: 'danger' });
+            }
+          }
+        });
+      }
+
+      // Receive Actions
+      const receiveBtn = tr.querySelector('.action-receive-btn');
+      if (receiveBtn) {
+        receiveBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openReceivePurchaseModal(p, () => renderPurchasesTable());
+        });
+      }
+
+      // View Action
+      const viewBtn = tr.querySelector('.action-view-btn');
+      if (viewBtn) {
+        viewBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openViewPurchaseModal(p, onNavigate, () => renderPurchasesTable());
+        });
+      }
+
+      tbody.appendChild(tr);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  // Filter Buttons logic
+  function updateFilterButtons() {
+    mainCard.querySelectorAll('.pur-filter-btn').forEach(btn => {
+      const f = btn.dataset.filter;
+      if (f === currentFilter) {
+        btn.style.backgroundColor = 'var(--brand-primary)';
+        btn.style.color = '#ffffff';
+        btn.style.borderColor = 'var(--brand-primary)';
+      } else {
+        btn.style.backgroundColor = 'var(--bg-secondary)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderColor = 'var(--border-color)';
+      }
+    });
+    renderPurchasesTable();
+  }
+
+  mainCard.querySelectorAll('.pur-filter-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      currentFilter = e.currentTarget.dataset.filter;
+      updateFilterButtons();
+    });
+  });
+
+  const searchInput = mainCard.querySelector('#pur-search-input');
+  searchInput.addEventListener('input', (e) => {
+    searchQuery = e.target.value.trim();
+    renderPurchasesTable();
+  });
+
+  updateFilterButtons();
 
   if (window.lucide) window.lucide.createIcons();
   return container;
 }
 
-// ADD PURCHASE PAGE (Size-wise Purchase Details Intake & Single Stock Receipt)
+// RECEIVE PURCHASE MODAL (Actual Stock Intake & Partial Receipt Support)
+function openReceivePurchaseModal(purchase, onComplete) {
+  const modalOverlay = document.createElement('div');
+  modalOverlay.className = 'modal-overlay';
+  modalOverlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem;';
+
+  const modalBox = document.createElement('div');
+  modalBox.className = 'modal-content card';
+  modalBox.style.cssText = 'max-width: 750px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem;';
+
+  const status = purchase.status || 'Approved';
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  modalBox.innerHTML = `
+    <!-- Modal Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <div>
+        <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin: 0;">
+          Receive Purchase Order — ${purchase.id}
+        </h3>
+        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
+          Supplier: <strong>${purchase.supplier}</strong> | Order Date: ${purchase.date}
+        </p>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm close-receive-btn" style="padding: 0.35rem;">
+        <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+      </button>
+    </div>
+
+    <!-- Instructions / Status Banner -->
+    <div style="background: var(--bg-secondary); padding: 0.85rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.825rem; color: var(--text-secondary);">
+      Verify goods received against ordered quantities. Enter the actual units received now for each size. Only confirmed received units will be added to Inventory.
+    </div>
+
+    <!-- Items Intake Table -->
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+      <table class="admin-table" style="font-size: 0.85rem;">
+        <thead>
+          <tr>
+            <th style="width: 25%;">Product</th>
+            <th style="width: 12%;">Size</th>
+            <th style="width: 15%;">Ordered Qty</th>
+            <th style="width: 15%;">Already Rec.</th>
+            <th style="width: 15%;">Outstanding</th>
+            <th style="width: 18%;">Receive Now *</th>
+          </tr>
+        </thead>
+        <tbody id="receive-items-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Receipt Details (Date & Remarks) -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+      <div class="form-group">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Receipt Date *</label>
+        <input type="date" class="form-input" id="receive-date-input" value="${todayStr}">
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Delivery Notes / Remarks</label>
+        <input type="text" class="form-input" id="receive-notes-input" placeholder="e.g. Batch verified, quality OK">
+      </div>
+    </div>
+
+    <!-- Live Receipt Summary -->
+    <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.85rem; font-weight: 600;">
+      <div>Units Receiving Now: <span id="receive-now-total" style="color: var(--brand-primary); font-weight: 700;">0</span></div>
+      <div id="receive-status-preview" style="color: var(--status-success);">Status after receipt: Fully Received</div>
+    </div>
+
+    <!-- Modal Footer Actions -->
+    <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+      <button type="button" class="btn btn-secondary cancel-receive-btn">Cancel</button>
+      <button type="button" class="btn btn-primary confirm-receive-btn" style="padding: 0.55rem 1.35rem; font-weight: 600;">
+        <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+        Confirm Receipt & Update Stock
+      </button>
+    </div>
+  `;
+
+  modalOverlay.appendChild(modalBox);
+  document.body.appendChild(modalOverlay);
+
+  const tbody = modalBox.querySelector('#receive-items-tbody');
+  const items = purchase.items || [];
+  const receiveMap = {};
+
+  items.forEach((item, index) => {
+    const ordered = item.qty || 0;
+    const alreadyRec = item.receivedQty || 0;
+    const outstanding = Math.max(0, ordered - alreadyRec);
+    
+    // Default receive now to outstanding quantity for 1-click convenience
+    receiveMap[index] = outstanding;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight: 600; color: var(--text-primary);">${item.product}</td>
+      <td><span class="badge badge-secondary">${item.size || 'Standard'}</span></td>
+      <td style="font-weight: 600;">${ordered} units</td>
+      <td style="color: var(--text-secondary);">${alreadyRec} units</td>
+      <td style="font-weight: 700; color: ${outstanding > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)'};">
+        ${outstanding} units
+      </td>
+      <td>
+        <input type="number" class="form-input item-receive-input" data-index="${index}" min="0" max="${outstanding}" value="${outstanding}" style="max-width: 110px; font-weight: 600;" ${outstanding === 0 ? 'disabled' : ''}>
+      </td>
+    `;
+
+    const input = tr.querySelector('.item-receive-input');
+    if (input) {
+      input.addEventListener('input', (e) => {
+        let val = parseInt(e.target.value, 10);
+        if (isNaN(val) || val < 0) val = 0;
+        if (val > outstanding) {
+          val = outstanding;
+          e.target.value = outstanding;
+          toast.show({ message: `Cannot receive more than outstanding (${outstanding} units).`, type: 'warning' });
+        }
+        receiveMap[index] = val;
+        recalculateReceiveSummary();
+      });
+    }
+
+    tbody.appendChild(tr);
+  });
+
+  function recalculateReceiveSummary() {
+    let nowTotal = 0;
+    let allRemainingCleared = true;
+
+    items.forEach((item, index) => {
+      const ordered = item.qty || 0;
+      const alreadyRec = item.receivedQty || 0;
+      const outstanding = Math.max(0, ordered - alreadyRec);
+      const nowRec = receiveMap[index] || 0;
+
+      nowTotal += nowRec;
+      if (alreadyRec + nowRec < ordered) {
+        allRemainingCleared = false;
+      }
+    });
+
+    modalBox.querySelector('#receive-now-total').textContent = `${nowTotal} units`;
+    const previewEl = modalBox.querySelector('#receive-status-preview');
+    if (nowTotal === 0) {
+      previewEl.textContent = 'No units entered to receive';
+      previewEl.style.color = 'var(--text-secondary)';
+    } else if (allRemainingCleared) {
+      previewEl.textContent = 'Will mark purchase as: Received (Fully Received)';
+      previewEl.style.color = 'var(--status-success)';
+    } else {
+      previewEl.textContent = 'Will mark purchase as: Partially Received';
+      previewEl.style.color = 'var(--status-warning-text)';
+    }
+  }
+
+  recalculateReceiveSummary();
+
+  const closeModal = () => modalOverlay.remove();
+  modalBox.querySelector('.close-receive-btn').addEventListener('click', closeModal);
+  modalBox.querySelector('.cancel-receive-btn').addEventListener('click', closeModal);
+
+  let isConfirming = false;
+  modalBox.querySelector('.confirm-receive-btn').addEventListener('click', () => {
+    if (isConfirming) return;
+
+    let nowTotal = 0;
+    Object.values(receiveMap).forEach(v => { nowTotal += (v || 0); });
+
+    if (nowTotal <= 0) {
+      toast.show({ message: 'Please enter at least 1 unit to receive.', type: 'danger' });
+      return;
+    }
+
+    const rDate = modalBox.querySelector('#receive-date-input').value;
+    const rNotes = modalBox.querySelector('#receive-notes-input').value.trim();
+
+    isConfirming = true;
+    const confirmBtn = modalBox.querySelector('.confirm-receive-btn');
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = 'Receiving Stock...';
+
+    try {
+      store.receivePurchaseStock(purchase.id, receiveMap, rDate, rNotes);
+      toast.show({ message: `Successfully received ${nowTotal} units into Inventory!`, type: 'success' });
+      closeModal();
+      if (onComplete) onComplete();
+    } catch (err) {
+      console.error('Receive stock error:', err);
+      toast.show({ message: `Error receiving stock: ${err.message}`, type: 'danger' });
+      isConfirming = false;
+      confirmBtn.disabled = false;
+      confirmBtn.innerHTML = 'Confirm Receipt & Update Stock';
+    }
+  });
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+// VIEW PURCHASE DETAILS MODAL
+function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
+  const modalOverlay = document.createElement('div');
+  modalOverlay.className = 'modal-overlay';
+  modalOverlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem;';
+
+  const modalBox = document.createElement('div');
+  modalBox.className = 'modal-content card';
+  modalBox.style.cssText = 'max-width: 800px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem;';
+
+  const status = purchase.status || 'Completed';
+  let badgeVariant = 'secondary';
+  if (status === 'Draft') badgeVariant = 'warning';
+  else if (status === 'Approved') badgeVariant = 'info';
+  else if (status === 'Partially Received') badgeVariant = 'warning';
+  else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+
+  const totalOrdered = purchase.totalQuantity || (purchase.items || []).reduce((s, i) => s + (i.qty || 0), 0);
+  const totalReceived = purchase.totalReceived !== undefined ? purchase.totalReceived : (purchase.items || []).reduce((s, i) => s + (i.receivedQty || (status === 'Completed' || status === 'Received' ? (i.qty || 0) : 0)), 0);
+
+  const receiptHistory = purchase.receiptHistory || [];
+
+  modalBox.innerHTML = `
+    <!-- Modal Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin: 0;">
+          Purchase Details — ${purchase.id}
+        </h3>
+        ${createBadge({ label: status, variant: badgeVariant }).outerHTML}
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm close-view-btn" style="padding: 0.35rem;">
+        <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+      </button>
+    </div>
+
+    <!-- Overview Cards -->
+    <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.85rem;">
+      <div class="kpi-card" style="padding: 0.85rem;">
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Supplier</div>
+        <div style="font-size: 1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.2rem;">${purchase.supplier}</div>
+      </div>
+      <div class="kpi-card" style="padding: 0.85rem;">
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Order Date</div>
+        <div style="font-size: 1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.2rem;">${purchase.date}</div>
+      </div>
+      <div class="kpi-card" style="padding: 0.85rem;">
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Units (Rec / Ord)</div>
+        <div style="font-size: 1rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.2rem;">${totalReceived} / ${totalOrdered}</div>
+      </div>
+      <div class="kpi-card" style="padding: 0.85rem;">
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Total Cost</div>
+        <div style="font-size: 1rem; font-weight: 700; color: var(--status-success); margin-top: 0.2rem;">₹${(purchase.totalAmount || 0).toLocaleString()}</div>
+      </div>
+    </div>
+
+    <!-- Items List Table -->
+    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+      <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin: 0;">Ordered Items Breakdown</h4>
+      <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+        <table class="admin-table" style="font-size: 0.825rem;">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Size</th>
+              <th>Ordered</th>
+              <th>Received</th>
+              <th>Outstanding</th>
+              <th>Unit Buying Price</th>
+              <th>Total Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(purchase.items || []).map(item => {
+              const ord = item.qty || 0;
+              const rec = item.receivedQty !== undefined ? item.receivedQty : (status === 'Completed' || status === 'Received' ? ord : 0);
+              const out = Math.max(0, ord - rec);
+              const bPrice = item.buyingPrice || item.price || 0;
+              return `
+                <tr>
+                  <td style="font-weight: 600; color: var(--text-primary);">${item.product}</td>
+                  <td><span class="badge badge-secondary">${item.size || 'Standard'}</span></td>
+                  <td style="font-weight: 600;">${ord} units</td>
+                  <td style="color: var(--text-primary);">${rec} units</td>
+                  <td style="font-weight: 700; color: ${out > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)'};">${out} units</td>
+                  <td>₹${bPrice.toLocaleString()}</td>
+                  <td style="font-weight: 700; color: var(--brand-primary);">₹${((item.totalCost) || (ord * bPrice)).toLocaleString()}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Receipt History (if any) -->
+    ${receiptHistory.length > 0 ? `
+      <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin: 0;">Receipt History Log</h4>
+        <div style="background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); padding: 0.75rem; font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.5rem;">
+          ${receiptHistory.map(rh => `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.35rem;">
+              <div>
+                <strong>${rh.date}</strong>: Received <strong>${rh.totalReceived} units</strong>
+                ${rh.notes ? ` — <em>${rh.notes}</em>` : ''}
+              </div>
+              <span class="badge badge-success">Stock In</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- Modal Footer Actions -->
+    <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+      ${status === 'Draft' ? `
+        <button type="button" class="btn btn-ghost modal-delete-btn" style="color: var(--status-danger);">Delete Draft</button>
+        <button type="button" class="btn btn-secondary modal-edit-btn">Edit Draft</button>
+        <button type="button" class="btn btn-primary modal-approve-btn">Approve Purchase</button>
+      ` : ''}
+
+      ${status === 'Approved' ? `
+        <button type="button" class="btn btn-primary modal-receive-btn">
+          <i data-lucide="package-check" style="width: 16px; height: 16px;"></i> Receive Purchase Stock
+        </button>
+      ` : ''}
+
+      ${status === 'Partially Received' ? `
+        <button type="button" class="btn btn-primary modal-receive-btn">
+          <i data-lucide="package-check" style="width: 16px; height: 16px;"></i> Receive Remaining Stock
+        </button>
+      ` : ''}
+
+      <button type="button" class="btn btn-secondary close-view-btn">Close</button>
+    </div>
+  `;
+
+  modalOverlay.appendChild(modalBox);
+  document.body.appendChild(modalOverlay);
+
+  const closeModal = () => modalOverlay.remove();
+  modalBox.querySelectorAll('.close-view-btn').forEach(b => b.addEventListener('click', closeModal));
+
+  // Modal actions handlers
+  const modalApproveBtn = modalBox.querySelector('.modal-approve-btn');
+  if (modalApproveBtn) {
+    modalApproveBtn.addEventListener('click', () => {
+      const confirmed = confirm(`Approve purchase order ${purchase.id}?
+
+Stock will remain unchanged until goods are received.`);
+      if (confirmed) {
+        store.approvePurchase(purchase.id);
+        toast.show({ message: `Purchase ${purchase.id} approved!`, type: 'success' });
+        closeModal();
+        if (onRefresh) onRefresh();
+      }
+    });
+  }
+
+  const modalEditBtn = modalBox.querySelector('.modal-edit-btn');
+  if (modalEditBtn) {
+    modalEditBtn.addEventListener('click', () => {
+      closeModal();
+      if (onNavigate) onNavigate('purchases', { action: 'edit', purchaseId: purchase.id });
+    });
+  }
+
+  const modalDeleteBtn = modalBox.querySelector('.modal-delete-btn');
+  if (modalDeleteBtn) {
+    modalDeleteBtn.addEventListener('click', () => {
+      const confirmed = confirm(`Delete draft purchase ${purchase.id}?`);
+      if (confirmed) {
+        store.deleteDraftPurchase(purchase.id);
+        toast.show({ message: `Draft ${purchase.id} deleted.`, type: 'info' });
+        closeModal();
+        if (onRefresh) onRefresh();
+      }
+    });
+  }
+
+  const modalReceiveBtn = modalBox.querySelector('.modal-receive-btn');
+  if (modalReceiveBtn) {
+    modalReceiveBtn.addEventListener('click', () => {
+      closeModal();
+      openReceivePurchaseModal(purchase, () => {
+        if (onRefresh) onRefresh();
+      });
+    });
+  }
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+// ADD PURCHASE PAGE (Save as Draft or Save & Receive Stock)
 function renderAddPurchasePage(params = {}, onNavigate = null) {
   if (typeof params === 'function') {
     onNavigate = params;
@@ -3513,12 +4319,18 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
+  // Check if editing an existing draft
+  const isEditing = params && params.action === 'edit' && (params.purchaseId || params.id);
+  const editingPurchase = isEditing
+    ? (store.data.purchases || []).find(p => p.id === (params.purchaseId || params.id))
+    : null;
+
   // 1. Header
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   headerDiv.appendChild(createBreadcrumb([
     { label: 'Purchases', target: 'purchases' },
-    { label: 'Add Purchase' }
+    { label: isEditing ? `Edit Draft (${editingPurchase ? editingPurchase.id : 'Purchase'})` : 'Add Purchase' }
   ], onNavigate));
   container.appendChild(headerDiv);
 
@@ -3535,13 +4347,24 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     savedDraft = null;
   }
 
-  const supplierVal = savedDraft && savedDraft.supplier ? savedDraft.supplier : 'Apex Apparel Ltd';
-  const dateVal = savedDraft && savedDraft.date ? savedDraft.date : new Date().toISOString().split('T')[0];
-  const notesVal = savedDraft && savedDraft.notes ? savedDraft.notes : '';
+  const supplierVal = editingPurchase
+    ? editingPurchase.supplier
+    : (savedDraft && savedDraft.supplier ? savedDraft.supplier : 'Apex Apparel Ltd');
 
-  let purchaseItemsData = (savedDraft && Array.isArray(savedDraft.items) && savedDraft.items.length > 0)
-    ? savedDraft.items
-    : [];
+  const dateVal = editingPurchase
+    ? editingPurchase.date
+    : (savedDraft && savedDraft.date ? savedDraft.date : new Date().toISOString().split('T')[0]);
+
+  const notesVal = editingPurchase
+    ? (editingPurchase.notes || '')
+    : (savedDraft && savedDraft.notes ? savedDraft.notes : '');
+
+  let purchaseItemsData = [];
+  if (editingPurchase && Array.isArray(editingPurchase.items)) {
+    purchaseItemsData = JSON.parse(JSON.stringify(editingPurchase.items));
+  } else if (savedDraft && Array.isArray(savedDraft.items) && savedDraft.items.length > 0) {
+    purchaseItemsData = savedDraft.items;
+  }
 
   // If returning with newly created product
   if (params && params.selectedProductId) {
@@ -3561,19 +4384,14 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     }
   }
 
-  // Clear draft storage
   sessionStorage.removeItem('add_purchase_draft');
-
-  let pricingStrategy = 'markup';
-  let markupPct = 50;
-  let fixedProfitVal = 300;
 
   mainCard.innerHTML = `
     <!-- SECTION A: PURCHASE INFORMATION -->
     <div style="display: flex; flex-direction: column; gap: 1rem;">
       <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
         <i data-lucide="file-text" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
-        Purchase Information
+        Purchase Order Information
       </h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
@@ -3622,9 +4440,13 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       </div>
     </div>
 
-    <!-- SECTION C: ACTION BUTTONS -->
-    <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem; margin-top: 0.5rem;">
+    <!-- SECTION C: ACTION BUTTONS (Save as Draft & Save & Receive Stock) -->
+    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem; margin-top: 0.5rem; flex-wrap: wrap;">
       <button type="button" id="btn-cancel-pur" class="btn btn-secondary">Cancel</button>
+      <button type="button" id="btn-save-draft-pur" class="btn btn-secondary" style="font-weight: 600; border: 1px solid var(--brand-primary); color: var(--brand-primary);">
+        <i data-lucide="save" style="width: 16px; height: 16px;"></i>
+        Save as Draft
+      </button>
       <button type="button" id="btn-save-pur" class="btn btn-primary" style="padding: 0.65rem 1.5rem; font-weight: 600;">
         <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
         Save & Receive Stock
@@ -3845,7 +4667,41 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     if (onNavigate) onNavigate('purchases');
   });
 
-  // Complete Purchase & Single Stock Receipt
+  // 1. SAVE AS DRAFT (No Stock Change)
+  mainCard.querySelector('#btn-save-draft-pur').addEventListener('click', () => {
+    const supplier = mainCard.querySelector('#pur-supplier').value.trim();
+    const date = mainCard.querySelector('#pur-date').value;
+    const notes = mainCard.querySelector('#pur-notes').value.trim();
+
+    if (!supplier) {
+      toast.show({ message: 'Supplier name is required.', type: 'danger' });
+      return;
+    }
+
+    for (let item of purchaseItemsData) {
+      if (!item.productId) {
+        toast.show({ message: 'Please select a product for all purchase items.', type: 'danger' });
+        return;
+      }
+      if (!item.qty || item.qty <= 0) {
+        toast.show({ message: 'Purchase quantity must be greater than 0.', type: 'danger' });
+        return;
+      }
+    }
+
+    store.savePurchaseDraft({
+      supplier,
+      date,
+      notes,
+      items: purchaseItemsData
+    }, editingPurchase ? editingPurchase.id : null);
+
+    sessionStorage.removeItem('add_purchase_draft');
+    toast.show({ message: `Purchase order saved as Draft! Inventory stock is unchanged.`, type: 'success' });
+    if (onNavigate) onNavigate('purchases');
+  });
+
+  // 2. SAVE & RECEIVE STOCK (Instant Receive)
   mainCard.querySelector('#btn-save-pur').addEventListener('click', () => {
     const supplier = mainCard.querySelector('#pur-supplier').value.trim();
     const date = mainCard.querySelector('#pur-date').value;
@@ -3867,15 +4723,24 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       }
     }
 
-    store.addStockIn({
+    // Save as draft first if editing or new, then receive
+    const draft = store.savePurchaseDraft({
       supplier,
       date,
       notes,
       items: purchaseItemsData
+    }, editingPurchase ? editingPurchase.id : null);
+
+    // Auto approve and receive all
+    store.approvePurchase(draft.id);
+    const receiveMap = {};
+    (draft.items || []).forEach((item, idx) => {
+      receiveMap[idx] = item.qty;
     });
+    store.receivePurchaseStock(draft.id, receiveMap, date, notes);
 
     sessionStorage.removeItem('add_purchase_draft');
-    toast.show({ message: 'Purchase recorded and stock received into inventory successfully!', type: 'success' });
+    toast.show({ message: `Purchase confirmed and stock received into inventory!`, type: 'success' });
     if (onNavigate) onNavigate('purchases');
   });
 
