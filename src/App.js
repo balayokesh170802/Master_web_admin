@@ -2024,12 +2024,24 @@ class StoreManager {
   adjustProductStock({ productId, size, adjustmentType, quantity, reason }) {
     const product = this.data.products.find(p => p.id === productId);
     if (!product) throw new Error('Product not found');
-    const variant = (product.variants || []).find(v => v.size === size) || (product.variants || [])[0];
-    if (!variant) throw new Error('Size variant not found');
 
-    const curStock = variant.stock || 0;
+    if (!Array.isArray(product.variants) || product.variants.length === 0) {
+      product.variants = [{ size: 'Standard', stock: Number(product.stock || product.totalStock) || 0 }];
+    }
+
+    const hasSizes = product.variants.length > 0 && product.variants.some(v => v.size && v.size !== 'Standard');
+    let variant;
+    if (size) {
+      variant = product.variants.find(v => v.size === size);
+      if (!variant) throw new Error(`Size variant "${size}" not found for product "${product.name}".`);
+    } else {
+      variant = product.variants[0];
+      if (!variant) throw new Error(`No stock variants found for product "${product.name}".`);
+    }
+
+    const curStock = Number(variant.stock) || 0;
     const qty = parseInt(quantity, 10);
-    if (isNaN(qty) || qty <= 0) throw new Error('Quantity must be greater than 0');
+    if (isNaN(qty) || qty <= 0) throw new Error('Quantity must be a positive whole number greater than 0');
 
     let newStock;
     let qtyChange;
@@ -2038,33 +2050,44 @@ class StoreManager {
       qtyChange = qty;
     } else {
       if (qty > curStock) {
-        throw new Error(`Cannot remove more than available stock (${curStock} units).`);
+        throw new Error(`Cannot remove ${qty} units. Maximum available stock is ${curStock} units.`);
       }
       newStock = curStock - qty;
       qtyChange = -qty;
-      if (reason === 'Damaged Stock') {
+      if (reason && (reason.toLowerCase().includes('damaged') || reason === 'Damaged Stock (Write-off)')) {
         variant.damaged = (variant.damaged || 0) + qty;
       }
     }
 
+    const prevStock = curStock;
     variant.stock = newStock;
     product.totalStock = (product.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
 
+    const now = new Date();
+    const dateFormatted = now.toLocaleDateString('en-GB') + ' ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
-    this.data.stockMovements.unshift({
+    const movementRecord = {
       id: `MOV-ADJ-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
-      date: new Date().toLocaleString(),
+      date: dateFormatted,
       product: product.name,
-      size: variant.size || 'Standard',
+      productId: product.id,
+      size: (hasSizes && variant.size && variant.size !== 'Standard') ? variant.size : null,
       sku: `${(product.name || 'PRD').slice(0,3).toUpperCase()}-${variant.size || 'STD'}`,
       type: 'Adjustment',
+      adjustmentType: adjustmentType === 'ADD' ? 'Add Stock (+)' : 'Remove Stock (−)',
       quantity: qtyChange,
-      reference: reason || 'Manual Correction',
+      previousStock: prevStock,
+      newStock: newStock,
+      reason: reason || 'Stock Correction',
+      reference: reason || 'Stock Correction',
+      notes: `Stock adjusted from ${prevStock} to ${newStock} units (${reason || 'Manual Correction'})`,
       user: 'Manager'
-    });
+    };
+    this.data.stockMovements.unshift(movementRecord);
 
     this.save();
-    return { product, variant, newStock };
+    return { product, variant, newStock, previousStock: prevStock, movementRecord };
   }
 
   updateProduct(id, updatedData) {
@@ -4082,93 +4105,141 @@ function openEditProductModal(product, onSaved) {
   };
 }
 
-// ROW MANUAL STOCK ADJUSTMENT MODAL (SIZE-SELECTABLE)
+// ROW MANUAL STOCK ADJUSTMENT MODAL (CONTEXT-AWARE SIZE POPULATION)
 function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null) {
   const existingModal = document.getElementById('modal-adjust-row-stock');
   if (existingModal) existingModal.remove();
 
-  const modal = document.createElement('div');
-  modal.id = 'modal-adjust-row-stock';
-  modal.className = 'modal-overlay active';
+  // Fresh reference to live product from store to ensure current data
+  const liveProduct = store.data.products.find(p => p.id === product.id) || product;
 
-  const variants = (product.variants && product.variants.length > 0) ? product.variants : [{ size: 'Standard', stock: product.totalStock || 0 }];
-  let selectedSize = initialSize || variants[0].size;
-  let selectedVariant = variants.find(v => v.size === selectedSize) || variants[0];
+  // Normalize variants list
+  const variants = (Array.isArray(liveProduct.variants) && liveProduct.variants.length > 0)
+    ? liveProduct.variants
+    : [{ size: 'Standard', stock: Number(liveProduct.stock || liveProduct.totalStock) || 0 }];
+
+  const hasSizes = variants.length > 1 || (variants.length === 1 && variants[0].size && variants[0].size !== 'Standard');
+  const isSizePreselected = Boolean(initialSize);
+
+  let selectedSize;
+  let selectedVariant;
+
+  if (isSizePreselected) {
+    selectedSize = initialSize;
+    selectedVariant = variants.find(v => v.size === selectedSize);
+    if (!selectedVariant) {
+      toast.show({ message: `Size variant "${initialSize}" not found for ${liveProduct.name}.`, type: 'danger' });
+      return;
+    }
+  } else {
+    selectedVariant = variants[0];
+    selectedSize = selectedVariant ? selectedVariant.size : 'Standard';
+  }
 
   let adjType = 'ADD';
   let adjQty = 1;
 
   function getCurrentStock() {
-    return selectedVariant ? (selectedVariant.stock || 0) : 0;
+    return selectedVariant ? Math.max(0, Number(selectedVariant.stock) || 0) : 0;
   }
 
   function calculateNewStock() {
     const cur = getCurrentStock();
     if (adjType === 'ADD') return cur + adjQty;
-    return Math.max(0, cur - adjQty);
+    return cur - adjQty;
   }
 
-  const hasSizes = variants.length > 1 || (variants.length === 1 && variants[0].size !== 'Standard');
-
-  let sizeSelectHtml = '';
-  if (hasSizes) {
-    sizeSelectHtml = `
+  // Size UI depends on whether this is an Expanded Size Row click or Main Row click
+  let sizeSectionHtml = '';
+  if (isSizePreselected) {
+    // Expanded Size Row: Hide the selector because size is known; show explicit read-only display
+    sizeSectionHtml = `
+      <div style="padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-surface); display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <span style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">Target Size:</span>
+          <span class="badge badge-secondary" style="font-weight: 700; font-size: 0.875rem; padding: 0.25rem 0.65rem;">Size ${selectedSize}</span>
+        </div>
+        <span style="font-size: 0.825rem; color: var(--text-secondary);">Current Stock: <strong id="adj-current-stock-label" style="color: var(--brand-primary); font-size: 0.95rem;">${getCurrentStock()} units</strong></span>
+      </div>
+    `;
+  } else if (hasSizes) {
+    // Main Inventory Row with multiple sizes: Display size selector with current stock per size
+    sizeSectionHtml = `
       <div class="form-group">
-        <label class="form-label" style="font-weight: 500;">Select Size Variant</label>
+        <label class="form-label" style="font-weight: 500;">Select Size Variant <span style="color: var(--status-danger); font-size: 0.8rem;">*</span></label>
         <select id="adj-size-select" class="form-select">
-          ${variants.map(v => `<option value="${v.size}" ${v.size === selectedSize ? 'selected' : ''}>Size ${v.size} (Current: ${v.stock} units)</option>`).join('')}
+          ${variants.map(v => `<option value="${v.size}" ${v.size === selectedSize ? 'selected' : ''}>Size ${v.size} (Current: ${v.stock || 0} units)</option>`).join('')}
         </select>
       </div>
     `;
-  }
+  } // If no sizes, sizeSectionHtml remains empty
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-adjust-row-stock';
+  modal.className = 'modal-overlay active';
+
+  const totalProductStock = (liveProduct.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
 
   modal.innerHTML = `
-    <div class="modal-content" style="max-width: 480px; width: 95%;">
+    <div class="modal-content" style="max-width: 490px; width: 95%;">
       <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
-        <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Manual Stock Correction / Adjustment</h3>
+        <div>
+          <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Manual Stock Correction / Adjustment</h3>
+          <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 2px;">
+            ${isSizePreselected ? `Adjusting specific size variant for ${liveProduct.name}` : `Adjust stock for ${liveProduct.name}`}
+          </div>
+        </div>
         <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">
           <i data-lucide="x" style="width: 20px; height: 20px;"></i>
         </button>
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 1rem;">
-        <div style="padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); font-size: 0.875rem;">
-          <div style="font-weight: 600; color: var(--text-primary); font-size: 0.95rem; margin-bottom: 4px;">${product.name}</div>
-          <div style="color: var(--text-secondary); display: flex; gap: 1rem;">
-            <span>Category: <strong>${product.category || 'General'}</strong></span>
-            <span>Current Available: <strong id="adj-current-stock-label" style="color: var(--text-primary);">${getCurrentStock()} units</strong></span>
+        <!-- Product Overview Box -->
+        <div style="padding: 0.85rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary); font-size: 0.875rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <div style="font-weight: 600; color: var(--text-primary); font-size: 0.95rem;">${liveProduct.name}</div>
+            ${liveProduct.brand ? `<span style="font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-surface); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-color);">${liveProduct.brand}</span>` : ''}
+          </div>
+          <div style="color: var(--text-secondary); display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.825rem;">
+            <span>Category: <strong style="color: var(--text-primary);">${liveProduct.category || 'General'}</strong></span>
+            <span>Total Available: <strong style="color: var(--text-primary);">${totalProductStock} units</strong></span>
+            ${!isSizePreselected ? `<span>Selected Variant Stock: <strong id="adj-current-stock-label" style="color: var(--brand-primary);">${getCurrentStock()} units</strong></span>` : ''}
           </div>
         </div>
 
-        ${sizeSelectHtml}
+        ${sizeSectionHtml}
 
         <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Adjustment Type</label>
+          <label class="form-label" style="font-weight: 500;">Adjustment Type <span style="color: var(--status-danger); font-size: 0.8rem;">*</span></label>
           <select id="adj-type-select" class="form-select">
             <option value="ADD" selected>Add Stock (+)</option>
-            <option value="REMOVE">Remove Stock (-)</option>
+            <option value="REMOVE">Remove Stock (−)</option>
           </select>
         </div>
 
         <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Quantity</label>
-          <input type="number" id="adj-qty-input" class="form-input" min="1" value="1">
+          <label class="form-label" style="font-weight: 500;">Quantity <span style="color: var(--status-danger); font-size: 0.8rem;">*</span></label>
+          <input type="number" id="adj-qty-input" class="form-input" min="1" step="1" value="1" placeholder="Enter positive whole number">
+          <div id="adj-qty-error" style="font-size: 0.775rem; color: var(--status-danger); margin-top: 4px; display: none;"></div>
         </div>
 
         <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Reason for Adjustment</label>
+          <label class="form-label" style="font-weight: 500;">Reason for Adjustment <span style="color: var(--status-danger); font-size: 0.8rem;">*</span></label>
           <select id="adj-reason-select" class="form-select">
-            <option value="Stock Correction">Stock Correction / Audit</option>
-            <option value="Damaged Stock">Damaged Stock (Write-off)</option>
-            <option value="Missing Stock">Missing / Discrepancy</option>
+            <option value="Stock Correction / Audit" selected>Stock Correction / Audit</option>
+            <option value="Damaged Stock (Write-off)">Damaged Stock (Write-off)</option>
+            <option value="Missing / Lost Stock">Missing / Discrepancy</option>
+            <option value="Found Stock">Found Stock</option>
+            <option value="Manual Stock Update">Manual Stock Update</option>
             <option value="Customer Return">Customer Return</option>
-            <option value="Internal Use">Internal Display / Sample</option>
+            <option value="Other">Other</option>
           </select>
         </div>
 
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.9rem; background: var(--bg-surface);">
           <span style="color: var(--text-secondary);">Calculated New Stock:</span>
-          <strong id="adj-new-stock-label" style="font-size: 1.1rem; color: var(--text-primary);">${calculateNewStock()} units</strong>
+          <strong id="adj-new-stock-label" style="font-size: 1.1rem; color: var(--text-primary); font-weight: 700;">${calculateNewStock()} units</strong>
         </div>
       </div>
 
@@ -4191,6 +4262,8 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
   const qtyInp = modal.querySelector('#adj-qty-input');
   const curStockLabel = modal.querySelector('#adj-current-stock-label');
   const newStockLabel = modal.querySelector('#adj-new-stock-label');
+  const qtyErrorEl = modal.querySelector('#adj-qty-error');
+  const saveBtn = modal.querySelector('.save-modal-btn');
 
   function updateCalc() {
     if (sizeSel) {
@@ -4198,38 +4271,101 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
       selectedVariant = variants.find(v => v.size === selectedSize) || variants[0];
     }
     adjType = typeSel.value;
-    adjQty = parseInt(qtyInp.value, 10) || 0;
 
-    curStockLabel.textContent = `${getCurrentStock()} units`;
-    newStockLabel.textContent = `${calculateNewStock()} units`;
+    const rawVal = (qtyInp.value || '').trim();
+    const num = Number(rawVal);
+    adjQty = parseInt(rawVal, 10);
+
+    const cur = getCurrentStock();
+    if (curStockLabel) curStockLabel.textContent = `${cur} units`;
+
+    let hasError = false;
+
+    if (!rawVal || isNaN(num) || num <= 0 || !Number.isInteger(num)) {
+      hasError = true;
+      if (qtyErrorEl) {
+        qtyErrorEl.textContent = 'Please enter a positive whole number quantity (1 or greater).';
+        qtyErrorEl.style.display = 'block';
+      }
+      qtyInp.style.borderColor = 'var(--status-danger)';
+      newStockLabel.innerHTML = `<span style="color: var(--text-secondary); font-size: 0.95rem;">Invalid quantity</span>`;
+    } else if (adjType === 'REMOVE' && adjQty > cur) {
+      hasError = true;
+      const deficit = cur - adjQty;
+      if (qtyErrorEl) {
+        qtyErrorEl.textContent = `Cannot remove ${adjQty} units. Maximum available stock is ${cur} units.`;
+        qtyErrorEl.style.display = 'block';
+      }
+      qtyInp.style.borderColor = 'var(--status-danger)';
+      newStockLabel.innerHTML = `<span style="color: var(--status-danger); font-size: 0.95rem;">${deficit} units (Negative stock prevented)</span>`;
+    } else {
+      if (qtyErrorEl) qtyErrorEl.style.display = 'none';
+      qtyInp.style.borderColor = '';
+      const calculated = (adjType === 'ADD') ? (cur + adjQty) : (cur - adjQty);
+      newStockLabel.innerHTML = `<span style="color: var(--text-primary); font-weight: 700;">${calculated} units</span>`;
+    }
+
+    return !hasError;
   }
 
   if (sizeSel) sizeSel.onchange = updateCalc;
   typeSel.onchange = updateCalc;
   qtyInp.oninput = updateCalc;
 
-  modal.querySelector('.save-modal-btn').onclick = () => {
-    const finalQty = parseInt(qtyInp.value, 10) || 0;
-    const reason = modal.querySelector('#adj-reason-select').value;
+  let isSaving = false;
 
-    if (finalQty <= 0) {
-      toast.show({ message: 'Quantity must be greater than 0.', type: 'danger' });
+  saveBtn.onclick = () => {
+    if (isSaving) return;
+
+    const isValid = updateCalc();
+    const rawVal = (qtyInp.value || '').trim();
+    const finalQty = parseInt(rawVal, 10);
+    const reasonSel = modal.querySelector('#adj-reason-select');
+    const reason = (reasonSel ? reasonSel.value : '').trim();
+
+    if (!rawVal || isNaN(finalQty) || finalQty <= 0 || !Number.isInteger(Number(rawVal))) {
+      toast.show({ message: 'Quantity must be a positive whole number greater than 0.', type: 'danger' });
+      qtyInp.focus();
       return;
     }
 
+    const cur = getCurrentStock();
+    if (adjType === 'REMOVE' && finalQty > cur) {
+      toast.show({ message: `Cannot remove ${finalQty} units. Maximum available stock is ${cur} units.`, type: 'danger' });
+      qtyInp.focus();
+      return;
+    }
+
+    if (!reason) {
+      toast.show({ message: 'Please select a reason for the stock adjustment.', type: 'danger' });
+      if (reasonSel) reasonSel.focus();
+      return;
+    }
+
+    // Prevent duplicate adjustments on repeated clicks
+    isSaving = true;
+    saveBtn.disabled = true;
+    saveBtn.style.opacity = '0.6';
+    saveBtn.style.cursor = 'not-allowed';
+
     try {
       store.adjustProductStock({
-        productId: product.id,
+        productId: liveProduct.id,
         size: selectedSize,
         adjustmentType: adjType,
         quantity: finalQty,
         reason: reason
       });
 
-      toast.show({ message: `Stock adjusted successfully for ${product.name} (${selectedSize}).`, type: 'success' });
+      const sizeInfo = (hasSizes && selectedSize && selectedSize !== 'Standard') ? ` (${selectedSize})` : '';
+      toast.show({ message: `Stock adjusted successfully for ${liveProduct.name}${sizeInfo}.`, type: 'success' });
       closeModal();
       if (onAdjusted) onAdjusted();
     } catch (err) {
+      isSaving = false;
+      saveBtn.disabled = false;
+      saveBtn.style.opacity = '1';
+      saveBtn.style.cursor = 'pointer';
       toast.show({ message: err.message || 'Error adjusting stock', type: 'danger' });
     }
   };
