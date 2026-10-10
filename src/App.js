@@ -1910,15 +1910,35 @@ class StoreManager {
 
   addSale(salePayload) {
     // salePayload: { customerName, customerPhone, paymentMethod, paymentStatus, discount, items: [ { productId, size, qty, sellingPrice }, ... ] }
+    
+    // 1. Validate combined stock for all items per product and size
+    const requiredStockMap = {};
+    (salePayload.items || []).forEach(item => {
+      const key = `${item.productId}:::${item.size || 'Standard'}`;
+      requiredStockMap[key] = (requiredStockMap[key] || 0) + (parseInt(item.qty, 10) || 0);
+    });
+
+    for (const [key, reqQty] of Object.entries(requiredStockMap)) {
+      const [prodId, size] = key.split(':::');
+      const prod = this.data.products.find(p => p.id === prodId);
+      if (!prod) throw new Error('Product not found.');
+      const variant = (prod.variants || []).find(v => v.size === size) || (prod.variants || [])[0];
+      const avail = variant ? (variant.stock || 0) : 0;
+      if (reqQty > avail) {
+        throw new Error(`Insufficient stock for "${prod.name}" (${size}). Available: ${avail}, Requested: ${reqQty}.`);
+      }
+    }
+
     let totalAmt = 0;
     let totalItemCount = 0;
     const saleItems = [];
+    const shouldDeductStock = salePayload.paymentStatus !== 'Cancelled' && salePayload.paymentStatus !== 'Failed' && salePayload.paymentStatus !== 'Draft';
 
     (salePayload.items || []).forEach(item => {
       const prod = this.data.products.find(p => p.id === item.productId);
       if (prod) {
         const variant = (prod.variants || []).find(v => v.size === item.size) || (prod.variants || [])[0];
-        if (variant) {
+        if (variant && shouldDeductStock) {
           variant.stock = Math.max(0, (variant.stock || 0) - item.qty);
         }
         prod.totalStock = (prod.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
@@ -1954,6 +1974,24 @@ class StoreManager {
       items: saleItems
     };
 
+    // Log Stock Movement for completed sale
+    if (shouldDeductStock) {
+      if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+      saleItems.forEach(si => {
+        this.data.stockMovements.unshift({
+          id: `MOV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+          date: new Date().toLocaleString(),
+          product: si.product,
+          size: si.size,
+          sku: `${(si.product || 'PRD').slice(0,3).toUpperCase()}-${si.size || 'STD'}`,
+          type: 'Sale',
+          quantity: -si.qty,
+          reference: saleRecord.id,
+          user: 'Cashier'
+        });
+      });
+    }
+
     // Automatic Customer Update
     const custName = salePayload.customerName || 'Walk-in Customer';
     const custPhone = salePayload.customerPhone || '-';
@@ -1983,10 +2021,66 @@ class StoreManager {
     return saleRecord;
   }
 
+  adjustProductStock({ productId, size, adjustmentType, quantity, reason }) {
+    const product = this.data.products.find(p => p.id === productId);
+    if (!product) throw new Error('Product not found');
+    const variant = (product.variants || []).find(v => v.size === size) || (product.variants || [])[0];
+    if (!variant) throw new Error('Size variant not found');
+
+    const curStock = variant.stock || 0;
+    const qty = parseInt(quantity, 10);
+    if (isNaN(qty) || qty <= 0) throw new Error('Quantity must be greater than 0');
+
+    let newStock;
+    let qtyChange;
+    if (adjustmentType === 'ADD') {
+      newStock = curStock + qty;
+      qtyChange = qty;
+    } else {
+      if (qty > curStock) {
+        throw new Error(`Cannot remove more than available stock (${curStock} units).`);
+      }
+      newStock = curStock - qty;
+      qtyChange = -qty;
+      if (reason === 'Damaged Stock') {
+        variant.damaged = (variant.damaged || 0) + qty;
+      }
+    }
+
+    variant.stock = newStock;
+    product.totalStock = (product.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+    this.data.stockMovements.unshift({
+      id: `MOV-ADJ-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+      date: new Date().toLocaleString(),
+      product: product.name,
+      size: variant.size || 'Standard',
+      sku: `${(product.name || 'PRD').slice(0,3).toUpperCase()}-${variant.size || 'STD'}`,
+      type: 'Adjustment',
+      quantity: qtyChange,
+      reference: reason || 'Manual Correction',
+      user: 'Manager'
+    });
+
+    this.save();
+    return { product, variant, newStock };
+  }
+
   updateProduct(id, updatedData) {
     const idx = this.data.products.findIndex(p => p.id === id);
     if (idx !== -1) {
       const existing = this.data.products[idx];
+      const updatedVariants = (existing.variants || []).map(v => {
+        if (updatedData.variantPrices && updatedData.variantPrices[v.size] !== undefined) {
+          return {
+            ...v,
+            sellingPrice: updatedData.variantPrices[v.size]
+          };
+        }
+        return v;
+      });
+
       this.data.products[idx] = {
         ...existing,
         name: updatedData.name !== undefined ? updatedData.name : existing.name,
@@ -1995,8 +2089,8 @@ class StoreManager {
         sellingPrice: updatedData.sellingPrice !== undefined ? updatedData.sellingPrice : existing.sellingPrice,
         description: updatedData.description !== undefined ? updatedData.description : existing.description,
         status: updatedData.status !== undefined ? updatedData.status : existing.status,
-        variants: existing.variants, // PRESERVE INVENTORY STOCK INTACT
-        totalStock: existing.totalStock
+        variants: updatedVariants, // PRESERVE INVENTORY STOCK AND BUYING COSTS INTACT
+        totalStock: updatedVariants.reduce((sum, v) => sum + (v.stock || 0), 0)
       };
       this.save();
     }
@@ -2244,6 +2338,50 @@ function openProductDetailsModal(productInput) {
         <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0; line-height: 1.4;">${product.description}</p>
       </div>
     ` : ''}
+
+    <!-- Stock Movement History Section -->
+    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+      <h4 style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="history" style="width: 15px; height: 15px; color: var(--brand-primary);"></i>
+        Stock Movement History
+      </h4>
+      <div class="table-responsive" style="max-height: 220px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+        <table class="admin-table" style="font-size: 0.8rem; margin: 0;">
+          <thead>
+            <tr>
+              <th>Date & Time</th>
+              <th>Type</th>
+              <th>Size</th>
+              <th>Qty Change</th>
+              <th>Reference / Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(() => {
+              const allMovements = store.data.stockMovements || [];
+              const productMovements = allMovements.filter(m => {
+                return (m.product && m.product.toLowerCase() === product.name.toLowerCase()) ||
+                       (m.productId && m.productId === product.id);
+              });
+              if (productMovements.length === 0) {
+                return `<tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 1.25rem;">No stock movements recorded for this product yet.</td></tr>`;
+              }
+              return productMovements.map(m => `
+                <tr>
+                  <td style="color: var(--text-secondary);">${m.date || '-'}</td>
+                  <td>${createBadge({ label: m.type || 'Movement', variant: m.type === 'Stock In' ? 'success' : (m.type === 'Sale' ? 'info' : 'warning') }).outerHTML}</td>
+                  <td style="font-weight: 600;">${m.size || m.sku || 'Standard'}</td>
+                  <td style="font-weight: 700; color: ${m.quantity > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
+                    ${m.quantity > 0 ? `+${m.quantity}` : m.quantity} units
+                  </td>
+                  <td style="color: var(--text-secondary);">${m.reference || '-'}</td>
+                </tr>
+              `).join('');
+            })()}
+          </tbody>
+        </table>
+      </div>
+    </div>
   `;
 
   modalEl.appendChild(innerContent);
@@ -3212,12 +3350,14 @@ function renderInventory(params = {}, onNavigate = null) {
 
   let searchQuery = '';
   let selectedCategory = 'ALL';
+  let selectedBrand = 'ALL';
   let selectedStatus = params.status || 'ALL';
+  let selectedSort = 'name-asc';
   const expandedProductIds = new Set();
 
   // 1. Breadcrumb Header
   const headerDiv = document.createElement('div');
-  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.5rem;';
 
   let invBreadcrumbItems = [
     { label: 'Inventory' }
@@ -3237,17 +3377,82 @@ function renderInventory(params = {}, onNavigate = null) {
   headerDiv.appendChild(createBreadcrumb(invBreadcrumbItems, onNavigate));
   container.appendChild(headerDiv);
 
-  // 2. Filters Bar Card
+  // 2. Summary KPI Cards
+  const kpiGrid = document.createElement('div');
+  kpiGrid.className = 'kpi-grid';
+  kpiGrid.style.cssText = 'margin-bottom: 1.25rem;';
+
+  const metrics = store.getMetrics();
+  const lowCount = metrics.lowStockCount || 0;
+  const outCount = metrics.outOfStockCount || 0;
+  const totalStockUnits = metrics.totalStock || 0;
+  const totalProductsCount = (store.data.products || []).length;
+
+  kpiGrid.appendChild(createMetricCard({
+    label: 'Total Products',
+    value: `${totalProductsCount}`,
+    subtext: `<span style="color: var(--text-secondary);">Unique items in catalog</span>`,
+    icon: 'package',
+    onClick: () => {
+      selectedStatus = 'ALL';
+      const sf = container.querySelector('.status-filter');
+      if (sf) sf.value = 'ALL';
+      renderInventoryTable();
+    }
+  }));
+
+  kpiGrid.appendChild(createMetricCard({
+    label: 'Total Stock Units',
+    value: `${totalStockUnits.toLocaleString('en-IN')}`,
+    subtext: `<span style="color: var(--text-secondary);">Available across all size variants</span>`,
+    icon: 'boxes'
+  }));
+
+  kpiGrid.appendChild(createMetricCard({
+    label: 'Low Stock',
+    value: `${lowCount}`,
+    subtext: `<span style="color: var(--status-warning-text); font-weight: 600;">${lowCount} items / variants</span> <span style="color: var(--text-secondary);">at or below threshold</span>`,
+    icon: 'alert-triangle',
+    variant: 'warning',
+    onClick: () => {
+      selectedStatus = 'LOW';
+      const sf = container.querySelector('.status-filter');
+      if (sf) sf.value = 'LOW';
+      renderInventoryTable();
+    }
+  }));
+
+  kpiGrid.appendChild(createMetricCard({
+    label: 'Out of Stock',
+    value: `${outCount}`,
+    subtext: `<span style="color: var(--status-danger-text); font-weight: 600;">${outCount} items / variants</span> <span style="color: var(--text-secondary);">with 0 units available</span>`,
+    icon: 'alert-circle',
+    variant: 'danger',
+    onClick: () => {
+      selectedStatus = 'OUT';
+      const sf = container.querySelector('.status-filter');
+      if (sf) sf.value = 'OUT';
+      renderInventoryTable();
+    }
+  }));
+
+  container.appendChild(kpiGrid);
+
+  // 3. Filters Bar Card
   const filtersCard = document.createElement('div');
   filtersCard.className = 'card';
   filtersCard.style.cssText = 'padding: 0.85rem 1.15rem; margin-bottom: 1.25rem;';
 
   const categories = store.data.categories || ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies'];
+  const allBrands = Array.from(new Set([
+    ...(store.data.brands || []),
+    ...(store.data.products || []).map(p => p.brand).filter(Boolean)
+  ])).sort();
 
   filtersCard.innerHTML = `
     <div style="display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: center; justify-content: space-between;">
       <div style="display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: center; flex: 1;">
-        <div style="position: relative; flex: 1; min-width: 200px; max-width: 320px;">
+        <div style="position: relative; flex: 1; min-width: 200px; max-width: 300px;">
           <i data-lucide="search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-secondary);"></i>
           <input type="text" class="form-input search-input" placeholder="Search product name or brand..." style="padding-left: 32px; font-size: 0.85rem;">
         </div>
@@ -3257,23 +3462,37 @@ function renderInventory(params = {}, onNavigate = null) {
           ${categories.map(c => `<option value="${c}">${c}</option>`).join('')}
         </select>
 
+        <select class="form-select brand-filter" style="width: auto; min-width: 130px; font-size: 0.85rem;">
+          <option value="ALL">All Brands</option>
+          ${allBrands.map(b => `<option value="${b}">${b}</option>`).join('')}
+        </select>
+
         <select class="form-select status-filter" style="width: auto; min-width: 130px; font-size: 0.85rem;">
-          <option value="ALL" ${selectedStatus === 'ALL' ? 'selected' : ''}>All Status</option>
-          <option value="Active" ${selectedStatus === 'Active' ? 'selected' : ''}>Active</option>
+          <option value="ALL" ${selectedStatus === 'ALL' ? 'selected' : ''}>All Stock Status</option>
+          <option value="Active" ${selectedStatus === 'Active' || selectedStatus === 'IN_STOCK' ? 'selected' : ''}>In Stock</option>
           <option value="LOW" ${selectedStatus === 'LOW' ? 'selected' : ''}>Low Stock</option>
           <option value="OUT" ${selectedStatus === 'OUT' ? 'selected' : ''}>Out of Stock</option>
           <option value="Inactive" ${selectedStatus === 'Inactive' ? 'selected' : ''}>Inactive</option>
         </select>
+
+        <select class="form-select sort-filter" style="width: auto; min-width: 160px; font-size: 0.85rem;">
+          <option value="name-asc" ${selectedSort === 'name-asc' ? 'selected' : ''}>Sort: Name (A–Z)</option>
+          <option value="name-desc" ${selectedSort === 'name-desc' ? 'selected' : ''}>Sort: Name (Z–A)</option>
+          <option value="stock-desc" ${selectedSort === 'stock-desc' ? 'selected' : ''}>Sort: Stock (High to Low)</option>
+          <option value="stock-asc" ${selectedSort === 'stock-asc' ? 'selected' : ''}>Sort: Stock (Low to High)</option>
+          <option value="price-desc" ${selectedSort === 'price-desc' ? 'selected' : ''}>Sort: Price (High to Low)</option>
+          <option value="price-asc" ${selectedSort === 'price-asc' ? 'selected' : ''}>Sort: Price (Low to High)</option>
+        </select>
       </div>
 
-      <div style="font-size: 0.85rem; color: var(--text-secondary);">
-        Total: <strong id="inv-count-label" style="color: var(--text-primary);">${(store.data.products || []).length}</strong> Products
+      <div style="font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap;">
+        Showing: <strong id="inv-count-label" style="color: var(--text-primary);">${(store.data.products || []).length}</strong> Products
       </div>
     </div>
   `;
   container.appendChild(filtersCard);
 
-  // 3. Main Grouped Inventory Table Card
+  // 4. Main Grouped Inventory Table Card
   const tableCard = document.createElement('div');
   tableCard.className = 'card';
 
@@ -3283,14 +3502,14 @@ function renderInventory(params = {}, onNavigate = null) {
     <table class="admin-table">
       <thead>
         <tr>
-          <th style="width: 6%; text-align: center;">S.No</th>
+          <th style="width: 5%; text-align: center;">S.No</th>
           <th>Product Name</th>
           <th>Category</th>
           <th>Brand</th>
           <th>Selling Price</th>
-          <th>Total Stock</th>
-          <th>Status</th>
-          <th>Actions</th>
+          <th>Total Available Stock</th>
+          <th>Stock Status</th>
+          <th style="text-align: right;">Actions</th>
         </tr>
       </thead>
       <tbody id="inventory-table-body"></tbody>
@@ -3301,62 +3520,132 @@ function renderInventory(params = {}, onNavigate = null) {
 
   const searchInp = filtersCard.querySelector('.search-input');
   const catFilter = filtersCard.querySelector('.category-filter');
+  const brandFilter = filtersCard.querySelector('.brand-filter');
   const statusFilter = filtersCard.querySelector('.status-filter');
+  const sortFilter = filtersCard.querySelector('.sort-filter');
   const tbody = tableContainer.querySelector('#inventory-table-body');
   const countLabel = filtersCard.querySelector('#inv-count-label');
 
   searchInp.addEventListener('input', (e) => { searchQuery = e.target.value; renderInventoryTable(); });
   catFilter.addEventListener('change', (e) => { selectedCategory = e.target.value; renderInventoryTable(); });
+  brandFilter.addEventListener('change', (e) => { selectedBrand = e.target.value; renderInventoryTable(); });
   statusFilter.addEventListener('change', (e) => { selectedStatus = e.target.value; renderInventoryTable(); });
+  sortFilter.addEventListener('change', (e) => { selectedSort = e.target.value; renderInventoryTable(); });
+
+  function getProductPriceInfo(product) {
+    const prices = [];
+    if (Array.isArray(product.variants) && product.variants.length > 0) {
+      product.variants.forEach(v => {
+        const sp = v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== '' ? Number(v.sellingPrice) : null;
+        if (sp !== null && !isNaN(sp) && sp > 0) prices.push(sp);
+      });
+    }
+    if (prices.length === 0 && product.sellingPrice !== undefined && product.sellingPrice !== null && product.sellingPrice !== '') {
+      const sp = Number(product.sellingPrice);
+      if (!isNaN(sp) && sp > 0) prices.push(sp);
+    }
+    if (prices.length === 0) {
+      return {
+        display: `<span style="color: var(--text-secondary); font-style: italic;">Price Not Set</span>`,
+        min: 0,
+        max: 0
+      };
+    }
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    if (min === max) {
+      return {
+        display: `₹${min.toLocaleString('en-IN')}`,
+        min,
+        max
+      };
+    }
+    return {
+      display: `₹${min.toLocaleString('en-IN')} – ₹${max.toLocaleString('en-IN')}`,
+      min,
+      max
+    };
+  }
 
   function renderInventoryTable() {
     tbody.innerHTML = '';
     const products = store.data.products || [];
 
     const filteredProducts = products.filter(p => {
-      const matchQuery = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || (p.brand || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const q = searchQuery.toLowerCase().trim();
+      const matchQuery = !q || p.name.toLowerCase().includes(q) || (p.brand || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q);
       const matchCat = selectedCategory === 'ALL' || p.category === selectedCategory;
+      const matchBrand = selectedBrand === 'ALL' || (p.brand || 'Unbranded') === selectedBrand;
 
       const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-      const isLowStock = (p.variants || []).some(v => (v.stock || 0) > 0 && (v.stock || 0) <= (p.minStock || 5));
+      const isLowStock = (p.variants || []).some(v => (v.stock || 0) > 0 && (v.stock || 0) <= (p.minStock || 5)) || (totalStock > 0 && totalStock <= (p.minStock || 5));
       const isOutOfStock = totalStock === 0;
+      const isInStock = totalStock > 0 && !isLowStock;
 
       let matchStat = true;
-      if (selectedStatus === 'Active') matchStat = (p.status === 'Active');
-      else if (selectedStatus === 'Inactive') matchStat = (p.status === 'Inactive');
-      else if (selectedStatus === 'LOW') matchStat = isLowStock;
-      else if (selectedStatus === 'OUT') matchStat = isOutOfStock;
+      if (selectedStatus === 'Active' || selectedStatus === 'IN_STOCK') {
+        matchStat = (p.status !== 'Inactive') && isInStock;
+      } else if (selectedStatus === 'Inactive') {
+        matchStat = (p.status === 'Inactive');
+      } else if (selectedStatus === 'LOW') {
+        matchStat = (p.status !== 'Inactive') && isLowStock;
+      } else if (selectedStatus === 'OUT') {
+        matchStat = (p.status !== 'Inactive') && isOutOfStock;
+      }
 
-      return matchQuery && matchCat && matchStat;
+      return matchQuery && matchCat && matchBrand && matchStat;
+    });
+
+    // Sorting
+    filteredProducts.sort((a, b) => {
+      const stockA = (a.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+      const stockB = (b.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+      const priceA = getProductPriceInfo(a);
+      const priceB = getProductPriceInfo(b);
+
+      if (selectedSort === 'name-asc') return a.name.localeCompare(b.name);
+      if (selectedSort === 'name-desc') return b.name.localeCompare(a.name);
+      if (selectedSort === 'stock-desc') return stockB - stockA;
+      if (selectedSort === 'stock-asc') return stockA - stockB;
+      if (selectedSort === 'price-desc') return priceB.max - priceA.max;
+      if (selectedSort === 'price-asc') return priceA.min - priceB.min;
+      return 0;
     });
 
     countLabel.textContent = filteredProducts.length;
 
     if (filteredProducts.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No products match your criteria.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No products match your search or filter criteria.</td></tr>`;
       return;
     }
 
     filteredProducts.forEach((p, index) => {
       const totalStock = (p.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-      const hasSizes = p.variants && (p.variants || []).length > 0 && p.variants.some(v => v.size !== 'Standard');
+      const hasSizes = Array.isArray(p.variants) && p.variants.length > 0 && p.variants.some(v => v.size !== 'Standard');
       const isExpanded = expandedProductIds.has(p.id);
 
-      let itemStatus = p.status || 'Active';
-      if (p.status !== 'Inactive') {
-        if (totalStock === 0) itemStatus = 'Out of Stock';
-        else if ((p.variants || []).some(v => (v.stock || 0) > 0 && (v.stock || 0) <= (p.minStock || 5))) itemStatus = 'Low Stock';
+      const isLowStock = (p.variants || []).some(v => (v.stock || 0) > 0 && (v.stock || 0) <= (p.minStock || 5)) || (totalStock > 0 && totalStock <= (p.minStock || 5));
+      const isOutOfStock = totalStock === 0;
+
+      let statusBadge;
+      if (p.status === 'Inactive') {
+        statusBadge = createBadge({ label: 'Inactive', variant: 'secondary' });
+      } else if (isOutOfStock) {
+        statusBadge = createBadge({ label: 'Out of Stock', variant: 'danger' });
+      } else if (isLowStock) {
+        statusBadge = createBadge({ label: 'Low Stock', variant: 'warning' });
+      } else {
+        statusBadge = createBadge({ label: 'In Stock', variant: 'success' });
       }
 
-      const isPriceSet = p.sellingPrice !== null && p.sellingPrice !== undefined && p.sellingPrice > 0;
-      const priceDisplay = isPriceSet ? `₹${(p.sellingPrice || 0).toLocaleString()}` : `<span style="color: var(--text-secondary); font-style: italic;">Price Not Set</span>`;
+      const priceInfo = getProductPriceInfo(p);
 
       // Main Product Row
       const tr = document.createElement('tr');
-      tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
+      tr.style.cssText = 'transition: background-color 0.15s ease;';
 
       const chevronIcon = hasSizes
-        ? `<button type="button" class="expand-toggle-btn" style="background: none; border: none; padding: 2px 4px; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; vertical-align: middle; margin-right: 6px;">
+        ? `<button type="button" class="expand-toggle-btn" title="${isExpanded ? 'Collapse sizes' : 'Expand sizes'}" style="background: none; border: none; padding: 3px 5px; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; border-radius: 4px; transition: color 0.15s ease;">
              <i data-lucide="${isExpanded ? 'chevron-down' : 'chevron-right'}" style="width: 16px; height: 16px;"></i>
            </button>`
         : '';
@@ -3374,11 +3663,11 @@ function renderInventory(params = {}, onNavigate = null) {
         </td>
         <td style="color: var(--text-secondary);">${p.category || 'General'}</td>
         <td style="color: var(--text-secondary);">${p.brand || 'Unbranded'}</td>
-        <td style="font-weight: 600;">${priceDisplay}</td>
+        <td style="font-weight: 600;">${priceInfo.display}</td>
         <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${totalStock} units</td>
-        <td>${createBadge({ label: itemStatus, variant: 'secondary' }).outerHTML}</td>
-        <td>
-          <div style="display: flex; gap: 0.4rem; align-items: center;" onclick="event.stopPropagation();">
+        <td>${statusBadge.outerHTML}</td>
+        <td style="text-align: right;">
+          <div style="display: inline-flex; gap: 0.4rem; align-items: center;" onclick="event.stopPropagation();">
             <button type="button" class="btn btn-secondary btn-sm view-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">View</button>
             <button type="button" class="btn btn-secondary btn-sm edit-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">Edit</button>
             <button type="button" class="btn btn-secondary btn-sm adjust-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">Adjust</button>
@@ -3397,9 +3686,6 @@ function renderInventory(params = {}, onNavigate = null) {
         };
 
         if (toggleBtn) toggleBtn.addEventListener('click', handleToggle);
-        tr.addEventListener('click', (e) => {
-          if (!e.target.closest('button')) handleToggle(e);
-        });
       }
 
       tr.querySelector('.view-inv-btn').addEventListener('click', (e) => {
@@ -3419,36 +3705,89 @@ function renderInventory(params = {}, onNavigate = null) {
 
       tbody.appendChild(tr);
 
-      // Expandable Size Breakdown Sub-Row
+      // Expandable Size Breakdown Table Sub-Row
       if (hasSizes && isExpanded) {
         const subTr = document.createElement('tr');
         subTr.className = 'size-breakdown-row';
+
+        const variantsList = (p.variants || []);
+        const sizeRowsHtml = variantsList.map(v => {
+          const buyPrice = v.purchasePrice !== undefined && v.purchasePrice !== null && v.purchasePrice > 0 
+            ? `₹${Number(v.purchasePrice).toLocaleString('en-IN')}` 
+            : (p.purchasePrice ? `₹${Number(p.purchasePrice).toLocaleString('en-IN')}` : '—');
+
+          const sellPrice = v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice > 0 
+            ? `₹${Number(v.sellingPrice).toLocaleString('en-IN')}` 
+            : (p.sellingPrice ? `₹${Number(p.sellingPrice).toLocaleString('en-IN')}` : '—');
+
+          const vStock = v.stock || 0;
+          let vBadge;
+          if (vStock === 0) {
+            vBadge = createBadge({ label: 'Out of Stock', variant: 'danger' }).outerHTML;
+          } else if (vStock <= (p.minStock || 5)) {
+            vBadge = createBadge({ label: 'Low Stock', variant: 'warning' }).outerHTML;
+          } else {
+            vBadge = createBadge({ label: 'In Stock', variant: 'success' }).outerHTML;
+          }
+
+          return `
+            <tr style="border-bottom: 1px solid var(--border-color);">
+              <td style="padding: 0.6rem 0.85rem; font-weight: 600;">
+                <span style="display: inline-block; padding: 0.15rem 0.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.8rem;">
+                  Size ${v.size}
+                </span>
+              </td>
+              <td style="padding: 0.6rem 0.85rem; color: var(--text-secondary); font-size: 0.85rem;">${buyPrice}</td>
+              <td style="padding: 0.6rem 0.85rem; font-weight: 600; font-size: 0.85rem;">${sellPrice}</td>
+              <td style="padding: 0.6rem 0.85rem; font-weight: 600; font-size: 0.85rem; color: ${vStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${vStock} units</td>
+              <td style="padding: 0.6rem 0.85rem;">${vBadge}</td>
+              <td style="padding: 0.6rem 0.85rem; text-align: right;">
+                <button type="button" class="btn btn-secondary btn-sm size-adjust-btn" data-size="${v.size}" style="padding: 0.2rem 0.5rem; font-size: 0.775rem;">
+                  Adjust
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+
         subTr.innerHTML = `
           <td colspan="8" style="padding: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
-            <div style="padding: 0.85rem 1.25rem; display: flex; flex-direction: column; gap: 0.65rem;">
+            <div style="padding: 1rem 1.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
               <div style="display: flex; align-items: center; justify-content: space-between;">
-                <span style="font-size: 0.775rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);">
-                  Size & Stock Breakdown for ${p.name}
-                </span>
-                <span style="font-size: 0.75rem; color: var(--text-secondary);">Click any size to adjust its stock</span>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                  <span style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--brand-primary);">
+                    Size-Wise Inventory Details
+                  </span>
+                  <span style="font-size: 0.8rem; color: var(--text-secondary);">&mdash; ${p.name}</span>
+                </div>
+                <span style="font-size: 0.75rem; color: var(--text-secondary);">Total Available: <strong>${totalStock} units</strong> across ${variantsList.length} sizes</span>
               </div>
-              <div style="display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center;">
-                ${(p.variants || []).map(v => `
-                  <div class="size-stock-pill" data-size="${v.size}" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.75rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.825rem; cursor: pointer; transition: all 0.15s ease;">
-                    <span style="font-weight: 600; color: var(--text-primary);">${v.size}:</span>
-                    <span style="font-weight: 600; color: ${v.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${v.stock} units</span>
-                    ${v.stock === 0 ? '<span style="font-size: 0.7rem; color: var(--text-secondary);">(Out of Stock)</span>' : ''}
-                  </div>
-                `).join('')}
+
+              <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);">
+                <table class="admin-table" style="margin: 0; font-size: 0.825rem;">
+                  <thead>
+                    <tr style="background: var(--bg-secondary);">
+                      <th style="padding: 0.5rem 0.85rem;">Size</th>
+                      <th style="padding: 0.5rem 0.85rem;">Buying Price / Unit</th>
+                      <th style="padding: 0.5rem 0.85rem;">Selling Price / Unit</th>
+                      <th style="padding: 0.5rem 0.85rem;">Available Quantity</th>
+                      <th style="padding: 0.5rem 0.85rem;">Stock Status</th>
+                      <th style="padding: 0.5rem 0.85rem; text-align: right;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${sizeRowsHtml}
+                  </tbody>
+                </table>
               </div>
             </div>
           </td>
         `;
 
-        subTr.querySelectorAll('.size-stock-pill').forEach(pill => {
-          pill.addEventListener('click', (e) => {
+        subTr.querySelectorAll('.size-adjust-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const sz = pill.getAttribute('data-size');
+            const sz = btn.getAttribute('data-size');
             openRowStockAdjustModal(p, sz, () => renderInventoryTable());
           });
         });
@@ -3475,9 +3814,30 @@ function openEditProductModal(product, onSaved) {
 
   const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
   const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+  const hasSizes = Array.isArray(product.variants) && product.variants.length > 0 && product.variants.some(v => v.size !== 'Standard');
+
+  let sizePricesHtml = '';
+  if (hasSizes) {
+    sizePricesHtml = `
+      <div class="form-group" style="margin-top: 0.25rem;">
+        <label class="form-label" style="font-weight: 500; display: flex; justify-content: space-between; align-items: center;">
+          <span>Size-Wise Selling Prices (₹)</span>
+          <span style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 400;">Optional: set specific prices per size</span>
+        </label>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.6rem; background: var(--bg-secondary); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          ${(product.variants || []).map(v => `
+            <div>
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 3px;">Size ${v.size}</label>
+              <input type="number" class="form-input variant-price-input" data-size="${v.size}" placeholder="e.g. 599" value="${v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== '' ? v.sellingPrice : (product.sellingPrice || '')}" style="font-size: 0.825rem; padding: 0.35rem 0.5rem;">
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
 
   modal.innerHTML = `
-    <div class="modal-content" style="max-width: 520px; width: 95%;">
+    <div class="modal-content" style="max-width: 540px; width: 95%; max-height: 90vh; overflow-y: auto;">
       <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
         <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Edit Product Details</h3>
         <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">
@@ -3485,7 +3845,7 @@ function openEditProductModal(product, onSaved) {
         </button>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <div style="display: flex; flex-direction: column; gap: 0.85rem;">
         <div class="form-group">
           <label class="form-label" style="font-weight: 500;">Product Name <span style="color: #ef4444;">*</span></label>
           <input type="text" id="edit-prod-name" class="form-input" value="${product.name || ''}">
@@ -3508,7 +3868,7 @@ function openEditProductModal(product, onSaved) {
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
           <div class="form-group">
-            <label class="form-label" style="font-weight: 500;">Selling Price (₹)</label>
+            <label class="form-label" style="font-weight: 500;">Default Selling Price (₹)</label>
             <input type="number" id="edit-prod-price" class="form-input" placeholder="e.g. 1499" value="${product.sellingPrice !== null && product.sellingPrice !== undefined ? product.sellingPrice : ''}">
           </div>
           <div class="form-group">
@@ -3518,6 +3878,13 @@ function openEditProductModal(product, onSaved) {
               <option value="Inactive" ${product.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
             </select>
           </div>
+        </div>
+
+        ${sizePricesHtml}
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Product Description (Optional)</label>
+          <textarea id="edit-prod-desc" class="form-textarea" rows="3" placeholder="Enter product description, material, care instructions...">${product.description || ''}</textarea>
         </div>
       </div>
 
@@ -3542,18 +3909,30 @@ function openEditProductModal(product, onSaved) {
     const priceVal = modal.querySelector('#edit-prod-price').value.trim();
     const sellingPrice = priceVal !== '' ? parseFloat(priceVal) : null;
     const status = modal.querySelector('#edit-prod-status').value;
+    const description = modal.querySelector('#edit-prod-desc').value.trim();
 
     if (!name) {
       toast.show({ message: 'Product Name is required.', type: 'danger' });
       return;
     }
 
+    const variantPrices = {};
+    modal.querySelectorAll('.variant-price-input').forEach(inp => {
+      const sz = inp.getAttribute('data-size');
+      const val = inp.value.trim();
+      if (val !== '' && !isNaN(parseFloat(val))) {
+        variantPrices[sz] = parseFloat(val);
+      }
+    });
+
     store.updateProduct(product.id, {
       name,
       category,
       brand,
       sellingPrice,
-      status
+      status,
+      description,
+      variantPrices
     });
 
     toast.show({ message: 'Product details updated successfully.', type: 'success' });
@@ -3605,7 +3984,7 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
   modal.innerHTML = `
     <div class="modal-content" style="max-width: 480px; width: 95%;">
       <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
-        <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Manual Stock Audit / Adjustment</h3>
+        <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Manual Stock Correction / Adjustment</h3>
         <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">
           <i data-lucide="x" style="width: 20px; height: 20px;"></i>
         </button>
@@ -3616,7 +3995,7 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
           <div style="font-weight: 600; color: var(--text-primary); font-size: 0.95rem; margin-bottom: 4px;">${product.name}</div>
           <div style="color: var(--text-secondary); display: flex; gap: 1rem;">
             <span>Category: <strong>${product.category || 'General'}</strong></span>
-            <span>Current Stock: <strong id="adj-current-stock-label">${getCurrentStock()} units</strong></span>
+            <span>Current Available: <strong id="adj-current-stock-label" style="color: var(--text-primary);">${getCurrentStock()} units</strong></span>
           </div>
         </div>
 
@@ -3636,16 +4015,17 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
         </div>
 
         <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Reason</label>
+          <label class="form-label" style="font-weight: 500;">Reason for Adjustment</label>
           <select id="adj-reason-select" class="form-select">
-            <option value="Stock Audit">Manual Stock Audit</option>
-            <option value="Damaged Stock">Damaged Stock</option>
-            <option value="Received Return">Customer Return</option>
+            <option value="Stock Correction">Stock Correction / Audit</option>
+            <option value="Damaged Stock">Damaged Stock (Write-off)</option>
+            <option value="Missing Stock">Missing / Discrepancy</option>
+            <option value="Customer Return">Customer Return</option>
             <option value="Internal Use">Internal Display / Sample</option>
           </select>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.9rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); font-size: 0.9rem; background: var(--bg-surface);">
           <span style="color: var(--text-secondary);">Calculated New Stock:</span>
           <strong id="adj-new-stock-label" style="font-size: 1.1rem; color: var(--text-primary);">${calculateNewStock()} units</strong>
         </div>
@@ -3696,24 +4076,21 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
       return;
     }
 
-    if (selectedVariant) {
-      const curStock = selectedVariant.stock || 0;
-      if (adjType === 'ADD') {
-        selectedVariant.stock = curStock + finalQty;
-      } else {
-        if (finalQty > curStock) {
-          toast.show({ message: `Cannot remove more than current stock (${curStock} units).`, type: 'danger' });
-          return;
-        }
-        selectedVariant.stock = curStock - finalQty;
-      }
-      product.totalStock = (product.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
-      store.save();
-    }
+    try {
+      store.adjustProductStock({
+        productId: product.id,
+        size: selectedSize,
+        adjustmentType: adjType,
+        quantity: finalQty,
+        reason: reason
+      });
 
-    toast.show({ message: `Stock updated for ${product.name} (${selectedSize}).`, type: 'success' });
-    closeModal();
-    if (onAdjusted) onAdjusted();
+      toast.show({ message: `Stock adjusted successfully for ${product.name} (${selectedSize}).`, type: 'success' });
+      closeModal();
+      if (onAdjusted) onAdjusted();
+    } catch (err) {
+      toast.show({ message: err.message || 'Error adjusting stock', type: 'danger' });
+    }
   };
 }
 
