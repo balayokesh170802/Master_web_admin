@@ -6347,12 +6347,39 @@ function openEditCustomerModal(customer, onSaved = null) {
   };
 }
 
-// CUSTOMERS PAGE (Standardized with Purchases Table UI)
+// CUSTOMERS PAGE (Standardized with Purchases Table UI & Full Pagination)
 function renderCustomers(onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
   let searchQuery = '';
+  let currentPage = 1;
+  let pageSize = 10;
+
+  function getPageNumbers(current, total) {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    const pages = [];
+    if (current <= 4) {
+      for (let i = 1; i <= 5; i++) pages.push(i);
+      pages.push('...');
+      pages.push(total);
+    } else if (current >= total - 3) {
+      pages.push(1);
+      pages.push('...');
+      for (let i = total - 4; i <= total; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      pages.push('...');
+      pages.push(current - 1);
+      pages.push(current);
+      pages.push(current + 1);
+      pages.push('...');
+      pages.push(total);
+    }
+    return pages;
+  }
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
@@ -6394,12 +6421,32 @@ function renderCustomers(onNavigate = null) {
         <tbody id="cust-table-tbody"></tbody>
       </table>
     </div>
+
+    <!-- Pagination Footer -->
+    <div id="cust-pagination-container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding-top: 0.25rem;">
+      <div style="display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap;">
+        <span id="cust-pagination-info" style="font-size: 0.825rem; color: var(--text-secondary);"></span>
+        <div style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.825rem; color: var(--text-secondary);">
+          <span>Rows per page:</span>
+          <select id="cust-page-size-select" class="form-select" style="padding: 0.25rem 0.55rem; font-size: 0.8rem; width: auto; height: auto;">
+            <option value="10" selected>10</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="cust-pagination-nav" style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;"></div>
+    </div>
   `;
   container.appendChild(mainCard);
 
   function renderCustomersTable() {
     const tbody = mainCard.querySelector('#cust-table-tbody');
     const countLabel = mainCard.querySelector('#cust-count-label');
+    const paginationContainer = mainCard.querySelector('#cust-pagination-container');
+    const paginationInfo = mainCard.querySelector('#cust-pagination-info');
+    const paginationNav = mainCard.querySelector('#cust-pagination-nav');
     tbody.innerHTML = '';
 
     const allCustomers = store.data.customers || [];
@@ -6416,15 +6463,33 @@ function renderCustomers(onNavigate = null) {
 
     if (filtered.length === 0) {
       tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No customers found matching search.</td></tr>`;
+      if (paginationInfo) paginationInfo.textContent = 'Showing 0 of 0 customers';
+      if (paginationNav) paginationNav.innerHTML = '';
+      if (paginationContainer) paginationContainer.style.display = 'none';
       return;
     }
 
-    filtered.forEach((c, index) => {
+    if (paginationContainer) paginationContainer.style.display = 'flex';
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+
+    const startIdx = (currentPage - 1) * pageSize;
+    const endIdx = Math.min(startIdx + pageSize, filtered.length);
+    const pageCustomers = filtered.slice(startIdx, endIdx);
+
+    if (paginationInfo) {
+      paginationInfo.innerHTML = `Showing <strong style="color: var(--text-primary); font-weight: 600;">${startIdx + 1}–${endIdx}</strong> of <strong style="color: var(--text-primary); font-weight: 600;">${filtered.length}</strong> customers`;
+    }
+
+    pageCustomers.forEach((c, index) => {
+      const globalIndex = startIdx + index + 1;
       const tr = document.createElement('tr');
       tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
 
       tr.innerHTML = `
-        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${globalIndex}</td>
         <td style="font-weight: 600; color: var(--text-primary);">${c.name}</td>
         <td style="color: var(--text-secondary);">${c.phone || '-'}</td>
         <td style="font-weight: 600; color: var(--text-primary);">${c.ordersCount || 0} purchases</td>
@@ -6460,12 +6525,87 @@ function renderCustomers(onNavigate = null) {
       tbody.appendChild(tr);
     });
 
+    // Render Navigation Buttons
+    if (paginationNav) {
+      paginationNav.innerHTML = '';
+
+      // Previous Button
+      const prevBtn = document.createElement('button');
+      prevBtn.type = 'button';
+      prevBtn.className = 'btn btn-sm btn-secondary cust-prev-btn';
+      prevBtn.style.cssText = 'padding: 0.3rem 0.65rem; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 0.35rem;';
+      prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width: 14px; height: 14px;"></i> Previous`;
+      if (currentPage <= 1) {
+        prevBtn.disabled = true;
+        prevBtn.style.opacity = '0.5';
+        prevBtn.style.cursor = 'not-allowed';
+      } else {
+        prevBtn.addEventListener('click', () => {
+          currentPage--;
+          renderCustomersTable();
+        });
+      }
+      paginationNav.appendChild(prevBtn);
+
+      // Page Numbers
+      const pageNumbers = getPageNumbers(currentPage, totalPages);
+      pageNumbers.forEach(p => {
+        if (p === '...') {
+          const dots = document.createElement('span');
+          dots.style.cssText = 'padding: 0.3rem 0.45rem; font-size: 0.8rem; color: var(--text-secondary); user-select: none;';
+          dots.textContent = '...';
+          paginationNav.appendChild(dots);
+        } else {
+          const pageBtn = document.createElement('button');
+          pageBtn.type = 'button';
+          pageBtn.className = `btn btn-sm ${p === currentPage ? 'btn-primary' : 'btn-secondary'} cust-page-num-btn`;
+          pageBtn.style.cssText = `padding: 0.3rem 0.65rem; font-size: 0.8rem; min-width: 32px; font-weight: ${p === currentPage ? '700' : '500'};`;
+          pageBtn.textContent = p;
+          if (p === currentPage) {
+            pageBtn.setAttribute('aria-current', 'page');
+          } else {
+            pageBtn.addEventListener('click', () => {
+              currentPage = p;
+              renderCustomersTable();
+            });
+          }
+          paginationNav.appendChild(pageBtn);
+        }
+      });
+
+      // Next Button
+      const nextBtn = document.createElement('button');
+      nextBtn.type = 'button';
+      nextBtn.className = 'btn btn-sm btn-secondary cust-next-btn';
+      nextBtn.style.cssText = 'padding: 0.3rem 0.65rem; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 0.35rem;';
+      nextBtn.innerHTML = `Next <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i>`;
+      if (currentPage >= totalPages) {
+        nextBtn.disabled = true;
+        nextBtn.style.opacity = '0.5';
+        nextBtn.style.cursor = 'not-allowed';
+      } else {
+        nextBtn.addEventListener('click', () => {
+          currentPage++;
+          renderCustomersTable();
+        });
+      }
+      paginationNav.appendChild(nextBtn);
+    }
+
     if (window.lucide) window.lucide.createIcons();
   }
 
   const searchInput = mainCard.querySelector('#cust-search-input');
   searchInput.addEventListener('input', (e) => {
     searchQuery = e.target.value.trim();
+    currentPage = 1;
+    renderCustomersTable();
+  });
+
+  const pageSizeSelect = mainCard.querySelector('#cust-page-size-select');
+  pageSizeSelect.addEventListener('change', (e) => {
+    pageSize = parseInt(e.target.value, 10) || 10;
+    currentPage = 1;
     renderCustomersTable();
   });
 
