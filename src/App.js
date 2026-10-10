@@ -1477,6 +1477,14 @@ class StoreManager {
     const buyPrice = payload.purchasePrice !== undefined ? payload.purchasePrice : 0;
     const sellPrice = payload.sellingPrice !== undefined ? payload.sellingPrice : 0;
 
+    let parsedSizes = [];
+    if (Array.isArray(payload.sizes) && payload.sizes.length > 0) {
+      parsedSizes = payload.sizes;
+    } else if (typeof payload.sizes === 'string' && payload.sizes.trim()) {
+      parsedSizes = payload.sizes.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (parsedSizes.length === 0) parsedSizes = ['Standard'];
+
     if (!product) {
       const newProdId = `PROD-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`;
       product = {
@@ -1489,9 +1497,13 @@ class StoreManager {
         sellingPrice: sellPrice,
         status: 'Active',
         minStock: 5,
-        variants: [
-          { size: 'Standard', stock: 0, damaged: 0, purchasePrice: buyPrice, sellingPrice: sellPrice }
-        ],
+        variants: parsedSizes.map(sz => ({
+          size: sz,
+          stock: 0,
+          damaged: 0,
+          purchasePrice: buyPrice,
+          sellingPrice: sellPrice
+        })),
         totalStock: 0
       };
       this.data.products.unshift(product);
@@ -1501,6 +1513,31 @@ class StoreManager {
       if (payload.description) product.description = payload.description;
       if (payload.purchasePrice !== undefined) product.purchasePrice = buyPrice;
       if (payload.sellingPrice !== undefined) product.sellingPrice = sellPrice;
+
+      if (!product.variants || product.variants.length === 0) {
+        product.variants = parsedSizes.map(sz => ({
+          size: sz,
+          stock: 0,
+          damaged: 0,
+          purchasePrice: buyPrice,
+          sellingPrice: sellPrice
+        }));
+      } else {
+        parsedSizes.forEach(sz => {
+          if (!product.variants.some(v => v.size.toLowerCase() === sz.toLowerCase())) {
+            product.variants.push({
+              size: sz,
+              stock: 0,
+              damaged: 0,
+              purchasePrice: buyPrice,
+              sellingPrice: sellPrice
+            });
+          }
+        });
+        if (parsedSizes.some(s => s !== 'Standard')) {
+          product.variants = product.variants.filter(v => v.size !== 'Standard' || v.stock > 0);
+        }
+      }
     }
 
     if (!product.variants || product.variants.length === 0) {
@@ -2540,6 +2577,23 @@ function renderAddProductPage(params = {}, onNavigate = null) {
         </div>
       </div>
 
+      <!-- Size Input with Quick Select Pills -->
+      <div class="form-group">
+        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center;">
+          <span>Size / Sizes *</span>
+          <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-secondary);">Click pills or enter comma-separated</span>
+        </label>
+        <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem;" id="new-prod-size-pills">
+          <button type="button" class="btn btn-sm size-pill-btn" data-size="S" style="padding: 0.2rem 0.65rem; font-size: 0.775rem;">S</button>
+          <button type="button" class="btn btn-sm size-pill-btn" data-size="M" style="padding: 0.2rem 0.65rem; font-size: 0.775rem;">M</button>
+          <button type="button" class="btn btn-sm size-pill-btn" data-size="L" style="padding: 0.2rem 0.65rem; font-size: 0.775rem;">L</button>
+          <button type="button" class="btn btn-sm size-pill-btn" data-size="XL" style="padding: 0.2rem 0.65rem; font-size: 0.775rem;">XL</button>
+          <button type="button" class="btn btn-sm size-pill-btn" data-size="XXL" style="padding: 0.2rem 0.65rem; font-size: 0.775rem;">XXL</button>
+          <button type="button" class="btn btn-sm size-pill-btn" data-size="Free Size" style="padding: 0.2rem 0.65rem; font-size: 0.775rem;">Free Size</button>
+        </div>
+        <input type="text" class="form-input" id="new-prod-sizes" placeholder="e.g. S, M, L, XL, XXL (or Standard)" value="S, M, L, XL, XXL" style="font-size: 0.9rem;">
+      </div>
+
       <div class="form-group">
         <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Product Description (Optional)</label>
         <textarea class="form-textarea" id="new-prod-desc" rows="3" placeholder="Enter fabric composition, fit, design, or care details..."></textarea>
@@ -2661,6 +2715,48 @@ function renderAddProductPage(params = {}, onNavigate = null) {
   // Initial calculation
   recalculatePricing();
 
+  // Size pills interactivity
+  const sizesInput = formContainer.querySelector('#new-prod-sizes');
+  const sizePillsContainer = formContainer.querySelector('#new-prod-size-pills');
+
+  function updatePillStyles() {
+    if (!sizesInput || !sizePillsContainer) return;
+    const currentSizes = sizesInput.value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+    sizePillsContainer.querySelectorAll('.size-pill-btn').forEach(btn => {
+      const sz = btn.dataset.size.toUpperCase();
+      if (currentSizes.includes(sz)) {
+        btn.style.backgroundColor = 'var(--brand-primary)';
+        btn.style.color = '#ffffff';
+        btn.style.borderColor = 'var(--brand-primary)';
+      } else {
+        btn.style.backgroundColor = 'var(--bg-secondary)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderColor = 'var(--border-color)';
+      }
+    });
+  }
+
+  if (sizePillsContainer && sizesInput) {
+    sizePillsContainer.querySelectorAll('.size-pill-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const sz = btn.dataset.size;
+        let currentSizes = sizesInput.value.split(',').map(s => s.trim()).filter(Boolean);
+        const idx = currentSizes.findIndex(s => s.toUpperCase() === sz.toUpperCase());
+        if (idx >= 0) {
+          currentSizes.splice(idx, 1);
+        } else {
+          currentSizes.push(sz);
+        }
+        sizesInput.value = currentSizes.join(', ');
+        updatePillStyles();
+      });
+    });
+
+    sizesInput.addEventListener('input', updatePillStyles);
+    updatePillStyles();
+  }
+
   // Cancel Navigation
   formContainer.querySelector('#cancel-add-prod-btn').addEventListener('click', () => {
     if (onNavigate) {
@@ -2677,6 +2773,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
     const category = formContainer.querySelector('#new-prod-cat').value;
     const brand = formContainer.querySelector('#new-prod-brand').value;
     const desc = formContainer.querySelector('#new-prod-desc').value.trim();
+    const sizesRaw = formContainer.querySelector('#new-prod-sizes') ? formContainer.querySelector('#new-prod-sizes').value.trim() : '';
 
     const units = parseInt(unitsInput.value, 10);
     const totalBuying = parseFloat(totalBuyingInput.value);
@@ -2699,6 +2796,10 @@ function renderAddProductPage(params = {}, onNavigate = null) {
       return;
     }
 
+    const parsedSizes = sizesRaw
+      ? sizesRaw.split(',').map(s => s.trim()).filter(Boolean)
+      : ['Standard'];
+
     const buyingPricePerUnit = units > 0 ? Math.round((totalBuying / units) * 100) / 100 : 0;
     const markupPct = buyingPricePerUnit > 0 ? (((sellingPrice - buyingPricePerUnit) / buyingPricePerUnit) * 100) : 0;
     const totalSellingValue = sellingPrice * units;
@@ -2714,6 +2815,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
       category,
       brand,
       description: desc,
+      sizes: parsedSizes,
       purchasePrice: buyingPricePerUnit,
       sellingPrice: sellingPrice,
       totalBuyingPrice: totalBuying,
@@ -2732,6 +2834,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
           onNavigate('purchases', {
             action: 'add',
             selectedProductId: result.product.id,
+            sizes: parsedSizes,
             units: units,
             totalBuying: totalBuying,
             buyingPrice: buyingPricePerUnit,
@@ -4368,9 +4471,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       const pBuy = params.buyingPrice ? parseFloat(params.buyingPrice) : (selectedProd.purchasePrice || 400);
       const pSell = params.sellingPrice ? parseFloat(params.sellingPrice) : (selectedProd.sellingPrice || 600);
 
+      const hasProdSizes = selectedProd.variants && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size !== 'Standard');
+      const initialSize = hasProdSizes ? selectedProd.variants[0].size : 'Standard';
+
       purchaseItemsData.push({
         productId: selectedProd.id,
-        size: 'Standard',
+        size: initialSize,
         qty: pQty,
         buyingPrice: pBuy,
         sellingPrice: pSell
