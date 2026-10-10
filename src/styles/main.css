@@ -409,7 +409,7 @@ body {
   flex-wrap: wrap;
 }
 
-.search-box {
+.search-box, .search-input-wrapper {
   position: relative;
   min-width: 260px;
 }

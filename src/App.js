@@ -3377,10 +3377,10 @@ function renderInventory(params = {}, onNavigate = null) {
   headerDiv.appendChild(createBreadcrumb(invBreadcrumbItems, onNavigate));
   container.appendChild(headerDiv);
 
-  // 2. Filters Bar Card
-  const filtersCard = document.createElement('div');
-  filtersCard.className = 'card';
-  filtersCard.style.cssText = 'padding: 0.85rem 1.15rem; margin-bottom: 1.25rem;';
+  // 2. Main Card with Controls & Inventory Table (Standardized with Purchases UI)
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
 
   const categories = store.data.categories || ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies'];
   const allBrands = Array.from(new Set([
@@ -3388,25 +3388,21 @@ function renderInventory(params = {}, onNavigate = null) {
     ...(store.data.products || []).map(p => p.brand).filter(Boolean)
   ])).sort();
 
-  filtersCard.innerHTML = `
-    <div style="display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: center; justify-content: space-between;">
-      <div style="display: flex; flex-wrap: wrap; gap: 0.85rem; align-items: center; flex: 1;">
-        <div style="position: relative; flex: 1; min-width: 200px; max-width: 300px;">
-          <i data-lucide="search" style="position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-secondary);"></i>
-          <input type="text" class="form-input search-input" placeholder="Search product name or brand..." style="padding-left: 32px; font-size: 0.85rem;">
-        </div>
-
-        <select class="form-select category-filter" style="width: auto; min-width: 140px; font-size: 0.85rem;">
+  mainCard.innerHTML = `
+    <!-- Top Filter Bar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+        <select class="form-select category-filter" style="width: auto; min-width: 135px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           <option value="ALL">All Categories</option>
           ${categories.map(c => `<option value="${c}">${c}</option>`).join('')}
         </select>
 
-        <select class="form-select brand-filter" style="width: auto; min-width: 130px; font-size: 0.85rem;">
+        <select class="form-select brand-filter" style="width: auto; min-width: 130px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           <option value="ALL">All Brands</option>
           ${allBrands.map(b => `<option value="${b}">${b}</option>`).join('')}
         </select>
 
-        <select class="form-select status-filter" style="width: auto; min-width: 130px; font-size: 0.85rem;">
+        <select class="form-select status-filter" style="width: auto; min-width: 135px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           <option value="ALL" ${selectedStatus === 'ALL' ? 'selected' : ''}>All Stock Status</option>
           <option value="Active" ${selectedStatus === 'Active' || selectedStatus === 'IN_STOCK' ? 'selected' : ''}>In Stock</option>
           <option value="LOW" ${selectedStatus === 'LOW' ? 'selected' : ''}>Low Stock</option>
@@ -3414,7 +3410,7 @@ function renderInventory(params = {}, onNavigate = null) {
           <option value="Inactive" ${selectedStatus === 'Inactive' ? 'selected' : ''}>Inactive</option>
         </select>
 
-        <select class="form-select sort-filter" style="width: auto; min-width: 160px; font-size: 0.85rem;">
+        <select class="form-select sort-filter" style="width: auto; min-width: 155px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           <option value="name-asc" ${selectedSort === 'name-asc' ? 'selected' : ''}>Sort: Name (A–Z)</option>
           <option value="name-desc" ${selectedSort === 'name-desc' ? 'selected' : ''}>Sort: Name (Z–A)</option>
           <option value="stock-desc" ${selectedSort === 'stock-desc' ? 'selected' : ''}>Sort: Stock (High to Low)</option>
@@ -3424,46 +3420,39 @@ function renderInventory(params = {}, onNavigate = null) {
         </select>
       </div>
 
-      <div style="font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap;">
-        Showing: <strong id="inv-count-label" style="color: var(--text-primary);">${(store.data.products || []).length}</strong> Products
+      <div class="search-input-wrapper" style="max-width: 280px; width: 100%;">
+        <i data-lucide="search" class="search-icon"></i>
+        <input type="text" class="form-input search-input" id="inv-search-input" placeholder="Search product or brand..." style="padding-left: 2.25rem; font-size: 0.85rem;">
       </div>
     </div>
+
+    <!-- Inventory Table Container -->
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+      <table class="admin-table" style="font-size: 0.875rem;">
+        <thead>
+          <tr>
+            <th style="width: 5%; text-align: center;">S.No</th>
+            <th style="width: 25%;">Product Name</th>
+            <th style="width: 13%;">Category</th>
+            <th style="width: 13%;">Brand</th>
+            <th style="width: 14%;">Selling Price</th>
+            <th style="width: 12%;">Total Available Stock</th>
+            <th style="width: 10%;">Stock Status</th>
+            <th style="width: 14%; text-align: right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="inventory-table-body"></tbody>
+      </table>
+    </div>
   `;
-  container.appendChild(filtersCard);
+  container.appendChild(mainCard);
 
-  // 4. Main Grouped Inventory Table Card
-  const tableCard = document.createElement('div');
-  tableCard.className = 'card';
-
-  const tableContainer = document.createElement('div');
-  tableContainer.className = 'table-responsive';
-  tableContainer.innerHTML = `
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th style="width: 5%; text-align: center;">S.No</th>
-          <th>Product Name</th>
-          <th>Category</th>
-          <th>Brand</th>
-          <th>Selling Price</th>
-          <th>Total Available Stock</th>
-          <th>Stock Status</th>
-          <th style="text-align: right;">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="inventory-table-body"></tbody>
-    </table>
-  `;
-  tableCard.appendChild(tableContainer);
-  container.appendChild(tableCard);
-
-  const searchInp = filtersCard.querySelector('.search-input');
-  const catFilter = filtersCard.querySelector('.category-filter');
-  const brandFilter = filtersCard.querySelector('.brand-filter');
-  const statusFilter = filtersCard.querySelector('.status-filter');
-  const sortFilter = filtersCard.querySelector('.sort-filter');
-  const tbody = tableContainer.querySelector('#inventory-table-body');
-  const countLabel = filtersCard.querySelector('#inv-count-label');
+  const searchInp = mainCard.querySelector('#inv-search-input');
+  const catFilter = mainCard.querySelector('.category-filter');
+  const brandFilter = mainCard.querySelector('.brand-filter');
+  const statusFilter = mainCard.querySelector('.status-filter');
+  const sortFilter = mainCard.querySelector('.sort-filter');
+  const tbody = mainCard.querySelector('#inventory-table-body');
 
   searchInp.addEventListener('input', (e) => { searchQuery = e.target.value; renderInventoryTable(); });
   catFilter.addEventListener('change', (e) => { selectedCategory = e.target.value; renderInventoryTable(); });
@@ -3551,10 +3540,8 @@ function renderInventory(params = {}, onNavigate = null) {
       return 0;
     });
 
-    countLabel.textContent = filteredProducts.length;
-
     if (filteredProducts.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No products match your search or filter criteria.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No products found matching filter.</td></tr>`;
       return;
     }
 
@@ -3581,11 +3568,11 @@ function renderInventory(params = {}, onNavigate = null) {
 
       // Main Product Row
       const tr = document.createElement('tr');
-      tr.style.cssText = 'transition: background-color 0.15s ease;';
+      tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
 
       const chevronIcon = hasSizes
-        ? `<button type="button" class="expand-toggle-btn" title="${isExpanded ? 'Collapse sizes' : 'Expand sizes'}" style="background: none; border: none; padding: 3px 5px; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; border-radius: 4px; transition: color 0.15s ease;">
-             <i data-lucide="${isExpanded ? 'chevron-down' : 'chevron-right'}" style="width: 16px; height: 16px;"></i>
+        ? `<button type="button" class="expand-toggle-btn" title="${isExpanded ? 'Collapse sizes' : 'Expand sizes'}" style="background: none; border: none; padding: 2px 4px; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; border-radius: 4px; transition: color 0.15s ease;">
+             <i data-lucide="${isExpanded ? 'chevron-down' : 'chevron-right'}" style="width: 15px; height: 15px;"></i>
            </button>`
         : '';
 
@@ -3602,14 +3589,20 @@ function renderInventory(params = {}, onNavigate = null) {
         </td>
         <td style="color: var(--text-secondary);">${p.category || 'General'}</td>
         <td style="color: var(--text-secondary);">${p.brand || 'Unbranded'}</td>
-        <td style="font-weight: 600;">${priceInfo.display}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">${priceInfo.display}</td>
         <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${totalStock} units</td>
         <td>${statusBadge.outerHTML}</td>
         <td style="text-align: right;">
-          <div style="display: inline-flex; gap: 0.4rem; align-items: center;" onclick="event.stopPropagation();">
-            <button type="button" class="btn btn-secondary btn-sm view-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">View</button>
-            <button type="button" class="btn btn-secondary btn-sm edit-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">Edit</button>
-            <button type="button" class="btn btn-secondary btn-sm adjust-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.8rem;">Adjust</button>
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            <button type="button" class="btn btn-sm btn-secondary view-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
+              <i data-lucide="eye" style="width: 13px; height: 13px;"></i> View
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary edit-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
+              <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i> Edit
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary adjust-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
+              <i data-lucide="sliders" style="width: 13px; height: 13px;"></i> Adjust
+            </button>
           </div>
         </td>
       `;
@@ -3626,6 +3619,12 @@ function renderInventory(params = {}, onNavigate = null) {
 
         if (toggleBtn) toggleBtn.addEventListener('click', handleToggle);
       }
+
+      // Row Click -> Open View Details Modal (like Purchases)
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('.row-actions-box') || e.target.closest('.expand-toggle-btn')) return;
+        openProductDetailsModal(p);
+      });
 
       tr.querySelector('.view-inv-btn').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -3681,8 +3680,8 @@ function renderInventory(params = {}, onNavigate = null) {
               <td style="padding: 0.6rem 0.85rem; font-weight: 600; font-size: 0.85rem; color: ${vStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${vStock} units</td>
               <td style="padding: 0.6rem 0.85rem;">${vBadge}</td>
               <td style="padding: 0.6rem 0.85rem; text-align: right;">
-                <button type="button" class="btn btn-secondary btn-sm size-adjust-btn" data-size="${v.size}" style="padding: 0.2rem 0.5rem; font-size: 0.775rem;">
-                  Adjust
+                <button type="button" class="btn btn-sm btn-secondary size-adjust-btn" data-size="${v.size}" style="padding: 0.2rem 0.55rem; font-size: 0.75rem;">
+                  <i data-lucide="sliders" style="width: 12px; height: 12px;"></i> Adjust
                 </button>
               </td>
             </tr>
@@ -3691,7 +3690,7 @@ function renderInventory(params = {}, onNavigate = null) {
 
         subTr.innerHTML = `
           <td colspan="8" style="padding: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
-            <div style="padding: 1rem 1.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.75rem;">
               <div style="display: flex; align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
                   <span style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--brand-primary);">
@@ -3706,12 +3705,12 @@ function renderInventory(params = {}, onNavigate = null) {
                 <table class="admin-table" style="margin: 0; font-size: 0.825rem;">
                   <thead>
                     <tr style="background: var(--bg-secondary);">
-                      <th style="padding: 0.5rem 0.85rem;">Size</th>
-                      <th style="padding: 0.5rem 0.85rem;">Buying Price / Unit</th>
-                      <th style="padding: 0.5rem 0.85rem;">Selling Price / Unit</th>
-                      <th style="padding: 0.5rem 0.85rem;">Available Quantity</th>
-                      <th style="padding: 0.5rem 0.85rem;">Stock Status</th>
-                      <th style="padding: 0.5rem 0.85rem; text-align: right;">Actions</th>
+                      <th style="padding: 0.55rem 0.85rem;">Size</th>
+                      <th style="padding: 0.55rem 0.85rem;">Buying Price / Unit</th>
+                      <th style="padding: 0.55rem 0.85rem;">Selling Price / Unit</th>
+                      <th style="padding: 0.55rem 0.85rem;">Available Quantity</th>
+                      <th style="padding: 0.55rem 0.85rem;">Stock Status</th>
+                      <th style="padding: 0.55rem 0.85rem; text-align: right;">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5267,7 +5266,7 @@ function openCreateProductModalInline(onCreated) {
   });
 }
 
-// SALES PAGE
+// SALES PAGE (Standardized with Purchases Table UI)
 function renderSales(params = {}, onNavigate = null) {
   if (params && (params.action === 'add' || params.view === 'add')) {
     return renderAddSalePage(onNavigate);
@@ -5276,11 +5275,12 @@ function renderSales(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
+  let currentFilter = 'all'; // 'all', 'paid', 'pending'
   let searchQuery = '';
 
   // 1. Header (Breadcrumb + "+ Add Sale" button)
   const headerDiv = document.createElement('div');
-  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
   headerDiv.appendChild(createBreadcrumb([
     { label: 'Sales' }
   ], onNavigate));
@@ -5295,55 +5295,157 @@ function renderSales(params = {}, onNavigate = null) {
   headerDiv.appendChild(btnAddSale);
   container.appendChild(headerDiv);
 
-  // 2. Sales Table Card
-  const tableCard = document.createElement('div');
-  tableCard.className = 'card';
+  // 2. Main Card with Status Filters & Sales Table
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
 
-  const tableContainer = document.createElement('div');
-  tableContainer.className = 'table-responsive';
-  tableContainer.innerHTML = `
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th style="width: 6%; text-align: center;">S.No</th>
-          <th>Customer</th>
-          <th>Date</th>
-          <th>Items</th>
-          <th>Total Amount</th>
-          <th>Payment Status</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${(store.data.sales || []).map((s, index) => `
+  mainCard.innerHTML = `
+    <!-- Top Filter Bar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+      <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;" id="sales-status-filters">
+        <button type="button" class="btn btn-sm sales-filter-btn" data-filter="all" style="font-weight: 600;">All Sales</button>
+        <button type="button" class="btn btn-sm sales-filter-btn" data-filter="paid" style="font-weight: 600;">Paid</button>
+        <button type="button" class="btn btn-sm sales-filter-btn" data-filter="pending" style="font-weight: 600;">Pending</button>
+      </div>
+
+      <div class="search-input-wrapper" style="max-width: 280px; width: 100%;">
+        <i data-lucide="search" class="search-icon"></i>
+        <input type="text" class="form-input search-input" id="sales-search-input" placeholder="Search reference, customer..." style="padding-left: 2.25rem; font-size: 0.85rem;">
+      </div>
+    </div>
+
+    <!-- Sales Table Container -->
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+      <table class="admin-table" style="font-size: 0.875rem;">
+        <thead>
           <tr>
-            <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
-            <td style="font-weight: 600; color: var(--text-primary);">${s.customer || 'Walk-in Customer'}</td>
-            <td style="color: var(--text-secondary);">${s.date || '-'}</td>
-            <td>${s.itemCount || (s.items ? s.items.length : 1)} items</td>
-            <td style="font-weight: 600; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
-            <td>${createBadge({ label: s.status || 'Paid', variant: 'secondary' }).outerHTML}</td>
-            <td>
-              <button type="button" class="btn btn-secondary btn-sm view-sale-btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem;">View</button>
-            </td>
+            <th style="width: 6%; text-align: center;">S.No</th>
+            <th style="width: 18%;">Sale Reference</th>
+            <th style="width: 24%;">Customer</th>
+            <th style="width: 14%;">Date</th>
+            <th style="width: 14%;">Total Amount</th>
+            <th style="width: 12%;">Payment Status</th>
+            <th style="width: 12%; text-align: right;">Actions</th>
           </tr>
-        `).join('')}
-      </tbody>
-    </table>
+        </thead>
+        <tbody id="sales-table-tbody"></tbody>
+      </table>
+    </div>
   `;
+  container.appendChild(mainCard);
 
-  tableCard.appendChild(tableContainer);
-  container.appendChild(tableCard);
+  function renderSalesTable() {
+    const tbody = mainCard.querySelector('#sales-table-tbody');
+    tbody.innerHTML = '';
 
-  // Bind view sale buttons
-  const viewBtns = tableContainer.querySelectorAll('.view-sale-btn');
-  viewBtns.forEach((btn, i) => {
-    btn.addEventListener('click', () => {
-      openSaleDetailsModal(store.data.sales[i]);
+    const allSales = store.data.sales || [];
+
+    const filtered = allSales.filter(s => {
+      const statusLower = (s.status || 'paid').toLowerCase();
+
+      // Status Filter
+      if (currentFilter === 'paid' && statusLower !== 'paid' && statusLower !== 'completed') return false;
+      if (currentFilter === 'pending' && statusLower !== 'pending') return false;
+
+      // Search Query
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const refMatch = (s.id || '').toLowerCase().includes(q) || (s.reference || '').toLowerCase().includes(q);
+        const custMatch = (s.customer || '').toLowerCase().includes(q) || (s.customerName || '').toLowerCase().includes(q);
+        const phoneMatch = (s.phone || '').toLowerCase().includes(q);
+        const dateMatch = (s.date || '').toLowerCase().includes(q);
+        if (!refMatch && !custMatch && !phoneMatch && !dateMatch) return false;
+      }
+
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No sales found matching filter.</td></tr>`;
+      return;
+    }
+
+    filtered.forEach((s, index) => {
+      const tr = document.createElement('tr');
+      tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
+
+      const status = s.status || 'Paid';
+      let badgeVariant = 'secondary';
+      if (status === 'Paid' || status === 'Completed') badgeVariant = 'success';
+      else if (status === 'Pending') badgeVariant = 'warning';
+      else if (status === 'Failed' || status === 'Cancelled') badgeVariant = 'danger';
+
+      const saleRef = s.id || s.reference || `SAL-${String(index + 1).padStart(2, '0')}`;
+      const custName = s.customer || s.customerName || 'Walk-in Customer';
+
+      tr.innerHTML = `
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">${saleRef}</td>
+        <td>
+          <div style="font-weight: 600; color: var(--text-primary);">${custName}</div>
+          ${s.phone ? `<div style="font-size: 0.75rem; color: var(--text-secondary);">${s.phone}</div>` : ''}
+        </td>
+        <td style="color: var(--text-secondary);">${s.date || '-'}</td>
+        <td style="font-weight: 700; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
+        <td>${createBadge({ label: status, variant: badgeVariant }).outerHTML}</td>
+        <td style="text-align: right;">
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            <button type="button" class="btn btn-sm btn-secondary view-sale-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
+              <i data-lucide="eye" style="width: 13px; height: 13px;"></i> View
+            </button>
+          </div>
+        </td>
+      `;
+
+      // Row Click -> Open Sale Details Modal
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('.row-actions-box')) return;
+        openSaleDetailsModal(s);
+      });
+
+      tr.querySelector('.view-sale-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        openSaleDetailsModal(s);
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  // Filter Buttons logic
+  function updateFilterButtons() {
+    mainCard.querySelectorAll('.sales-filter-btn').forEach(btn => {
+      const f = btn.dataset.filter;
+      if (f === currentFilter) {
+        btn.style.backgroundColor = 'var(--brand-primary)';
+        btn.style.color = '#ffffff';
+        btn.style.borderColor = 'var(--brand-primary)';
+      } else {
+        btn.style.backgroundColor = 'var(--bg-secondary)';
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderColor = 'var(--border-color)';
+      }
+    });
+    renderSalesTable();
+  }
+
+  mainCard.querySelectorAll('.sales-filter-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      currentFilter = e.currentTarget.dataset.filter;
+      updateFilterButtons();
     });
   });
 
-  if (window.lucide) window.lucide.createIcons();
+  const searchInput = mainCard.querySelector('#sales-search-input');
+  searchInput.addEventListener('input', (e) => {
+    searchQuery = e.target.value.trim();
+    renderSalesTable();
+  });
+
+  updateFilterButtons();
   return container;
 }
 
@@ -5668,13 +5770,193 @@ function renderAddSalePage(onNavigate = null) {
   return container;
 }
 
-// CUSTOMERS PAGE
+// CUSTOMER DETAILS MODAL
+function openCustomerDetailsModal(customer, onNavigate = null) {
+  const existingModal = document.getElementById('modal-customer-details');
+  if (existingModal) existingModal.remove();
+
+  const modalEl = document.createElement('div');
+  modalEl.id = 'modal-customer-details';
+  modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
+
+  const modalBreadcrumb = createBreadcrumb([
+    { label: 'Customers', target: 'customers' },
+    { label: customer.name }
+  ], (target, params) => {
+    if (modalObj && modalObj.closeModal) modalObj.closeModal();
+    if (onNavigate) onNavigate(target, params);
+  });
+  modalEl.appendChild(modalBreadcrumb);
+
+  // Customer sales history
+  const customerSales = (store.data.sales || []).filter(s => {
+    const cust = (s.customer || s.customerName || '').toLowerCase();
+    return cust === (customer.name || '').toLowerCase();
+  });
+
+  const innerContent = document.createElement('div');
+  innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
+  innerContent.innerHTML = `
+    <div style="background: var(--bg-secondary); padding: 1rem 1.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; font-size: 0.85rem;">
+      <div>
+        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Customer Name</div>
+        <div style="font-weight: 700; color: var(--text-primary); margin-top: 0.2rem; font-size: 1rem;">${customer.name}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Phone Number</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.2rem;">${customer.phone || 'Not Provided'}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Orders</div>
+        <div style="font-weight: 700; color: var(--text-primary); margin-top: 0.2rem;">${customer.ordersCount || customerSales.length} purchases</div>
+      </div>
+      <div>
+        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Amount Spent</div>
+        <div style="font-weight: 700; color: var(--brand-primary); margin-top: 0.2rem; font-size: 1rem;">₹${(customer.totalSpend || 0).toLocaleString()}</div>
+      </div>
+    </div>
+
+    <div>
+      <h4 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.65rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="shopping-bag" style="width: 15px; height: 15px; color: var(--brand-primary);"></i>
+        Customer Purchase History (${customerSales.length})
+      </h4>
+      <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); max-height: 240px; overflow-y: auto;">
+        <table class="admin-table" style="font-size: 0.825rem; margin: 0;">
+          <thead>
+            <tr>
+              <th style="width: 8%; text-align: center;">S.No</th>
+              <th>Sale Reference</th>
+              <th>Date</th>
+              <th>Total Amount</th>
+              <th>Status</th>
+              <th style="text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${customerSales.length === 0 ? `
+              <tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 1.5rem;">No purchase history found for this customer.</td></tr>
+            ` : customerSales.map((s, idx) => `
+              <tr>
+                <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${idx + 1}</td>
+                <td style="font-weight: 600; color: var(--text-primary);">${s.id || s.reference || 'SAL-' + (idx+1)}</td>
+                <td style="color: var(--text-secondary);">${s.date || '-'}</td>
+                <td style="font-weight: 700; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
+                <td>${createBadge({ label: s.status || 'Paid', variant: s.status === 'Paid' ? 'success' : 'warning' }).outerHTML}</td>
+                <td style="text-align: right;">
+                  <button type="button" class="btn btn-sm btn-secondary cust-view-sale-btn" data-sale-id="${s.id}" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">
+                    <i data-lucide="eye" style="width: 12px; height: 12px;"></i> View
+                  </button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  modalEl.appendChild(innerContent);
+
+  const closeBtn = createButton({
+    text: 'Close',
+    variant: 'secondary',
+    onClick: () => modalObj.closeModal()
+  });
+
+  const modalObj = createModal({
+    title: `Customer Profile — ${customer.name}`,
+    bodyElement: modalEl,
+    footerButtons: [closeBtn]
+  });
+
+  innerContent.querySelectorAll('.cust-view-sale-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const saleId = btn.getAttribute('data-sale-id');
+      const sale = (store.data.sales || []).find(s => s.id === saleId);
+      if (sale) {
+        modalObj.closeModal();
+        openSaleDetailsModal(sale);
+      }
+    });
+  });
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+// EDIT CUSTOMER MODAL
+function openEditCustomerModal(customer, onSaved = null) {
+  const existingModal = document.getElementById('modal-edit-customer');
+  if (existingModal) existingModal.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-edit-customer';
+  modal.className = 'modal-overlay active';
+
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width: 440px; width: 95%;">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+        <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Edit Customer Details</h3>
+        <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">
+          <i data-lucide="x" style="width: 20px; height: 20px;"></i>
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Customer Name <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="edit-cust-name" class="form-input" value="${customer.name || ''}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Phone Number</label>
+          <input type="text" id="edit-cust-phone" class="form-input" placeholder="e.g. +91 98765 43210" value="${customer.phone && customer.phone !== '-' ? customer.phone : ''}">
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+        <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
+        <button type="button" class="btn btn-primary save-modal-btn">Save Changes</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+  if (window.lucide) window.lucide.createIcons();
+
+  const closeModal = () => modal.remove();
+  modal.querySelector('.modal-close-btn').onclick = closeModal;
+  modal.querySelector('.cancel-modal-btn').onclick = closeModal;
+
+  modal.querySelector('.save-modal-btn').onclick = () => {
+    const name = modal.querySelector('#edit-cust-name').value.trim();
+    const phone = modal.querySelector('#edit-cust-phone').value.trim();
+
+    if (!name) {
+      toast.show({ message: 'Customer Name is required.', type: 'danger' });
+      return;
+    }
+
+    customer.name = name;
+    customer.phone = phone || '-';
+    store.save();
+
+    toast.show({ message: `Customer details updated for ${name}.`, type: 'success' });
+    closeModal();
+    if (onSaved) onSaved();
+  };
+}
+
+// CUSTOMERS PAGE (Standardized with Purchases Table UI)
 function renderCustomers(onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
+  let searchQuery = '';
+
   const headerDiv = document.createElement('div');
-  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
   headerDiv.appendChild(createBreadcrumb([
     { label: 'Customers' }
   ], onNavigate));
@@ -5682,37 +5964,113 @@ function renderCustomers(onNavigate = null) {
 
   const mainCard = document.createElement('div');
   mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+
   mainCard.innerHTML = `
-    <div class="table-responsive">
-      <table class="admin-table">
+    <!-- Top Filter Bar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+      <div style="font-size: 0.85rem; color: var(--text-secondary);">
+        Total: <strong id="cust-count-label" style="color: var(--text-primary);">${(store.data.customers || []).length}</strong> Customers
+      </div>
+
+      <div class="search-input-wrapper" style="max-width: 280px; width: 100%;">
+        <i data-lucide="search" class="search-icon"></i>
+        <input type="text" class="form-input search-input" id="cust-search-input" placeholder="Search customer, phone..." style="padding-left: 2.25rem; font-size: 0.85rem;">
+      </div>
+    </div>
+
+    <!-- Customers Table Container -->
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+      <table class="admin-table" style="font-size: 0.875rem;">
         <thead>
           <tr>
             <th style="width: 6%; text-align: center;">S.No</th>
-            <th>Customer Name</th>
-            <th>Phone</th>
-            <th>Orders</th>
-            <th>Last Purchase</th>
-            <th>Total Spend</th>
+            <th style="width: 26%;">Customer Name</th>
+            <th style="width: 20%;">Phone Number</th>
+            <th style="width: 16%;">Total Purchases</th>
+            <th style="width: 18%;">Total Amount Spent</th>
+            <th style="width: 14%; text-align: right;">Actions</th>
           </tr>
         </thead>
-        <tbody>
-          ${(store.data.customers || []).map((c, index) => `
-            <tr>
-              <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
-              <td style="font-weight: 600;">${c.name}</td>
-              <td style="color: var(--text-secondary);">${c.phone}</td>
-              <td>${c.ordersCount} purchases</td>
-              <td style="color: var(--text-secondary);">${c.lastPurchase}</td>
-              <td style="font-weight: 600; color: var(--brand-primary);">₹${(c.totalSpend || 0).toLocaleString()}</td>
-            </tr>
-          `).join('')}
-        </tbody>
+        <tbody id="cust-table-tbody"></tbody>
       </table>
     </div>
   `;
   container.appendChild(mainCard);
 
-  if (window.lucide) window.lucide.createIcons();
+  function renderCustomersTable() {
+    const tbody = mainCard.querySelector('#cust-table-tbody');
+    const countLabel = mainCard.querySelector('#cust-count-label');
+    tbody.innerHTML = '';
+
+    const allCustomers = store.data.customers || [];
+
+    const filtered = allCustomers.filter(c => {
+      if (!searchQuery) return true;
+      const q = searchQuery.toLowerCase();
+      const nameMatch = (c.name || '').toLowerCase().includes(q);
+      const phoneMatch = (c.phone || '').toLowerCase().includes(q);
+      return nameMatch || phoneMatch;
+    });
+
+    if (countLabel) countLabel.textContent = filtered.length;
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No customers found matching search.</td></tr>`;
+      return;
+    }
+
+    filtered.forEach((c, index) => {
+      const tr = document.createElement('tr');
+      tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
+
+      tr.innerHTML = `
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">${c.name}</td>
+        <td style="color: var(--text-secondary);">${c.phone || '-'}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">${c.ordersCount || 0} purchases</td>
+        <td style="font-weight: 700; color: var(--brand-primary);">₹${(c.totalSpend || 0).toLocaleString()}</td>
+        <td style="text-align: right;">
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            <button type="button" class="btn btn-sm btn-secondary view-cust-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
+              <i data-lucide="eye" style="width: 13px; height: 13px;"></i> View
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary edit-cust-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
+              <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i> Edit
+            </button>
+          </div>
+        </td>
+      `;
+
+      // Row Click -> Open Customer Details Modal
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('.row-actions-box')) return;
+        openCustomerDetailsModal(c, onNavigate);
+      });
+
+      tr.querySelector('.view-cust-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        openCustomerDetailsModal(c, onNavigate);
+      });
+
+      tr.querySelector('.edit-cust-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        openEditCustomerModal(c, () => renderCustomersTable());
+      });
+
+      tbody.appendChild(tr);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  const searchInput = mainCard.querySelector('#cust-search-input');
+  searchInput.addEventListener('input', (e) => {
+    searchQuery = e.target.value.trim();
+    renderCustomersTable();
+  });
+
+  renderCustomersTable();
   return container;
 }
 
