@@ -2659,6 +2659,140 @@ function createTopbar(activeTitle, onThemeToggle) {
 }
 
 // ==========================================
+// REUSABLE PAGINATION HELPERS
+// ==========================================
+function getPageNumbers(current, total) {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const pages = [];
+  if (current <= 4) {
+    for (let i = 1; i <= 5; i++) pages.push(i);
+    pages.push('...');
+    pages.push(total);
+  } else if (current >= total - 3) {
+    pages.push(1);
+    pages.push('...');
+    for (let i = total - 4; i <= total; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    pages.push('...');
+    pages.push(current - 1);
+    pages.push(current);
+    pages.push(current + 1);
+    pages.push('...');
+    pages.push(total);
+  }
+  return pages;
+}
+
+function renderPaginationBar({
+  container,
+  totalItems,
+  currentPage,
+  pageSize,
+  pageSizeOptions = [10, 25, 50],
+  itemName = 'records',
+  onPageChange,
+  onPageSizeChange,
+  customPrefix = ''
+}) {
+  if (!container) return;
+  if (totalItems === 0) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  container.style.display = 'flex';
+  container.className = 'table-pagination-container';
+  container.style.cssText = 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding-top: 0.25rem;';
+
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIdx = (validCurrentPage - 1) * pageSize;
+  const endIdx = Math.min(startIdx + pageSize, totalItems);
+
+  const prefixClass = customPrefix ? `${customPrefix}-` : '';
+
+  container.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap;">
+      <span class="${prefixClass}pagination-info pagination-info" style="font-size: 0.825rem; color: var(--text-secondary);">
+        Showing <strong style="color: var(--text-primary); font-weight: 600;">${startIdx + 1}–${endIdx}</strong> of <strong style="color: var(--text-primary); font-weight: 600;">${totalItems}</strong> ${itemName}
+      </span>
+      <div style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.825rem; color: var(--text-secondary);">
+        <span>Rows per page:</span>
+        <select class="form-select ${prefixClass}page-size-select pagination-page-size" style="padding: 0.25rem 0.55rem; font-size: 0.8rem; width: auto; height: auto;">
+          ${pageSizeOptions.map(opt => `<option value="${opt}" ${opt === pageSize ? 'selected' : ''}>${opt}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="${prefixClass}pagination-nav pagination-nav" style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;"></div>
+  `;
+
+  const sizeSelect = container.querySelector(`.${prefixClass}page-size-select`);
+  if (sizeSelect && onPageSizeChange) {
+    sizeSelect.addEventListener('change', (e) => {
+      onPageSizeChange(parseInt(e.target.value, 10) || 10);
+    });
+  }
+
+  const navEl = container.querySelector(`.${prefixClass}pagination-nav`);
+  if (navEl) {
+    const prevBtn = document.createElement('button');
+    prevBtn.type = 'button';
+    prevBtn.className = `btn btn-sm btn-secondary ${prefixClass}prev-btn pagination-prev-btn`;
+    prevBtn.style.cssText = 'padding: 0.3rem 0.65rem; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 0.35rem;';
+    prevBtn.innerHTML = `<i data-lucide="chevron-left" style="width: 14px; height: 14px;"></i> Previous`;
+    if (validCurrentPage <= 1) {
+      prevBtn.disabled = true;
+      prevBtn.style.opacity = '0.5';
+      prevBtn.style.cursor = 'not-allowed';
+    } else {
+      prevBtn.addEventListener('click', () => onPageChange(validCurrentPage - 1));
+    }
+    navEl.appendChild(prevBtn);
+
+    const pageNumbers = getPageNumbers(validCurrentPage, totalPages);
+    pageNumbers.forEach(p => {
+      if (p === '...') {
+        const dots = document.createElement('span');
+        dots.style.cssText = 'padding: 0.3rem 0.45rem; font-size: 0.8rem; color: var(--text-secondary); user-select: none;';
+        dots.textContent = '...';
+        navEl.appendChild(dots);
+      } else {
+        const pageBtn = document.createElement('button');
+        pageBtn.type = 'button';
+        pageBtn.className = `btn btn-sm ${p === validCurrentPage ? 'btn-primary' : 'btn-secondary'} ${prefixClass}page-btn ${prefixClass}page-num-btn pagination-page-btn`;
+        pageBtn.style.cssText = `padding: 0.3rem 0.65rem; font-size: 0.8rem; min-width: 32px; font-weight: ${p === validCurrentPage ? '700' : '500'};`;
+        pageBtn.textContent = p;
+        if (p === validCurrentPage) {
+          pageBtn.setAttribute('aria-current', 'page');
+        } else {
+          pageBtn.addEventListener('click', () => onPageChange(p));
+        }
+        navEl.appendChild(pageBtn);
+      }
+    });
+
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = `btn btn-sm btn-secondary ${prefixClass}next-btn pagination-next-btn`;
+    nextBtn.style.cssText = 'padding: 0.3rem 0.65rem; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 0.35rem;';
+    nextBtn.innerHTML = `Next <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i>`;
+    if (validCurrentPage >= totalPages) {
+      nextBtn.disabled = true;
+      nextBtn.style.opacity = '0.5';
+      nextBtn.style.cursor = 'not-allowed';
+    } else {
+      nextBtn.addEventListener('click', () => onPageChange(validCurrentPage + 1));
+    }
+    navEl.appendChild(nextBtn);
+  }
+
+  if (window.lucide) window.lucide.createIcons();
+}
+
+// ==========================================
 // 4. PAGE RENDERERS
 // ==========================================
 
@@ -3324,7 +3458,10 @@ function renderOverview(onNavigate) {
   // Section 4: RECENT SALES HISTORY
   const salesHistoryCard = document.createElement('div');
   salesHistoryCard.className = 'card';
-  const salesList = sales.slice(0, 5);
+  salesHistoryCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+
+  let overviewSalesPage = 1;
+  let overviewSalesPageSize = 10;
 
   salesHistoryCard.innerHTML = `
     <div class="card-header">
@@ -3335,7 +3472,7 @@ function renderOverview(onNavigate) {
       <button class="btn btn-ghost btn-sm view-all-sales-btn" style="font-size: 0.775rem; color: var(--brand-primary); font-weight: 600;">View all</button>
     </div>
 
-    <div class="table-responsive">
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
       <table class="admin-table">
         <thead>
           <tr>
@@ -3347,23 +3484,70 @@ function renderOverview(onNavigate) {
             <th>Status</th>
           </tr>
         </thead>
-        <tbody>
-          ${salesList.map(s => `
-            <tr>
-              <td style="font-weight: 600; color: var(--text-primary);">${s.customer || 'Walk-in Customer'}</td>
-              <td style="color: var(--text-secondary); font-size: 0.8rem;">${s.date || '-'}</td>
-              <td style="color: var(--text-secondary);">${s.itemCount || (s.items ? s.items.length : 1)} item${(s.itemCount || 1) > 1 ? 's' : ''}</td>
-              <td style="font-weight: 600; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
-              <td>${createBadge({ label: s.paymentMethod || 'Cash', variant: 'secondary' }).outerHTML}</td>
-              <td>${createBadge({ label: s.status || 'Completed', variant: 'secondary' }).outerHTML}</td>
-            </tr>
-          `).join('')}
-        </tbody>
+        <tbody id="overview-sales-tbody"></tbody>
       </table>
     </div>
+
+    <div id="overview-sales-pagination-container"></div>
   `;
 
+  function renderOverviewSalesTable() {
+    const tbody = salesHistoryCard.querySelector('#overview-sales-tbody');
+    tbody.innerHTML = '';
+
+    if (sales.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No sales records found.</td></tr>`;
+      renderPaginationBar({
+        container: salesHistoryCard.querySelector('#overview-sales-pagination-container'),
+        totalItems: 0
+      });
+      return;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(sales.length / overviewSalesPageSize));
+    if (overviewSalesPage > totalPages) overviewSalesPage = totalPages;
+    if (overviewSalesPage < 1) overviewSalesPage = 1;
+
+    const startIdx = (overviewSalesPage - 1) * overviewSalesPageSize;
+    const endIdx = Math.min(startIdx + overviewSalesPageSize, sales.length);
+    const pageSales = sales.slice(startIdx, endIdx);
+
+    pageSales.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-weight: 600; color: var(--text-primary);">${s.customer || 'Walk-in Customer'}</td>
+        <td style="color: var(--text-secondary); font-size: 0.8rem;">${s.date || '-'}</td>
+        <td style="color: var(--text-secondary);">${s.itemCount || (s.items ? s.items.length : 1)} item${(s.itemCount || 1) > 1 ? 's' : ''}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
+        <td>${createBadge({ label: s.paymentMethod || 'Cash', variant: 'secondary' }).outerHTML}</td>
+        <td>${createBadge({ label: s.status || 'Completed', variant: 'secondary' }).outerHTML}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    renderPaginationBar({
+      container: salesHistoryCard.querySelector('#overview-sales-pagination-container'),
+      totalItems: sales.length,
+      currentPage: overviewSalesPage,
+      pageSize: overviewSalesPageSize,
+      pageSizeOptions: [10, 25, 50],
+      itemName: 'sales',
+      onPageChange: (newPage) => {
+        overviewSalesPage = newPage;
+        renderOverviewSalesTable();
+      },
+      onPageSizeChange: (newSize) => {
+        overviewSalesPageSize = newSize;
+        overviewSalesPage = 1;
+        renderOverviewSalesTable();
+      }
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
   salesHistoryCard.querySelector('.view-all-sales-btn').addEventListener('click', () => onNavigate('sales'));
+  renderOverviewSalesTable();
   container.appendChild(salesHistoryCard);
 
   if (window.lucide) window.lucide.createIcons();
@@ -3541,6 +3725,8 @@ function renderInventory(params = {}, onNavigate = null) {
     else selectedStatus = params.status;
   }
   let selectedSort = 'name-asc';
+  let invCurrentPage = 1;
+  let invPageSize = 10;
   const expandedProductIds = new Set();
 
   // 1. Breadcrumb Header with Product Count Badge
@@ -3646,6 +3832,9 @@ function renderInventory(params = {}, onNavigate = null) {
         <tbody id="inventory-table-body"></tbody>
       </table>
     </div>
+
+    <!-- Pagination Footer -->
+    <div id="inv-pagination-container"></div>
   `;
   container.appendChild(mainCard);
 
@@ -3656,11 +3845,11 @@ function renderInventory(params = {}, onNavigate = null) {
   const sortFilter = mainCard.querySelector('.sort-filter');
   const tbody = mainCard.querySelector('#inventory-table-body');
 
-  searchInp.addEventListener('input', (e) => { searchQuery = e.target.value; renderInventoryTable(); });
-  catFilter.addEventListener('change', (e) => { selectedCategory = e.target.value; renderInventoryTable(); });
-  brandFilter.addEventListener('change', (e) => { selectedBrand = e.target.value; renderInventoryTable(); });
-  statusFilter.addEventListener('change', (e) => { selectedStatus = e.target.value; renderInventoryTable(); });
-  sortFilter.addEventListener('change', (e) => { selectedSort = e.target.value; renderInventoryTable(); });
+  searchInp.addEventListener('input', (e) => { searchQuery = e.target.value; invCurrentPage = 1; renderInventoryTable(); });
+  catFilter.addEventListener('change', (e) => { selectedCategory = e.target.value; invCurrentPage = 1; renderInventoryTable(); });
+  brandFilter.addEventListener('change', (e) => { selectedBrand = e.target.value; invCurrentPage = 1; renderInventoryTable(); });
+  statusFilter.addEventListener('change', (e) => { selectedStatus = e.target.value; invCurrentPage = 1; renderInventoryTable(); });
+  sortFilter.addEventListener('change', (e) => { selectedSort = e.target.value; invCurrentPage = 1; renderInventoryTable(); });
 
   function getProductPriceInfo(product) {
     const prices = [];
@@ -3753,10 +3942,22 @@ function renderInventory(params = {}, onNavigate = null) {
 
     if (filteredProducts.length === 0) {
       tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No products found matching filter.</td></tr>`;
+      renderPaginationBar({
+        container: mainCard.querySelector('#inv-pagination-container'),
+        totalItems: 0
+      });
       return;
     }
 
-    filteredProducts.forEach((p, index) => {
+    const totalPages = Math.max(1, Math.ceil(filteredProducts.length / invPageSize));
+    if (invCurrentPage > totalPages) invCurrentPage = totalPages;
+    if (invCurrentPage < 1) invCurrentPage = 1;
+
+    const startIdx = (invCurrentPage - 1) * invPageSize;
+    const endIdx = Math.min(startIdx + invPageSize, filteredProducts.length);
+    const pageProducts = filteredProducts.slice(startIdx, endIdx);
+
+    pageProducts.forEach((p, index) => {
       const stockInfo = getProductStockStatus(p);
       const totalStock = stockInfo.totalStock;
       const hasSizes = stockInfo.hasSizes;
@@ -3800,7 +4001,7 @@ function renderInventory(params = {}, onNavigate = null) {
         : '';
 
       tr.innerHTML = `
-        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${startIdx + index + 1}</td>
         <td>
           <div style="display: flex; align-items: center; gap: 0.25rem;">
             ${chevronIcon}
@@ -3957,6 +4158,24 @@ function renderInventory(params = {}, onNavigate = null) {
         });
 
         tbody.appendChild(subTr);
+      }
+    });
+
+    renderPaginationBar({
+      container: mainCard.querySelector('#inv-pagination-container'),
+      totalItems: filteredProducts.length,
+      currentPage: invCurrentPage,
+      pageSize: invPageSize,
+      pageSizeOptions: [10, 25, 50],
+      itemName: 'products',
+      onPageChange: (newPage) => {
+        invCurrentPage = newPage;
+        renderInventoryTable();
+      },
+      onPageSizeChange: (newSize) => {
+        invPageSize = newSize;
+        invCurrentPage = 1;
+        renderInventoryTable();
       }
     });
 
@@ -4474,6 +4693,8 @@ function renderPurchases(params = {}, onNavigate = null) {
 
   let currentFilter = 'all'; // 'all', 'draft', 'approved', 'partially-received', 'received'
   let searchQuery = '';
+  let purCurrentPage = 1;
+  let purPageSize = 10;
 
   mainCard.innerHTML = `
     <!-- Top Filter Bar -->
@@ -4509,6 +4730,9 @@ function renderPurchases(params = {}, onNavigate = null) {
         <tbody id="pur-table-tbody"></tbody>
       </table>
     </div>
+
+    <!-- Pagination Footer -->
+    <div id="pur-pagination-container"></div>
   `;
 
   container.appendChild(mainCard);
@@ -4542,10 +4766,22 @@ function renderPurchases(params = {}, onNavigate = null) {
 
     if (filtered.length === 0) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No purchases found matching filter.</td></tr>`;
+      renderPaginationBar({
+        container: mainCard.querySelector('#pur-pagination-container'),
+        totalItems: 0
+      });
       return;
     }
 
-    filtered.forEach((p, index) => {
+    const totalPages = Math.max(1, Math.ceil(filtered.length / purPageSize));
+    if (purCurrentPage > totalPages) purCurrentPage = totalPages;
+    if (purCurrentPage < 1) purCurrentPage = 1;
+
+    const startIdx = (purCurrentPage - 1) * purPageSize;
+    const endIdx = Math.min(startIdx + purPageSize, filtered.length);
+    const pagePurchases = filtered.slice(startIdx, endIdx);
+
+    pagePurchases.forEach((p, index) => {
       const tr = document.createElement('tr');
       tr.style.cursor = 'pointer';
 
@@ -4607,7 +4843,7 @@ function renderPurchases(params = {}, onNavigate = null) {
       }
 
       tr.innerHTML = `
-        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${startIdx + index + 1}</td>
         <td style="font-weight: 600; color: var(--text-primary);">${p.supplier || 'Supplier'}</td>
         <td style="color: var(--text-secondary);">${p.date || '-'}</td>
         <td style="font-weight: 600; color: var(--text-primary);">
@@ -4692,6 +4928,24 @@ This action cannot be undone.`);
       tbody.appendChild(tr);
     });
 
+    renderPaginationBar({
+      container: mainCard.querySelector('#pur-pagination-container'),
+      totalItems: filtered.length,
+      currentPage: purCurrentPage,
+      pageSize: purPageSize,
+      pageSizeOptions: [10, 25, 50],
+      itemName: 'purchases',
+      onPageChange: (newPage) => {
+        purCurrentPage = newPage;
+        renderPurchasesTable();
+      },
+      onPageSizeChange: (newSize) => {
+        purPageSize = newSize;
+        purCurrentPage = 1;
+        renderPurchasesTable();
+      }
+    });
+
     if (window.lucide) window.lucide.createIcons();
   }
 
@@ -4715,6 +4969,7 @@ This action cannot be undone.`);
   mainCard.querySelectorAll('.pur-filter-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       currentFilter = e.currentTarget.dataset.filter;
+      purCurrentPage = 1;
       updateFilterButtons();
     });
   });
@@ -4722,6 +4977,7 @@ This action cannot be undone.`);
   const searchInput = mainCard.querySelector('#pur-search-input');
   searchInput.addEventListener('input', (e) => {
     searchQuery = e.target.value.trim();
+    purCurrentPage = 1;
     renderPurchasesTable();
   });
 
@@ -5676,6 +5932,8 @@ function renderSales(params = {}, onNavigate = null) {
 
   let currentFilter = 'all'; // 'all', 'paid', 'pending'
   let searchQuery = '';
+  let salesCurrentPage = 1;
+  let salesPageSize = 10;
 
   // 1. Header (Breadcrumb + "+ Add Sale" button)
   const headerDiv = document.createElement('div');
@@ -5731,6 +5989,9 @@ function renderSales(params = {}, onNavigate = null) {
         <tbody id="sales-table-tbody"></tbody>
       </table>
     </div>
+
+    <!-- Pagination Footer -->
+    <div id="sales-pagination-container"></div>
   `;
   container.appendChild(mainCard);
 
@@ -5762,10 +6023,22 @@ function renderSales(params = {}, onNavigate = null) {
 
     if (filtered.length === 0) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No sales found matching filter.</td></tr>`;
+      renderPaginationBar({
+        container: mainCard.querySelector('#sales-pagination-container'),
+        totalItems: 0
+      });
       return;
     }
 
-    filtered.forEach((s, index) => {
+    const totalPages = Math.max(1, Math.ceil(filtered.length / salesPageSize));
+    if (salesCurrentPage > totalPages) salesCurrentPage = totalPages;
+    if (salesCurrentPage < 1) salesCurrentPage = 1;
+
+    const startIdx = (salesCurrentPage - 1) * salesPageSize;
+    const endIdx = Math.min(startIdx + salesPageSize, filtered.length);
+    const pageSales = filtered.slice(startIdx, endIdx);
+
+    pageSales.forEach((s, index) => {
       const tr = document.createElement('tr');
       tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
 
@@ -5779,7 +6052,7 @@ function renderSales(params = {}, onNavigate = null) {
       const custName = s.customer || s.customerName || 'Walk-in Customer';
 
       tr.innerHTML = `
-        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${startIdx + index + 1}</td>
         <td style="font-weight: 600; color: var(--text-primary);">${saleRef}</td>
         <td>
           <div style="font-weight: 600; color: var(--text-primary);">${custName}</div>
@@ -5811,6 +6084,24 @@ function renderSales(params = {}, onNavigate = null) {
       tbody.appendChild(tr);
     });
 
+    renderPaginationBar({
+      container: mainCard.querySelector('#sales-pagination-container'),
+      totalItems: filtered.length,
+      currentPage: salesCurrentPage,
+      pageSize: salesPageSize,
+      pageSizeOptions: [10, 25, 50],
+      itemName: 'sales',
+      onPageChange: (newPage) => {
+        salesCurrentPage = newPage;
+        renderSalesTable();
+      },
+      onPageSizeChange: (newSize) => {
+        salesPageSize = newSize;
+        salesCurrentPage = 1;
+        renderSalesTable();
+      }
+    });
+
     if (window.lucide) window.lucide.createIcons();
   }
 
@@ -5834,6 +6125,7 @@ function renderSales(params = {}, onNavigate = null) {
   mainCard.querySelectorAll('.sales-filter-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       currentFilter = e.currentTarget.dataset.filter;
+      salesCurrentPage = 1;
       updateFilterButtons();
     });
   });
@@ -5841,6 +6133,7 @@ function renderSales(params = {}, onNavigate = null) {
   const searchInput = mainCard.querySelector('#sales-search-input');
   searchInput.addEventListener('input', (e) => {
     searchQuery = e.target.value.trim();
+    salesCurrentPage = 1;
     renderSalesTable();
   });
 
