@@ -3663,6 +3663,7 @@ function renderPurchases(params = {}, onNavigate = null) {
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="all" style="font-weight: 600;">All Purchases</button>
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="draft" style="font-weight: 600;">Draft</button>
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="approved" style="font-weight: 600;">Approved</button>
+        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="partially-received" style="font-weight: 600;">Partially Received</button>
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="received" style="font-weight: 600;">Received</button>
       </div>
 
