@@ -4073,7 +4073,7 @@ function renderInventory(params = {}, onNavigate = null) {
 
       // Main Product Row
       const tr = document.createElement('tr');
-      tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
+      tr.style.cssText = 'transition: background-color 0.15s ease;';
 
       const chevronIcon = hasSizes
         ? `<button type="button" class="expand-toggle-btn" title="${isExpanded ? 'Collapse sizes' : 'Expand sizes'}" style="background: none; border: none; padding: 2px 4px; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; border-radius: 4px; transition: color 0.15s ease;">
@@ -4129,12 +4129,6 @@ function renderInventory(params = {}, onNavigate = null) {
 
         if (toggleBtn) toggleBtn.addEventListener('click', handleToggle);
       }
-
-      // Row Click -> Open View Details Modal (like Purchases)
-      tr.addEventListener('click', (e) => {
-        if (e.target.closest('.row-actions-box') || e.target.closest('.expand-toggle-btn')) return;
-        openProductDetailsModal(p);
-      });
 
       tr.querySelector('.view-inv-btn').addEventListener('click', (e) => {
         e.stopPropagation();
