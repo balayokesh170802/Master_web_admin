@@ -2459,68 +2459,170 @@ function openProductDetailsModal(productInput) {
 }
 
 
-function openSaleDetailsModal(sale) {
+function openSaleDetailsModal(saleInput) {
+  if (!saleInput) return;
+
+  // Resolve sale from ID string or object, pulling fresh reference from store if available
+  let sale = saleInput;
+  if (typeof saleInput === 'string') {
+    sale = (store.data.sales || []).find(s => s.id === saleInput || s.reference === saleInput) || { id: saleInput };
+  } else if (saleInput && saleInput.id) {
+    const liveSale = (store.data.sales || []).find(s => s.id === saleInput.id);
+    if (liveSale) sale = liveSale;
+  }
+
+  // 1. Customer Information & Customer ID Lookup
+  const custName = sale.customer || sale.customerName || 'Walk-in Customer';
+  let custId = sale.customerId || '';
+  let custPhone = sale.phone || sale.customerPhone || '';
+
+  if (custName && custName !== 'Walk-in Customer') {
+    const matchedCustomer = (store.data.customers || []).find(c => 
+      (c.name && c.name.toLowerCase() === custName.toLowerCase()) ||
+      (custPhone && custPhone !== '-' && c.phone && c.phone === custPhone)
+    );
+    if (matchedCustomer) {
+      if (!custId) custId = matchedCustomer.id || '';
+      if ((!custPhone || custPhone === '-') && matchedCustomer.phone) custPhone = matchedCustomer.phone;
+    }
+  }
+
+  // 2. Sale Reference & Status Information
+  const saleRef = sale.id || sale.reference || '—';
+  const saleDate = sale.date || '—';
+  const paymentMethod = sale.paymentMethod || 'Cash';
+  const paymentStatus = sale.status || sale.paymentStatus || 'Completed';
+
+  let statusBadgeVariant = 'secondary';
+  if (paymentStatus === 'Completed' || paymentStatus === 'Paid') statusBadgeVariant = 'success';
+  else if (paymentStatus === 'Pending') statusBadgeVariant = 'warning';
+  else if (paymentStatus === 'Failed' || paymentStatus === 'Cancelled') statusBadgeVariant = 'danger';
+
+  // 3. Itemized Products Details
+  const items = Array.isArray(sale.items) && sale.items.length > 0 ? sale.items : [];
+  let calculatedSubtotal = 0;
+  let calculatedItemDiscount = 0;
+
+  const itemRowsHtml = items.length > 0 ? items.map((i, idx) => {
+    const prodName = i.product || i.productName || i.name || 'Unnamed Product';
+    
+    // Resolve size from item.size or extract from SKU (e.g., OXF-WHT-M -> M)
+    let size = i.size || '';
+    if (!size && i.sku) {
+      const parts = String(i.sku).split('-');
+      if (parts.length > 1) {
+        size = parts[parts.length - 1];
+      }
+    }
+    const sizeDisplay = size ? size : 'Standard';
+
+    const qty = Number(i.qty !== undefined ? i.qty : (i.quantity || 1)) || 0;
+    const unitPrice = Number(i.price !== undefined ? i.price : (i.sellingPrice || 0)) || 0;
+    const itemDiscount = Number(i.discount || 0) || 0;
+    const itemTotal = i.amount !== undefined ? Number(i.amount) : ((unitPrice * qty) - itemDiscount);
+
+    calculatedSubtotal += (unitPrice * qty);
+    calculatedItemDiscount += itemDiscount;
+
+    return `
+      <tr style="border-bottom: 1px solid var(--border-color);">
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center; padding: 0.65rem 0.75rem;">${idx + 1}</td>
+        <td style="padding: 0.65rem 0.75rem;">
+          <div style="font-weight: 600; color: var(--text-primary); font-size: 0.85rem;">${prodName}</div>
+          ${i.sku ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">SKU: ${i.sku}</div>` : ''}
+        </td>
+        <td style="padding: 0.65rem 0.75rem;">
+          <span style="display: inline-block; padding: 0.15rem 0.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.8rem; font-weight: 500;">
+            ${sizeDisplay}
+          </span>
+        </td>
+        <td style="font-weight: 600; color: var(--text-primary); text-align: center; padding: 0.65rem 0.75rem; font-size: 0.85rem;">${qty}</td>
+        <td style="color: var(--text-secondary); font-size: 0.85rem; padding: 0.65rem 0.75rem;">₹${unitPrice.toLocaleString('en-IN')}</td>
+        <td style="color: ${itemDiscount > 0 ? 'var(--status-warning)' : 'var(--text-secondary)'}; font-size: 0.85rem; padding: 0.65rem 0.75rem;">
+          ${itemDiscount > 0 ? `₹${itemDiscount.toLocaleString('en-IN')}` : '—'}
+        </td>
+        <td style="font-weight: 700; color: var(--text-primary); text-align: right; padding: 0.65rem 0.75rem; font-size: 0.85rem;">₹${itemTotal.toLocaleString('en-IN')}</td>
+      </tr>
+    `;
+  }).join('') : `
+    <tr>
+      <td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 1.5rem; font-size: 0.85rem;">No itemized products recorded for this sale.</td>
+    </tr>
+  `;
+
+  // 4. Financial Calculations
+  const subtotal = calculatedSubtotal > 0 ? calculatedSubtotal : (Number(sale.subtotal) || Number(sale.totalAmount) || 0);
+  const overallDiscount = (sale.discount !== undefined && sale.discount !== null) ? Number(sale.discount) : calculatedItemDiscount;
+  const otherCharges = Number(sale.tax || sale.otherCharges || sale.charges || 0) || 0;
+  const finalTotal = sale.totalAmount !== undefined ? Number(sale.totalAmount) : Math.max(0, subtotal - overallDiscount + otherCharges);
+
+  // 5. Build Modal DOM Elements
   const modalEl = document.createElement('div');
   modalEl.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
 
+  let modalObj;
   const modalBreadcrumb = createBreadcrumb([
     { label: 'Sales', target: 'sales' },
     { label: 'Sale Details' }
   ], (target, params) => {
-    modal.closeModal();
+    if (modalObj && modalObj.closeModal) modalObj.closeModal();
     if (window.appInstance) window.appInstance.navigateTo(target, params);
   });
   modalEl.appendChild(modalBreadcrumb);
 
-  const subtotal = (sale.items || []).reduce((sum, i) => sum + ((i.price || 0) * (i.qty || 0)), 0);
-  const totalDiscount = (sale.items || []).reduce((sum, i) => sum + (i.discount || 0), 0);
-
   const innerContent = document.createElement('div');
   innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
   innerContent.innerHTML = `
-    <div style="background: var(--bg-secondary); padding: 0.85rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; font-size: 0.85rem;">
+    <!-- Top Details Overview Grid -->
+    <div style="background: var(--bg-secondary); padding: 0.85rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; font-size: 0.85rem;">
       <div>
-        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Customer</div>
-        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.15rem;">${sale.customer}</div>
-        <div style="font-size: 0.75rem; color: var(--text-secondary);">${sale.phone || ''}</div>
+        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Customer</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.15rem; display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
+          <span>${custName}</span>
+          ${custId ? `<span class="badge badge-secondary" style="font-size: 0.7rem; padding: 0.1rem 0.4rem;">${custId}</span>` : ''}
+        </div>
+        ${custPhone && custPhone !== '-' ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.1rem;">${custPhone}</div>` : ''}
       </div>
       <div>
-        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Date & Time</div>
-        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.15rem;">${sale.date}</div>
+        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Invoice / Bill ID</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.15rem;">${saleRef}</div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.1rem;">${sale.itemCount || items.reduce((s, it) => s + (it.qty || 1), 0)} items</div>
       </div>
       <div>
-        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Payment Method</div>
-        <div style="margin-top: 0.15rem;">${createBadge({ label: sale.paymentMethod, variant: 'secondary' }).outerHTML}</div>
+        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Sale Date</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.15rem;">${saleDate}</div>
       </div>
       <div>
-        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Status</div>
-        <div style="margin-top: 0.15rem;">${createBadge({ label: sale.status, variant: 'success' }).outerHTML}</div>
+        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Payment Method</div>
+        <div style="margin-top: 0.2rem;">${createBadge({ label: paymentMethod, variant: 'secondary' }).outerHTML}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Payment Status</div>
+        <div style="margin-top: 0.2rem;">${createBadge({ label: paymentStatus, variant: statusBadgeVariant }).outerHTML}</div>
       </div>
     </div>
 
+    <!-- Itemized Products Table -->
     <div>
-      <h4 style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-primary);">Itemized Bill Details</h4>
-      <div class="table-responsive">
-        <table class="admin-table" style="font-size: 0.825rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+        <h4 style="font-size: 0.875rem; font-weight: 600; margin: 0; color: var(--text-primary);">Itemized Bill Details</h4>
+        <span style="font-size: 0.75rem; color: var(--text-secondary);">${items.length} product${items.length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);">
+        <table class="admin-table" style="font-size: 0.825rem; margin: 0;">
           <thead>
-            <tr>
-              <th>Product</th>
-              <th>Qty</th>
-              <th>Price</th>
-              <th>Discount</th>
-              <th>Total</th>
+            <tr style="background: var(--bg-secondary);">
+              <th style="width: 5%; text-align: center; padding: 0.6rem 0.75rem;">#</th>
+              <th style="width: 32%; padding: 0.6rem 0.75rem;">Product</th>
+              <th style="width: 13%; padding: 0.6rem 0.75rem;">Size</th>
+              <th style="width: 10%; text-align: center; padding: 0.6rem 0.75rem;">Qty</th>
+              <th style="width: 14%; padding: 0.6rem 0.75rem;">Price / Unit</th>
+              <th style="width: 12%; padding: 0.6rem 0.75rem;">Discount</th>
+              <th style="width: 14%; text-align: right; padding: 0.6rem 0.75rem;">Total</th>
             </tr>
           </thead>
           <tbody>
-            ${(sale.items || []).map(i => `
-              <tr>
-                <td style="font-weight: 600;">${i.product}</td>
-                <td style="font-weight: 600;">${i.qty}</td>
-                <td>₹${(i.price || 0).toLocaleString()}</td>
-                <td style="color: var(--text-secondary);">₹${i.discount || 0}</td>
-                <td style="font-weight: 600;">₹${(i.amount || 0).toLocaleString()}</td>
-              </tr>
-            `).join('')}
+            ${itemRowsHtml}
           </tbody>
         </table>
       </div>
@@ -2528,28 +2630,60 @@ function openSaleDetailsModal(sale) {
 
     <!-- Financial Summary -->
     <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.875rem;">
-      <div style="display: flex; justify-content: space-between; width: 220px; color: var(--text-secondary);">
-        <span>Subtotal:</span>
-        <strong>₹${(subtotal || 0).toLocaleString()}</strong>
+      <div style="display: flex; justify-content: space-between; width: 250px; color: var(--text-secondary);">
+        <span>Items Subtotal:</span>
+        <strong style="color: var(--text-primary);">₹${subtotal.toLocaleString('en-IN')}</strong>
       </div>
-      ${totalDiscount > 0 ? `
-        <div style="display: flex; justify-content: space-between; width: 220px; color: var(--status-warning);">
+      ${overallDiscount > 0 ? `
+        <div style="display: flex; justify-content: space-between; width: 250px; color: var(--status-warning);">
           <span>Discount:</span>
-          <strong>-₹${(totalDiscount || 0).toLocaleString()}</strong>
+          <strong>-₹${overallDiscount.toLocaleString('en-IN')}</strong>
         </div>
       ` : ''}
-      <div style="display: flex; justify-content: space-between; width: 220px; font-size: 1.05rem; font-weight: 700; color: var(--text-primary); border-top: 1px solid var(--border-color); padding-top: 0.35rem; margin-top: 0.25rem;">
+      ${otherCharges > 0 ? `
+        <div style="display: flex; justify-content: space-between; width: 250px; color: var(--text-secondary);">
+          <span>Other Charges / Tax:</span>
+          <strong>+₹${otherCharges.toLocaleString('en-IN')}</strong>
+        </div>
+      ` : ''}
+      <div style="display: flex; justify-content: space-between; width: 250px; font-size: 1.05rem; font-weight: 700; color: var(--text-primary); border-top: 1px solid var(--border-color); padding-top: 0.35rem; margin-top: 0.25rem;">
         <span>Final Total:</span>
-        <span style="color: var(--brand-primary);">₹${(sale.totalAmount || 0).toLocaleString()}</span>
+        <span style="color: var(--brand-primary);">₹${finalTotal.toLocaleString('en-IN')}</span>
       </div>
     </div>
   `;
 
-  const printBtn = createButton({ text: 'Print Receipt', icon: 'printer', variant: 'secondary', onClick: () => window.print() });
-  const closeBtn = createButton({ text: 'Close', variant: 'secondary', onClick: () => modal.closeModal() });
-  const modal = createModal({ title: `Sale Details — ${sale.customer}`, bodyElement: modalEl, footerButtons: [printBtn, closeBtn] });
-}
+  // Crucial: Append inner content to modalEl
+  modalEl.appendChild(innerContent);
 
+  const printBtn = createButton({
+    text: 'Print Receipt',
+    icon: 'printer',
+    variant: 'secondary',
+    onClick: () => window.print()
+  });
+  const closeBtn = createButton({
+    text: 'Close',
+    variant: 'secondary',
+    onClick: () => {
+      if (modalObj && modalObj.closeModal) modalObj.closeModal();
+    }
+  });
+
+  modalObj = createModal({
+    title: `Sale Details — ${saleRef}`,
+    bodyElement: modalEl,
+    footerButtons: [printBtn, closeBtn]
+  });
+
+  if (modalObj && modalObj.overlay) {
+    const mc = modalObj.overlay.querySelector('.modal-content');
+    if (mc) {
+      mc.style.maxWidth = '720px';
+      mc.style.width = '94%';
+    }
+  }
+}
 
 function createBreadcrumb(items = [], onNavigate = null) {
   const container = document.createElement('div');
@@ -6179,7 +6313,7 @@ function renderSales(params = {}, onNavigate = null) {
         <td>${createBadge({ label: status, variant: badgeVariant }).outerHTML}</td>
         <td style="text-align: right;">
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn view-sale-btn" title="View" aria-label="View">
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn view-sale-btn" data-sale-id="${s.id || ''}" title="View" aria-label="View">
               <i data-lucide="eye"></i>
               <span class="sr-only">View</span>
             </button>
