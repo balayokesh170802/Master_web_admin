@@ -4274,16 +4274,18 @@ function openEditProductModal(product, onSaved) {
   let sizePricesHtml = '';
   if (hasSizes) {
     sizePricesHtml = `
-      <div class="form-group" style="margin-top: 0.25rem;">
-        <label class="form-label" style="font-weight: 500; display: flex; justify-content: space-between; align-items: center;">
-          <span>Size-Wise Selling Prices (₹)</span>
-          <span style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 400;">Optional: set specific prices per size</span>
-        </label>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.6rem; background: var(--bg-secondary); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+      <div class="form-group" style="margin: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin: 0; color: var(--text-primary);">
+            Size-Wise Selling Prices (₹)
+          </label>
+          <span style="font-size: 0.75rem; color: var(--text-secondary);">Optional per size</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); gap: 0.5rem; background: var(--bg-secondary); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
           ${(product.variants || []).map(v => `
             <div>
               <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 3px;">Size ${v.size}</label>
-              <input type="number" class="form-input variant-price-input" data-size="${v.size}" placeholder="e.g. 599" value="${v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== '' ? v.sellingPrice : (product.sellingPrice || '')}" style="font-size: 0.825rem; padding: 0.35rem 0.5rem;">
+              <input type="number" class="form-input variant-price-input" data-size="${v.size}" placeholder="e.g. 599" value="${v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== '' ? v.sellingPrice : (product.sellingPrice || '')}" style="font-size: 0.825rem; padding: 0.35rem 0.55rem;">
             </div>
           `).join('')}
         </div>
@@ -4292,43 +4294,62 @@ function openEditProductModal(product, onSaved) {
   }
 
   modal.innerHTML = `
-    <div class="modal-content" style="max-width: 540px; width: 95%; max-height: 90vh; overflow-y: auto;">
-      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
-        <h3 style="margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary);">Edit Product Details</h3>
-        <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">
-          <i data-lucide="x" style="width: 20px; height: 20px;"></i>
+    <div class="modal-content" style="max-width: 480px; width: 92%; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; padding: 0; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-surface); box-shadow: var(--shadow-md);">
+      
+      <!-- 1. Header (Pinned at top) -->
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: flex-start; padding: 0.9rem 1.15rem; border-bottom: 1px solid var(--border-color); background: var(--bg-surface);">
+        <div style="flex: 1; padding-right: 0.75rem;">
+          <h3 style="margin: 0; font-size: 1.05rem; font-weight: 600; color: var(--text-primary); line-height: 1.3;">Edit Product Details</h3>
+          <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 3px; line-height: 1.3;">
+            Update product details and pricing for ${product.name}
+          </div>
+        </div>
+        <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; transition: color 0.15s ease;" title="Close">
+          <i data-lucide="x" style="width: 18px; height: 18px;"></i>
         </button>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Product Name <span style="color: #ef4444;">*</span></label>
-          <input type="text" id="edit-prod-name" class="form-input" value="${product.name || ''}">
+      <!-- 2. Scrollable Body Content -->
+      <div style="padding: 1rem 1.15rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.85rem; flex: 1;">
+        
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+            Product Name <span style="color: var(--status-danger);">*</span>
+          </label>
+          <input type="text" id="edit-prod-name" class="form-input" value="${product.name || ''}" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-          <div class="form-group">
-            <label class="form-label" style="font-weight: 500;">Category</label>
-            <select id="edit-prod-cat" class="form-select">
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Category
+            </label>
+            <select id="edit-prod-cat" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
               ${catOptions.map(c => `<option value="${c}" ${c === product.category ? 'selected' : ''}>${c}</option>`).join('')}
             </select>
           </div>
-          <div class="form-group">
-            <label class="form-label" style="font-weight: 500;">Brand</label>
-            <select id="edit-prod-brand" class="form-select">
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Brand
+            </label>
+            <select id="edit-prod-brand" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
               ${brandOptions.map(b => `<option value="${b}" ${b === product.brand ? 'selected' : ''}>${b}</option>`).join('')}
             </select>
           </div>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-          <div class="form-group">
-            <label class="form-label" style="font-weight: 500;">Default Selling Price (₹)</label>
-            <input type="number" id="edit-prod-price" class="form-input" placeholder="e.g. 1499" value="${product.sellingPrice !== null && product.sellingPrice !== undefined ? product.sellingPrice : ''}">
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Default Selling Price (₹)
+            </label>
+            <input type="number" id="edit-prod-price" class="form-input" placeholder="e.g. 1499" value="${product.sellingPrice !== null && product.sellingPrice !== undefined ? product.sellingPrice : ''}" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           </div>
-          <div class="form-group">
-            <label class="form-label" style="font-weight: 500;">Status</label>
-            <select id="edit-prod-status" class="form-select">
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Status
+            </label>
+            <select id="edit-prod-status" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
               <option value="Active" ${product.status === 'Active' ? 'selected' : ''}>Active</option>
               <option value="Inactive" ${product.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
             </select>
@@ -4337,15 +4358,18 @@ function openEditProductModal(product, onSaved) {
 
         ${sizePricesHtml}
 
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Product Description (Optional)</label>
-          <textarea id="edit-prod-desc" class="form-textarea" rows="3" placeholder="Enter product description, material, care instructions...">${product.description || ''}</textarea>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+            Product Description (Optional)
+          </label>
+          <textarea id="edit-prod-desc" class="form-textarea" rows="2" placeholder="Enter product description, material, care instructions..." style="font-size: 0.85rem; padding: 0.45rem 0.75rem; line-height: 1.4; resize: vertical;">${product.description || ''}</textarea>
         </div>
       </div>
 
-      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-        <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
-        <button type="button" class="btn btn-primary save-modal-btn">Save Changes</button>
+      <!-- 3. Footer Actions (Pinned at bottom) -->
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; align-items: center; gap: 0.65rem; padding: 0.85rem 1.15rem; border-top: 1px solid var(--border-color); background: var(--bg-surface);">
+        <button type="button" class="btn btn-secondary cancel-modal-btn" style="padding: 0.45rem 1rem; font-size: 0.85rem;">Cancel</button>
+        <button type="button" class="btn btn-primary save-modal-btn" style="padding: 0.45rem 1.15rem; font-size: 0.85rem;">Save Changes</button>
       </div>
     </div>
   `;
