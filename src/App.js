@@ -4021,14 +4021,17 @@ function renderInventory(params = {}, onNavigate = null) {
         <td>${statusBadge.outerHTML}</td>
         <td style="text-align: right;">
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-secondary view-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
-              <i data-lucide="eye" style="width: 13px; height: 13px;"></i> View
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn view-inv-btn" title="View" aria-label="View">
+              <i data-lucide="eye"></i>
+              <span class="sr-only">View</span>
             </button>
-            <button type="button" class="btn btn-sm btn-secondary edit-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
-              <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i> Edit
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn edit-inv-btn" title="Edit" aria-label="Edit">
+              <i data-lucide="pencil"></i>
+              <span class="sr-only">Edit</span>
             </button>
-            <button type="button" class="btn btn-sm btn-secondary adjust-inv-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
-              <i data-lucide="sliders" style="width: 13px; height: 13px;"></i> Adjust
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn adjust-inv-btn" title="Adjust Stock" aria-label="Adjust Stock">
+              <i data-lucide="sliders"></i>
+              <span class="sr-only">Adjust Stock</span>
             </button>
           </div>
         </td>
@@ -4107,8 +4110,9 @@ function renderInventory(params = {}, onNavigate = null) {
               <td style="padding: 0.6rem 0.85rem; font-weight: 600; font-size: 0.85rem; color: ${vStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${vStock} units</td>
               <td style="padding: 0.6rem 0.85rem;">${vBadge}</td>
               <td style="padding: 0.6rem 0.85rem; text-align: right;">
-                <button type="button" class="btn btn-sm btn-secondary size-adjust-btn" data-size="${v.size}" style="padding: 0.2rem 0.55rem; font-size: 0.75rem;">
-                  <i data-lucide="sliders" style="width: 12px; height: 12px;"></i> Adjust
+                <button type="button" class="btn btn-sm btn-secondary table-action-btn size-adjust-btn" data-size="${v.size}" title="Adjust Stock" aria-label="Adjust Stock">
+                  <i data-lucide="sliders"></i>
+                  <span class="sr-only">Adjust Stock</span>
                 </button>
               </td>
             </tr>
@@ -4805,38 +4809,44 @@ function renderPurchases(params = {}, onNavigate = null) {
       if (status === 'Draft') {
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-primary action-approve-btn" title="Approve Purchase" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
-              <i data-lucide="check" style="width: 13px; height: 13px;"></i> Approve
+            <button type="button" class="btn btn-sm btn-primary table-action-btn action-approve-btn" title="Approve" aria-label="Approve">
+              <i data-lucide="check-circle"></i>
+              <span class="sr-only">Approve</span>
             </button>
-            <button type="button" class="btn btn-sm btn-secondary action-edit-btn" title="Edit Draft" style="padding: 0.25rem 0.5rem; font-size: 0.775rem;">
-              <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i>
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
+              <i data-lucide="pencil"></i>
+              <span class="sr-only">Edit</span>
             </button>
-            <button type="button" class="btn btn-sm btn-ghost action-delete-btn" title="Delete Draft" style="padding: 0.25rem 0.5rem; color: var(--status-danger); font-size: 0.775rem;">
-              <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
+            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
+              <i data-lucide="trash-2"></i>
+              <span class="sr-only">Delete</span>
             </button>
           </div>
         `;
       } else if (status === 'Approved') {
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-primary action-receive-btn" style="padding: 0.25rem 0.75rem; font-size: 0.775rem; font-weight: 600;">
-              <i data-lucide="package-check" style="width: 14px; height: 14px;"></i> Receive
+            <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="Receive Purchase" aria-label="Receive Purchase">
+              <i data-lucide="package-check"></i>
+              <span class="sr-only">Receive Purchase</span>
             </button>
           </div>
         `;
       } else if (status === 'Partially Received') {
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-primary action-receive-btn" style="padding: 0.25rem 0.65rem; font-size: 0.775rem; font-weight: 600;">
-              <i data-lucide="package-check" style="width: 14px; height: 14px;"></i> Receive Remaining
+            <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="Receive Remaining" aria-label="Receive Remaining">
+              <i data-lucide="package-check"></i>
+              <span class="sr-only">Receive Remaining</span>
             </button>
           </div>
         `;
       } else {
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-secondary action-view-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
-              <i data-lucide="eye" style="width: 13px; height: 13px;"></i> View
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
+              <i data-lucide="eye"></i>
+              <span class="sr-only">View</span>
             </button>
           </div>
         `;
@@ -6063,8 +6073,9 @@ function renderSales(params = {}, onNavigate = null) {
         <td>${createBadge({ label: status, variant: badgeVariant }).outerHTML}</td>
         <td style="text-align: right;">
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-secondary view-sale-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
-              <i data-lucide="eye" style="width: 13px; height: 13px;"></i> View
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn view-sale-btn" title="View" aria-label="View">
+              <i data-lucide="eye"></i>
+              <span class="sr-only">View</span>
             </button>
           </div>
         </td>
@@ -6536,8 +6547,9 @@ function openCustomerDetailsModal(customer, onNavigate = null) {
                 <td style="font-weight: 700; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
                 <td>${createBadge({ label: s.status || 'Paid', variant: s.status === 'Paid' ? 'success' : 'warning' }).outerHTML}</td>
                 <td style="text-align: right;">
-                  <button type="button" class="btn btn-sm btn-secondary cust-view-sale-btn" data-sale-id="${s.id}" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">
-                    <i data-lucide="eye" style="width: 12px; height: 12px;"></i> View
+                  <button type="button" class="btn btn-sm btn-secondary table-action-btn cust-view-sale-btn" data-sale-id="${s.id}" title="View" aria-label="View">
+                    <i data-lucide="eye"></i>
+                    <span class="sr-only">View</span>
                   </button>
                 </td>
               </tr>
@@ -6790,11 +6802,13 @@ function renderCustomers(onNavigate = null) {
         <td style="font-weight: 700; color: var(--brand-primary);">₹${(c.totalSpend || 0).toLocaleString()}</td>
         <td style="text-align: right;">
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-secondary view-cust-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
-              <i data-lucide="eye" style="width: 13px; height: 13px;"></i> View
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn view-cust-btn" title="View" aria-label="View">
+              <i data-lucide="eye"></i>
+              <span class="sr-only">View</span>
             </button>
-            <button type="button" class="btn btn-sm btn-secondary edit-cust-btn" style="padding: 0.25rem 0.55rem; font-size: 0.775rem;">
-              <i data-lucide="edit-2" style="width: 13px; height: 13px;"></i> Edit
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn edit-cust-btn" title="Edit" aria-label="Edit">
+              <i data-lucide="pencil"></i>
+              <span class="sr-only">Edit</span>
             </button>
           </div>
         </td>

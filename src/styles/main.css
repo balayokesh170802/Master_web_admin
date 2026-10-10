@@ -588,6 +588,61 @@ body {
   animation: fadeIn 0.2s ease;
 }
 
+/* Table Action Icon Buttons */
+.row-actions-box {
+  display: flex;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.table-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.table-action-btn:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.table-action-btn i,
+.table-action-btn svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.table-action-btn.action-delete-btn:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--status-danger);
+  border-color: var(--status-danger);
+}
+
+/* Visually Hidden Screen Reader Text */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 /* Responsive Rules */
 @media (max-width: 1024px) {
   .sidebar {
