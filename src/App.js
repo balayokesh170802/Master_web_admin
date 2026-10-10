@@ -3909,37 +3909,64 @@ function renderInventory(params = {}, onNavigate = null) {
   sortFilter.addEventListener('change', (e) => { selectedSort = e.target.value; invCurrentPage = 1; renderInventoryTable(); });
 
   function getProductPriceInfo(product) {
-    const prices = [];
-    if (Array.isArray(product.variants) && product.variants.length > 0) {
-      product.variants.forEach(v => {
-        const sp = v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== '' ? Number(v.sellingPrice) : null;
-        if (sp !== null && !isNaN(sp) && sp > 0) prices.push(sp);
-      });
-    }
-    if (prices.length === 0 && product.sellingPrice !== undefined && product.sellingPrice !== null && product.sellingPrice !== '') {
-      const sp = Number(product.sellingPrice);
-      if (!isNaN(sp) && sp > 0) prices.push(sp);
-    }
-    if (prices.length === 0) {
+    if (!product) {
       return {
         display: `<span style="color: var(--text-secondary); font-style: italic;">Price Not Set</span>`,
+        price: 0,
         min: 0,
         max: 0
       };
     }
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
-    if (min === max) {
+
+    let price = null;
+    const variants = Array.isArray(product.variants) ? product.variants : [];
+    const hasSizes = variants.length > 0 && variants.some(v => v.size && v.size !== 'Standard');
+
+    if (hasSizes) {
+      // Use the selling price of the first size variant as the parent row's displayed price
+      const firstSizeVariant = variants.find(v => v.size && v.size !== 'Standard') || variants[0];
+      if (firstSizeVariant) {
+        const sp = firstSizeVariant.sellingPrice !== undefined && firstSizeVariant.sellingPrice !== null && firstSizeVariant.sellingPrice !== ''
+          ? Number(firstSizeVariant.sellingPrice)
+          : null;
+        if (sp !== null && !isNaN(sp) && sp > 0) {
+          price = sp;
+        }
+      }
+    } else if (variants.length > 0) {
+      const firstVariant = variants[0];
+      if (firstVariant) {
+        const sp = firstVariant.sellingPrice !== undefined && firstVariant.sellingPrice !== null && firstVariant.sellingPrice !== ''
+          ? Number(firstVariant.sellingPrice)
+          : null;
+        if (sp !== null && !isNaN(sp) && sp > 0) {
+          price = sp;
+        }
+      }
+    }
+
+    // If product has no size variants (or first variant has no explicit price), use regular product selling price
+    if (price === null && product.sellingPrice !== undefined && product.sellingPrice !== null && product.sellingPrice !== '') {
+      const sp = Number(product.sellingPrice);
+      if (!isNaN(sp) && sp > 0) {
+        price = sp;
+      }
+    }
+
+    if (price === null || price === 0) {
       return {
-        display: `₹${min.toLocaleString('en-IN')}`,
-        min,
-        max
+        display: `<span style="color: var(--text-secondary); font-style: italic;">Price Not Set</span>`,
+        price: 0,
+        min: 0,
+        max: 0
       };
     }
+
     return {
-      display: `₹${min.toLocaleString('en-IN')} – ₹${max.toLocaleString('en-IN')}`,
-      min,
-      max
+      display: `₹${Number(price).toLocaleString('en-IN')}`,
+      price: Number(price),
+      min: Number(price),
+      max: Number(price)
     };
   }
 
