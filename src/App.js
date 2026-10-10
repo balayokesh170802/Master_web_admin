@@ -10,6 +10,10 @@ const initialData = {
     defaultMinStock: 10
   },
 
+  inventorySettings: {
+    lowStockThreshold: 5
+  },
+
   categories: ["Shirts", "T-Shirts", "Jeans", "Trousers", "Hoodies"],
   brands: ["ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
   sizes: ["S", "M", "L", "XL"],
@@ -1411,7 +1415,36 @@ class StoreManager {
     if (!Array.isArray(this.data.sales)) this.data.sales = initialData.sales || [];
     if (!Array.isArray(this.data.customers)) this.data.customers = initialData.customers || [];
 
+    // Ensure inventorySettings exists and has valid lowStockThreshold
+    if (!this.data.inventorySettings || typeof this.data.inventorySettings !== 'object') {
+      this.data.inventorySettings = { lowStockThreshold: 5 };
+    } else {
+      const val = parseInt(this.data.inventorySettings.lowStockThreshold, 10);
+      this.data.inventorySettings.lowStockThreshold = (!isNaN(val) && val >= 1) ? val : 5;
+    }
+
     this.listeners = [];
+  }
+
+  getLowStockThreshold() {
+    if (this.data && this.data.inventorySettings && this.data.inventorySettings.lowStockThreshold !== undefined) {
+      const val = parseInt(this.data.inventorySettings.lowStockThreshold, 10);
+      if (!isNaN(val) && val >= 1) return val;
+    }
+    return 5;
+  }
+
+  setLowStockThreshold(newThreshold) {
+    const num = Number(newThreshold);
+    if (!Number.isInteger(num) || num < 1) {
+      return { success: false, error: 'Please enter a valid positive whole number (minimum 1).' };
+    }
+    if (!this.data.inventorySettings || typeof this.data.inventorySettings !== 'object') {
+      this.data.inventorySettings = {};
+    }
+    this.data.inventorySettings.lowStockThreshold = num;
+    this.save();
+    return { success: true, threshold: num };
   }
 
   save() {
@@ -1441,6 +1474,7 @@ class StoreManager {
     let stockValue = 0;
     let lowStockCount = 0;
     let outOfStockCount = 0;
+    const threshold = this.getLowStockThreshold();
 
     (this.data.products || []).forEach(p => {
       const variants = (p.variants && (p.variants || []).length > 0) ? p.variants : [{ size: 'Standard', stock: p.totalStock || p.stock || 0, damaged: 0 }];
@@ -1451,7 +1485,7 @@ class StoreManager {
 
         if ((v.stock || 0) === 0) {
           outOfStockCount++;
-        } else if ((v.stock || 0) <= (p.minStock || 5)) {
+        } else if ((v.stock || 0) <= threshold) {
           lowStockCount++;
         }
       });
@@ -3556,6 +3590,7 @@ function renderOverview(onNavigate) {
 
 // HELPER: CALCULATE OVERALL PRODUCT STOCK STATUS ACCORDING TO SIZE-WISE RULES
 function getProductStockStatus(product) {
+  const customThreshold = arguments[1];
   if (!product) {
     return {
       status: 'OUT_OF_STOCK',
@@ -3584,7 +3619,11 @@ function getProductStockStatus(product) {
 
   const variants = Array.isArray(product.variants) ? product.variants : [];
   const hasSizes = variants.length > 0 && variants.some(v => v.size && v.size !== 'Standard');
-  const threshold = Number(product.minStock) || 5;
+  const threshold = (typeof customThreshold === 'number' && customThreshold >= 1)
+    ? customThreshold
+    : (typeof store !== 'undefined' && typeof store.getLowStockThreshold === 'function'
+      ? store.getLowStockThreshold()
+      : 5);
 
   if (hasSizes) {
     const totalSizes = variants.length;
@@ -3707,6 +3746,24 @@ function getProductStockStatus(product) {
   }
 }
 window.getProductStockStatus = getProductStockStatus;
+
+// HELPER: CALCULATE SIZE-LEVEL STOCK STATUS
+function getSizeStockStatus(stock, customThreshold) {
+  const threshold = (typeof customThreshold === 'number' && customThreshold >= 1)
+    ? customThreshold
+    : (typeof store !== 'undefined' && typeof store.getLowStockThreshold === 'function'
+      ? store.getLowStockThreshold()
+      : 5);
+  const qty = Math.max(0, Number(stock) || 0);
+  if (qty === 0) {
+    return { status: 'OUT_OF_STOCK', label: 'Out of Stock', variant: 'danger' };
+  } else if (qty <= threshold) {
+    return { status: 'LOW_STOCK', label: 'Low Stock', variant: 'warning' };
+  } else {
+    return { status: 'IN_STOCK', label: 'In Stock', variant: 'success' };
+  }
+}
+window.getSizeStockStatus = getSizeStockStatus;
 
 // INVENTORY PAGE (GROUPED PRODUCTS + EXPANDABLE SIZE DETAILS)
 function renderInventory(params = {}, onNavigate = null) {
@@ -4089,14 +4146,8 @@ function renderInventory(params = {}, onNavigate = null) {
             : (p.sellingPrice ? `₹${Number(p.sellingPrice).toLocaleString('en-IN')}` : '—');
 
           const vStock = v.stock || 0;
-          let vBadge;
-          if (vStock === 0) {
-            vBadge = createBadge({ label: 'Out of Stock', variant: 'danger' }).outerHTML;
-          } else if (vStock <= (p.minStock || 5)) {
-            vBadge = createBadge({ label: 'Low Stock', variant: 'warning' }).outerHTML;
-          } else {
-            vBadge = createBadge({ label: 'In Stock', variant: 'success' }).outerHTML;
-          }
+          const vStatus = getSizeStockStatus(vStock);
+          const vBadge = createBadge({ label: vStatus.label, variant: vStatus.variant }).outerHTML;
 
           return `
             <tr style="border-bottom: 1px solid var(--border-color);">
@@ -6994,6 +7045,102 @@ function renderSettings(onThemeToggle, onNavigate = null) {
 
   card.querySelector('#settings-theme-toggle-btn').addEventListener('click', onThemeToggle);
   container.appendChild(card);
+
+  // INVENTORY SETTINGS
+  const currentThreshold = store.getLowStockThreshold();
+  const invSettingsCard = document.createElement('div');
+  invSettingsCard.className = 'card';
+  invSettingsCard.style.marginTop = '1.25rem';
+  invSettingsCard.innerHTML = `
+    <div style="padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1.25rem;">
+      <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+        <i data-lucide="sliders" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Inventory Settings
+      </h3>
+      <p style="font-size: 0.78rem; color: var(--text-secondary); margin: 0;">Configure stock level warnings and automated inventory alerts for your store.</p>
+    </div>
+
+    <form id="inventory-settings-form" style="display: flex; flex-direction: column; gap: 1.25rem; max-width: 520px;">
+      <div class="form-group" style="display: flex; flex-direction: column; gap: 0.35rem;">
+        <label for="low-stock-threshold-input" class="form-label" style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">
+          Low Stock Threshold
+        </label>
+        <div style="display: flex; align-items: center; gap: 0.65rem;">
+          <input 
+            type="number" 
+            id="low-stock-threshold-input" 
+            name="lowStockThreshold" 
+            class="form-input" 
+            min="1" 
+            step="1" 
+            value="${currentThreshold}" 
+            required 
+            style="width: 130px; font-weight: 600;"
+          />
+          <span style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">units</span>
+        </div>
+        <p style="font-size: 0.78rem; color: var(--text-secondary); margin: 0.25rem 0 0 0; line-height: 1.45;">
+          Products or sizes with available stock at or below this quantity will be marked as Low Stock.
+        </p>
+        <div id="threshold-error-msg" style="display: none; font-size: 0.78rem; color: var(--status-danger); margin-top: 0.35rem; font-weight: 500;"></div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        <button type="submit" class="btn btn-primary" id="save-inv-settings-btn" style="padding: 0.5rem 1.25rem;">
+          Save Changes
+        </button>
+        <span id="threshold-success-msg" style="display: none; font-size: 0.825rem; color: var(--status-success); font-weight: 600; align-items: center; gap: 0.35rem;">
+          <i data-lucide="check-circle" style="width: 15px; height: 15px;"></i> Settings saved successfully.
+        </span>
+      </div>
+    </form>
+  `;
+
+  const form = invSettingsCard.querySelector('#inventory-settings-form');
+  const input = invSettingsCard.querySelector('#low-stock-threshold-input');
+  const errorMsg = invSettingsCard.querySelector('#threshold-error-msg');
+  const successMsg = invSettingsCard.querySelector('#threshold-success-msg');
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    errorMsg.style.display = 'none';
+    successMsg.style.display = 'none';
+
+    const rawVal = input.value.trim();
+    if (!rawVal) {
+      errorMsg.textContent = 'Please enter a low stock threshold.';
+      errorMsg.style.display = 'block';
+      input.focus();
+      return;
+    }
+
+    const num = Number(rawVal);
+    if (!Number.isInteger(num) || num < 1) {
+      errorMsg.textContent = 'Threshold must be a positive whole number (minimum 1 unit).';
+      errorMsg.style.display = 'block';
+      input.focus();
+      return;
+    }
+
+    const res = store.setLowStockThreshold(num);
+    if (res.success) {
+      input.value = res.threshold;
+      successMsg.innerHTML = '<i data-lucide="check-circle" style="width: 15px; height: 15px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i> Low Stock Threshold updated to ' + res.threshold + ' units successfully.';
+      successMsg.style.display = 'inline-flex';
+      if (window.lucide) window.lucide.createIcons();
+      if (typeof toast !== 'undefined' && toast.show) {
+        toast.show({ message: `Low Stock Threshold saved (${res.threshold} units).`, type: 'success' });
+      }
+      setTimeout(() => {
+        if (successMsg) successMsg.style.display = 'none';
+      }, 4000);
+    } else {
+      errorMsg.textContent = res.error || 'Failed to update threshold.';
+      errorMsg.style.display = 'block';
+    }
+  });
+
+  container.appendChild(invSettingsCard);
 
   if (window.lucide) window.lucide.createIcons();
   return container;
