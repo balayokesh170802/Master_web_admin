@@ -6354,7 +6354,7 @@ function renderCustomers(onNavigate = null) {
 
   let searchQuery = '';
   let currentPage = 1;
-  let pageSize = 10;
+  let pageSize = 5;
 
   function getPageNumbers(current, total) {
     if (total <= 7) {
@@ -6429,7 +6429,8 @@ function renderCustomers(onNavigate = null) {
         <div style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.825rem; color: var(--text-secondary);">
           <span>Rows per page:</span>
           <select id="cust-page-size-select" class="form-select" style="padding: 0.25rem 0.55rem; font-size: 0.8rem; width: auto; height: auto;">
-            <option value="10" selected>10</option>
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
             <option value="25">25</option>
             <option value="50">50</option>
           </select>
@@ -6604,7 +6605,7 @@ function renderCustomers(onNavigate = null) {
 
   const pageSizeSelect = mainCard.querySelector('#cust-page-size-select');
   pageSizeSelect.addEventListener('change', (e) => {
-    pageSize = parseInt(e.target.value, 10) || 10;
+    pageSize = parseInt(e.target.value, 10) || 5;
     currentPage = 1;
     renderCustomersTable();
   });
