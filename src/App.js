@@ -5372,7 +5372,6 @@ function renderCustomers(onNavigate = null) {
         <thead>
           <tr>
             <th style="width: 6%; text-align: center;">S.No</th>
-            <th>Customer ID</th>
             <th>Customer Name</th>
             <th>Phone</th>
             <th>Orders</th>
@@ -5384,7 +5383,6 @@ function renderCustomers(onNavigate = null) {
           ${(store.data.customers || []).map((c, index) => `
             <tr>
               <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${index + 1}</td>
-              <td style="font-family: monospace; color: var(--text-secondary);">${c.id}</td>
               <td style="font-weight: 600;">${c.name}</td>
               <td style="color: var(--text-secondary);">${c.phone}</td>
               <td>${c.ordersCount} purchases</td>
