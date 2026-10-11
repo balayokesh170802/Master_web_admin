@@ -116,13 +116,26 @@ export function renderOverview(onNavigate) {
     onClick: () => onNavigate('inventory', { status: 'LOW' })
   }));
 
+  const outVariantsCount = metrics.outOfStockVariantsCount || 0;
+
+  let outSubtext = '';
+  if (outVariantsCount > 0) {
+    if (outCount > 0) {
+      outSubtext = `<span style="color: var(--status-danger-text); font-weight: 600;">${outVariantsCount} ${outVariantsCount === 1 ? 'size' : 'sizes'} at 0 stock</span> <span style="color: var(--text-secondary);">(${outCount} ${outCount === 1 ? 'product' : 'products'} fully out)</span>`;
+    } else {
+      outSubtext = `<span style="color: var(--status-warning-text); font-weight: 600;">${outVariantsCount} ${outVariantsCount === 1 ? 'size' : 'sizes'} at 0 stock</span> <span style="color: var(--text-secondary);">(in partial stock)</span>`;
+    }
+  } else {
+    outSubtext = `<span style="color: var(--text-secondary);">0 sizes at 0 stock</span>`;
+  }
+
   kpiGrid.appendChild(createMetricCard({
     label: 'Out of Stock',
-    value: `${outCount} Items`,
-    subtext: `<span style="color: var(--status-danger-text); font-weight: 600;">${outCount} items</span> <span style="color: var(--text-secondary);">require immediate PO</span>`,
+    value: `${outCount} Products`,
+    subtext: outSubtext,
     icon: 'alert-circle',
-    variant: 'danger',
-    onClick: () => onNavigate('inventory', { status: 'OUT' })
+    variant: (outCount > 0 || outVariantsCount > 0) ? 'danger' : 'default',
+    onClick: () => onNavigate('inventory', { status: outCount > 0 ? 'OUT' : (outVariantsCount > 0 ? 'PARTIAL' : 'OUT') })
   }));
 
   container.appendChild(kpiGrid);
