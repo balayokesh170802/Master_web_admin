@@ -2952,9 +2952,10 @@ function createSidebar(activeNavId, onNavigate) {
   const nav = document.createElement('nav');
   nav.className = 'sidebar-nav';
   
+  const effectiveNavId = activeNavId === 'manage-product' ? 'inventory' : activeNavId;
   NAV_ITEMS.forEach(item => {
     const btn = document.createElement('button');
-    btn.className = `nav-item ${item.id === activeNavId ? 'active' : ''}`;
+    btn.className = `nav-item ${item.id === effectiveNavId ? 'active' : ''}`;
     btn.innerHTML = `
       <i data-lucide="${item.icon}" style="width: 18px; height: 18px;"></i>
       <span>${item.label}</span>
@@ -4076,8 +4077,774 @@ function getSizeStockStatus(stock, customThreshold) {
 }
 window.getSizeStockStatus = getSizeStockStatus;
 
+// DEDICATED PRODUCT MANAGEMENT PAGE (4 CLEAR SECTIONS)
+function renderProductManagementPage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+
+  const container = document.createElement('div');
+  container.className = 'page-container product-management-page';
+  container.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; max-width: 1200px; margin: 0 auto; width: 100%;';
+
+  const productId = (params && (params.id || params.productId)) || null;
+
+  function renderPage() {
+    container.innerHTML = '';
+
+    // Fresh lookup from store
+    const productsList = store.data.products || [];
+    let product = productsList.find(p => p.id === productId);
+    if (!product && productsList.length > 0) {
+      product = productsList[0];
+    }
+
+    if (!product) {
+      const errDiv = document.createElement('div');
+      errDiv.className = 'card';
+      errDiv.style.cssText = 'padding: 2.5rem; text-align: center; border: 1px solid var(--border-color);';
+      errDiv.innerHTML = `
+        <i data-lucide="alert-circle" style="width: 48px; height: 48px; color: var(--status-danger); margin-bottom: 1rem;"></i>
+        <h3 style="font-size: 1.25rem; color: var(--text-primary); margin-bottom: 0.5rem;">Product Not Found</h3>
+        <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">The requested product could not be located in inventory records.</p>
+      `;
+      const backBtn = createButton({
+        text: 'Back to Inventory',
+        icon: 'arrow-left',
+        variant: 'primary',
+        onClick: () => {
+          if (onNavigate) onNavigate('inventory');
+          else if (window.appInstance) window.appInstance.navigateTo('inventory');
+        }
+      });
+      errDiv.appendChild(backBtn);
+      container.appendChild(errDiv);
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+
+    // 1. Breadcrumb & Back Action Header
+    const topNavDiv = document.createElement('div');
+    topNavDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 0.25rem;';
+
+    const breadcrumb = createBreadcrumb([
+      { label: 'Inventory', target: 'inventory' },
+      { label: 'Product Details' }
+    ], onNavigate);
+    topNavDiv.appendChild(breadcrumb);
+
+    const backBtn = createButton({
+      text: 'Back to Inventory',
+      icon: 'arrow-left',
+      variant: 'secondary',
+      size: 'sm',
+      onClick: () => {
+        if (onNavigate) onNavigate('inventory');
+        else if (window.appInstance) window.appInstance.navigateTo('inventory');
+      }
+    });
+    topNavDiv.appendChild(backBtn);
+    container.appendChild(topNavDiv);
+
+    // Normalize Variants
+    const variants = (Array.isArray(product.variants) && product.variants.length > 0)
+      ? product.variants
+      : [{ size: 'Standard', stock: Number(product.stock || product.totalStock) || 0, sellingPrice: product.sellingPrice, purchasePrice: product.purchasePrice }];
+    const hasSizes = variants.length > 1 || (variants.length === 1 && variants[0].size && variants[0].size !== 'Standard');
+    const totalStock = variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+    const stockInfo = getProductStockStatus(product);
+
+    // 2. Page Header & Product Summary
+    const summaryCard = document.createElement('div');
+    summaryCard.className = 'card product-summary-card';
+    summaryCard.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
+    summaryCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+            <h2 style="margin: 0; font-size: 1.35rem; font-weight: 700; color: var(--text-primary); line-height: 1.3;">Manage Product</h2>
+            ${product.id ? `<span class="badge badge-secondary" style="font-family: monospace; font-size: 0.75rem; padding: 0.2rem 0.55rem; font-weight: 600;">ID: ${product.id}</span>` : ''}
+            ${createBadge({ label: product.status || 'Active', variant: (product.status === 'Active' ? 'success' : 'secondary') }).outerHTML}
+          </div>
+          <div style="font-size: 1.15rem; font-weight: 600; color: var(--text-primary); margin-top: 0.4rem;">${product.name}</div>
+          <div style="display: flex; align-items: center; gap: 0.75rem; margin-top: 0.35rem; font-size: 0.825rem; color: var(--text-secondary); flex-wrap: wrap;">
+            <span>Category: <strong style="color: var(--text-primary); font-weight: 600;">${product.category || 'General'}</strong></span>
+            <span>•</span>
+            <span>Brand: <strong style="color: var(--text-primary); font-weight: 600;">${product.brand || 'Unbranded'}</strong></span>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 1.25rem; background: var(--bg-secondary); padding: 0.75rem 1.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <div>
+            <div style="font-size: 0.7rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Available Stock</div>
+            <div style="font-size: 1.25rem; font-weight: 700; color: var(--brand-primary); margin-top: 2px;">
+              ${totalStock} <span style="font-size: 0.8rem; font-weight: 500; color: var(--text-secondary);">Units</span>
+            </div>
+          </div>
+          <div style="height: 34px; width: 1px; background: var(--border-color);"></div>
+          <div>
+            <div style="font-size: 0.7rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px;">Stock Status</div>
+            ${createBadge({ label: stockInfo.label || 'In Stock', variant: stockInfo.variant || (stockInfo.status === 'IN_STOCK' ? 'success' : 'warning') }).outerHTML}
+          </div>
+        </div>
+      </div>
+    `;
+    container.appendChild(summaryCard);
+
+    // 3. SECTION 01 — Basic Information
+    const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
+    const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+
+    const sec1Card = document.createElement('div');
+    sec1Card.className = 'card';
+    sec1Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
+    sec1Card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="file-text" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+          <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: var(--text-primary);">Section 01 — Basic Information</h3>
+        </div>
+        <span style="font-size: 0.775rem; color: var(--text-secondary);">Core Catalog Details</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+            Product Name <span style="color: var(--status-danger);">*</span>
+          </label>
+          <input type="text" id="manage-prod-name" class="form-input" value="${product.name || ''}" placeholder="Enter product name" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
+          <div id="manage-prod-name-err" style="font-size: 0.75rem; color: var(--status-danger); margin-top: 3px; display: none;">Product Name is required.</div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Category
+            </label>
+            <select id="manage-prod-cat" class="form-select" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
+              ${catOptions.map(c => `<option value="${c}" ${c === product.category ? 'selected' : ''}>${c}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Brand
+            </label>
+            <select id="manage-prod-brand" class="form-select" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
+              ${brandOptions.map(b => `<option value="${b}" ${b === product.brand ? 'selected' : ''}>${b}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Status
+            </label>
+            <select id="manage-prod-status" class="form-select" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
+              <option value="Active" ${product.status === 'Active' ? 'selected' : ''}>Active</option>
+              <option value="Inactive" ${product.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+            Product Description (Optional)
+          </label>
+          <textarea id="manage-prod-desc" class="form-textarea" rows="2" placeholder="Enter product description, fabric, care instructions..." style="font-size: 0.85rem; padding: 0.5rem 0.75rem; line-height: 1.4; resize: vertical;">${product.description || ''}</textarea>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+          <button type="button" id="manage-save-basic-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-size: 0.85rem; font-weight: 600;">
+            <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+            <span>Save Changes</span>
+          </button>
+        </div>
+      </div>
+    `;
+    container.appendChild(sec1Card);
+
+    // Basic Info Save Handler
+    sec1Card.querySelector('#manage-save-basic-btn').onclick = () => {
+      const name = sec1Card.querySelector('#manage-prod-name').value.trim();
+      const category = sec1Card.querySelector('#manage-prod-cat').value;
+      const brand = sec1Card.querySelector('#manage-prod-brand').value;
+      const status = sec1Card.querySelector('#manage-prod-status').value;
+      const description = sec1Card.querySelector('#manage-prod-desc').value.trim();
+      const errEl = sec1Card.querySelector('#manage-prod-name-err');
+
+      if (!name) {
+        if (errEl) errEl.style.display = 'block';
+        toast.show({ message: 'Product Name is required.', type: 'danger' });
+        sec1Card.querySelector('#manage-prod-name').focus();
+        return;
+      }
+      if (errEl) errEl.style.display = 'none';
+
+      store.updateProduct(product.id, {
+        name,
+        category,
+        brand,
+        status,
+        description
+      });
+
+      toast.show({ message: 'Product basic information updated successfully.', type: 'success' });
+      renderPage();
+    };
+
+    // 4. SECTION 02 — Size & Pricing
+    const sec2Card = document.createElement('div');
+    sec2Card.className = 'card';
+    sec2Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
+    
+    let pricingBodyHtml = '';
+    if (hasSizes) {
+      pricingBodyHtml = `
+        <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface); margin-bottom: 1rem;">
+          <table class="admin-table" style="font-size: 0.85rem; margin: 0; width: 100%;">
+            <thead>
+              <tr style="background: var(--bg-secondary);">
+                <th style="width: 25%; padding: 0.65rem 0.85rem;">Size / Variant</th>
+                <th style="width: 25%; text-align: right; padding: 0.65rem 0.85rem;">Buying Price / Unit</th>
+                <th style="width: 25%; text-align: right; padding: 0.65rem 0.85rem;">Selling Price / Unit (₹)</th>
+                <th style="width: 25%; text-align: center; padding: 0.65rem 0.85rem;">Available Quantity</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${variants.map(v => {
+                const buyPrice = v.purchasePrice !== undefined && v.purchasePrice !== null && v.purchasePrice > 0
+                  ? `₹${Number(v.purchasePrice).toLocaleString('en-IN')}`
+                  : (product.purchasePrice ? `₹${Number(product.purchasePrice).toLocaleString('en-IN')}` : '—');
+                const sellVal = v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== ''
+                  ? v.sellingPrice
+                  : (product.sellingPrice || '');
+                return `
+                  <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.65rem 0.85rem;">
+                      <span class="badge badge-secondary" style="font-weight: 700; font-size: 0.825rem; padding: 0.2rem 0.55rem;">
+                        Size ${v.size}
+                      </span>
+                    </td>
+                    <td style="padding: 0.65rem 0.85rem; text-align: right; color: var(--text-secondary); font-size: 0.85rem;">
+                      ${buyPrice}
+                    </td>
+                    <td style="padding: 0.65rem 0.85rem; text-align: right;">
+                      <div style="display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem;">
+                        <span style="color: var(--text-secondary); font-size: 0.85rem;">₹</span>
+                        <input type="number" class="form-input manage-variant-price-inp" data-size="${v.size}" placeholder="e.g. 1499" value="${sellVal}" min="0" step="1" style="width: 130px; font-size: 0.85rem; padding: 0.35rem 0.6rem; text-align: right;">
+                      </div>
+                    </td>
+                    <td style="padding: 0.65rem 0.85rem; text-align: center;">
+                      <span style="font-weight: 600; color: var(--text-primary);">${v.stock || 0} units</span>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; align-items: flex-end; background: var(--bg-secondary); padding: 0.85rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: 0.5rem;">
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Default Product Selling Price (₹)
+            </label>
+            <input type="number" id="manage-default-selling-price" class="form-input" placeholder="e.g. 1499" value="${product.sellingPrice !== null && product.sellingPrice !== undefined ? product.sellingPrice : ''}" min="0" step="1" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 3px;">Catalog baseline price for new variants or references.</div>
+          </div>
+        </div>
+      `;
+    } else {
+      // Single / standard product without size variants
+      const buyPrice = product.purchasePrice ? `₹${Number(product.purchasePrice).toLocaleString('en-IN')}` : '—';
+      pricingBodyHtml = `
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; background: var(--bg-secondary); padding: 1rem 1.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: 0.5rem;">
+          <div>
+            <div style="font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Buying Price / Unit</div>
+            <div style="font-size: 1.05rem; font-weight: 600; color: var(--text-primary); margin-top: 0.25rem;">${buyPrice}</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Preserved from purchase records</div>
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Selling Price / Unit (₹)
+            </label>
+            <input type="number" id="manage-default-selling-price" class="form-input" placeholder="e.g. 1499" value="${product.sellingPrice !== null && product.sellingPrice !== undefined ? product.sellingPrice : ''}" min="0" step="1" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+          </div>
+          <div>
+            <div style="font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Available Quantity</div>
+            <div style="font-size: 1.05rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">${totalStock} units</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">Inventory stock level</div>
+          </div>
+        </div>
+      `;
+    }
+
+    sec2Card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="tag" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+          <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: var(--text-primary);">Section 02 — Size & Pricing</h3>
+        </div>
+        <span style="font-size: 0.775rem; color: var(--text-secondary);">Preserves Inventory Quantities</span>
+      </div>
+
+      <div>
+        ${pricingBodyHtml}
+        <div style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--border-color); margin-top: 0.5rem;">
+          <button type="button" id="manage-save-pricing-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-size: 0.85rem; font-weight: 600;">
+            <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+            <span>Save Price Changes</span>
+          </button>
+        </div>
+      </div>
+    `;
+    container.appendChild(sec2Card);
+
+    // Pricing Save Handler
+    sec2Card.querySelector('#manage-save-pricing-btn').onclick = () => {
+      const defaultPriceInput = sec2Card.querySelector('#manage-default-selling-price');
+      const defaultPriceVal = defaultPriceInput ? defaultPriceInput.value.trim() : '';
+      const sellingPrice = defaultPriceVal !== '' ? parseFloat(defaultPriceVal) : null;
+
+      const variantPrices = {};
+      sec2Card.querySelectorAll('.manage-variant-price-inp').forEach(inp => {
+        const sz = inp.getAttribute('data-size');
+        const val = inp.value.trim();
+        if (val !== '' && !isNaN(parseFloat(val))) {
+          variantPrices[sz] = parseFloat(val);
+        }
+      });
+
+      store.updateProduct(product.id, {
+        sellingPrice,
+        variantPrices
+      });
+
+      toast.show({ message: 'Size & pricing updated successfully. Inventory quantities preserved.', type: 'success' });
+      renderPage();
+    };
+
+    // 5. SECTION 03 — Stock Management
+    const lowStockThreshold = (typeof store !== 'undefined' && typeof store.getLowStockThreshold === 'function')
+      ? store.getLowStockThreshold()
+      : 5;
+
+    const sec3Card = document.createElement('div');
+    sec3Card.className = 'card';
+    sec3Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
+
+    const ADD_STOCK_REASONS = [
+      'Found Stock',
+      'Stock Correction / Audit',
+      'Supplier Extra Stock',
+      'Opening Stock',
+      'Manual Stock Update',
+      'Other'
+    ];
+    const REMOVE_STOCK_REASONS = [
+      'Damaged Stock',
+      'Missing / Lost Stock',
+      'Stock Correction / Audit',
+      'Expired Stock',
+      'Manual Stock Update',
+      'Other'
+    ];
+
+    sec3Card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="boxes" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+          <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: var(--text-primary);">Section 03 — Stock Management</h3>
+        </div>
+        <span style="font-size: 0.775rem; color: var(--text-secondary);">Threshold: ≤ ${lowStockThreshold} Units</span>
+      </div>
+
+      <!-- Size Variants Stock List -->
+      <div style="margin-bottom: 1.25rem;">
+        <div style="font-size: 0.825rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.65rem;">
+          Current Variant Stock & Quick Actions
+        </div>
+        <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);">
+          <table class="admin-table" style="font-size: 0.85rem; margin: 0; width: 100%;">
+            <thead>
+              <tr style="background: var(--bg-secondary);">
+                <th style="width: 25%; padding: 0.65rem 0.85rem;">Size Variant</th>
+                <th style="width: 25%; text-align: center; padding: 0.65rem 0.85rem;">Current Available Stock</th>
+                <th style="width: 25%; text-align: center; padding: 0.65rem 0.85rem;">Stock Status</th>
+                <th style="width: 25%; text-align: right; padding: 0.65rem 0.85rem;">Quick Adjust Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${variants.map(v => {
+                const varStatus = getSizeStockStatus(v.stock, lowStockThreshold);
+                return `
+                  <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.65rem 0.85rem;">
+                      <span class="badge badge-secondary" style="font-weight: 700; font-size: 0.825rem; padding: 0.2rem 0.55rem;">
+                        ${hasSizes ? `Size ${v.size}` : 'Standard'}
+                      </span>
+                    </td>
+                    <td style="padding: 0.65rem 0.85rem; text-align: center;">
+                      <strong style="color: var(--text-primary); font-size: 0.95rem;">${v.stock || 0} units</strong>
+                    </td>
+                    <td style="padding: 0.65rem 0.85rem; text-align: center;">
+                      ${createBadge({ label: varStatus.label, variant: varStatus.variant }).outerHTML}
+                    </td>
+                    <td style="padding: 0.65rem 0.85rem; text-align: right;">
+                      <div style="display: inline-flex; align-items: center; gap: 0.5rem; justify-content: flex-end;">
+                        <button type="button" class="btn btn-sm btn-secondary quick-add-stock-btn" data-size="${v.size}" style="padding: 0.3rem 0.65rem; font-size: 0.775rem;">
+                          <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+                          <span>Add Stock</span>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-secondary quick-remove-stock-btn" data-size="${v.size}" style="padding: 0.3rem 0.65rem; font-size: 0.775rem;">
+                          <i data-lucide="minus" style="width: 14px; height: 14px;"></i>
+                          <span>Remove Stock</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Dedicated Stock Adjustment Form -->
+      <div id="manage-adjustment-form-panel" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1.15rem 1.25rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+          <div style="font-size: 0.875rem; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 0.4rem;">
+            <i data-lucide="sliders" style="width: 16px; height: 16px; color: var(--brand-primary);"></i>
+            <span>Adjust Inventory Stock</span>
+          </div>
+          <div style="font-size: 0.75rem; color: var(--text-secondary);">Audit record will be generated automatically</div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin-bottom: 0.85rem;">
+          ${hasSizes ? `
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+                Size Variant <span style="color: var(--status-danger);">*</span>
+              </label>
+              <select id="manage-adj-size-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+                ${variants.map(v => `<option value="${v.size}">Size ${v.size} (${v.stock || 0} available)</option>`).join('')}
+              </select>
+            </div>
+          ` : `
+            <input type="hidden" id="manage-adj-size-select" value="Standard">
+          `}
+
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Adjustment Type <span style="color: var(--status-danger);">*</span>
+            </label>
+            <select id="manage-adj-type-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+              <option value="ADD" selected>Add Stock (+)</option>
+              <option value="REMOVE">Remove Stock (−)</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Quantity <span style="color: var(--status-danger);">*</span>
+            </label>
+            <input type="number" id="manage-adj-qty-input" class="form-input" min="1" step="1" value="1" placeholder="Enter positive whole number" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+          </div>
+
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
+              Reason for Adjustment <span style="color: var(--status-danger);">*</span>
+            </label>
+            <select id="manage-adj-reason-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+              ${ADD_STOCK_REASONS.map(r => `<option value="${r}">${r}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div id="manage-adj-qty-error" style="font-size: 0.775rem; color: var(--status-danger); margin-bottom: 0.65rem; display: none;"></div>
+
+        <!-- Calculated New Stock Card -->
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.85rem; background: var(--bg-surface); margin-bottom: 0.85rem;">
+          <div style="color: var(--text-secondary); font-weight: 500;">
+            Current: <span id="manage-adj-cur-stock-label" style="font-weight: 600; color: var(--text-primary);">0 units</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="color: var(--text-secondary); font-weight: 500;">Calculated New Stock:</span>
+            <strong id="manage-adj-new-stock-label" style="font-size: 1.1rem; color: var(--brand-primary); font-weight: 700;">0 units</strong>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end;">
+          <button type="button" id="manage-save-adj-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-size: 0.85rem; font-weight: 600;">
+            <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+            <span>Save Adjustment</span>
+          </button>
+        </div>
+      </div>
+    `;
+    container.appendChild(sec3Card);
+
+    // Stock Management Form Live Calculation & Handlers
+    const adjSizeSelect = sec3Card.querySelector('#manage-adj-size-select');
+    const adjTypeSelect = sec3Card.querySelector('#manage-adj-type-select');
+    const adjQtyInput = sec3Card.querySelector('#manage-adj-qty-input');
+    const adjReasonSelect = sec3Card.querySelector('#manage-adj-reason-select');
+    const curStockLabel = sec3Card.querySelector('#manage-adj-cur-stock-label');
+    const newStockLabel = sec3Card.querySelector('#manage-adj-new-stock-label');
+    const qtyErrorEl = sec3Card.querySelector('#manage-adj-qty-error');
+    const saveAdjBtn = sec3Card.querySelector('#manage-save-adj-btn');
+
+    function updateStockReasons(type) {
+      if (!adjReasonSelect) return;
+      const cur = adjReasonSelect.value;
+      const reasonsList = type === 'ADD' ? ADD_STOCK_REASONS : REMOVE_STOCK_REASONS;
+      adjReasonSelect.innerHTML = reasonsList.map(r => `<option value="${r}">${r}</option>`).join('');
+      if (reasonsList.includes(cur)) adjReasonSelect.value = cur;
+      else adjReasonSelect.value = reasonsList[0];
+    }
+
+    function calculateStockUpdate() {
+      const selectedSz = adjSizeSelect ? adjSizeSelect.value : (variants[0].size || 'Standard');
+      const targetVar = variants.find(v => v.size === selectedSz) || variants[0];
+      const curStock = targetVar ? (Number(targetVar.stock) || 0) : 0;
+      const type = adjTypeSelect ? adjTypeSelect.value : 'ADD';
+      const rawQty = (adjQtyInput ? adjQtyInput.value : '').trim();
+      const numQty = Number(rawQty);
+      const parsedQty = parseInt(rawQty, 10);
+
+      if (curStockLabel) curStockLabel.textContent = `${curStock} units`;
+
+      let hasErr = false;
+      if (!rawQty || isNaN(numQty) || numQty <= 0 || !Number.isInteger(numQty)) {
+        hasErr = true;
+        if (qtyErrorEl) {
+          qtyErrorEl.textContent = 'Please enter a positive whole number quantity (1 or greater).';
+          qtyErrorEl.style.display = 'block';
+        }
+        if (adjQtyInput) adjQtyInput.style.borderColor = 'var(--status-danger)';
+        if (newStockLabel) newStockLabel.innerHTML = `<span style="color: var(--text-secondary); font-size: 0.9rem;">Invalid quantity</span>`;
+      } else if (type === 'REMOVE' && parsedQty > curStock) {
+        hasErr = true;
+        const deficit = curStock - parsedQty;
+        if (qtyErrorEl) {
+          qtyErrorEl.textContent = `Cannot remove ${parsedQty} units. Maximum available stock is ${curStock} units. (Negative stock prevented)`;
+          qtyErrorEl.style.display = 'block';
+        }
+        if (adjQtyInput) adjQtyInput.style.borderColor = 'var(--status-danger)';
+        if (newStockLabel) newStockLabel.innerHTML = `<span style="color: var(--status-danger); font-size: 0.95rem;">${deficit} units (Negative stock prevented)</span>`;
+      } else {
+        if (qtyErrorEl) qtyErrorEl.style.display = 'none';
+        if (adjQtyInput) adjQtyInput.style.borderColor = '';
+        const computedNew = type === 'ADD' ? (curStock + parsedQty) : (curStock - parsedQty);
+        if (newStockLabel) newStockLabel.innerHTML = `<span style="color: var(--brand-primary); font-weight: 700;">${computedNew} units</span>`;
+      }
+
+      return !hasErr;
+    }
+
+    if (adjSizeSelect) adjSizeSelect.onchange = calculateStockUpdate;
+    if (adjTypeSelect) adjTypeSelect.onchange = () => {
+      updateStockReasons(adjTypeSelect.value);
+      calculateStockUpdate();
+    };
+    if (adjQtyInput) adjQtyInput.oninput = calculateStockUpdate;
+
+    calculateStockUpdate();
+
+    // Quick Action button listeners
+    sec3Card.querySelectorAll('.quick-add-stock-btn').forEach(btn => {
+      btn.onclick = () => {
+        const sz = btn.getAttribute('data-size');
+        if (adjSizeSelect) adjSizeSelect.value = sz;
+        if (adjTypeSelect) {
+          adjTypeSelect.value = 'ADD';
+          updateStockReasons('ADD');
+        }
+        calculateStockUpdate();
+        const panel = sec3Card.querySelector('#manage-adjustment-form-panel');
+        if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        if (adjQtyInput) adjQtyInput.focus();
+      };
+    });
+
+    sec3Card.querySelectorAll('.quick-remove-stock-btn').forEach(btn => {
+      btn.onclick = () => {
+        const sz = btn.getAttribute('data-size');
+        if (adjSizeSelect) adjSizeSelect.value = sz;
+        if (adjTypeSelect) {
+          adjTypeSelect.value = 'REMOVE';
+          updateStockReasons('REMOVE');
+        }
+        calculateStockUpdate();
+        const panel = sec3Card.querySelector('#manage-adjustment-form-panel');
+        if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        if (adjQtyInput) adjQtyInput.focus();
+      };
+    });
+
+    // Save Adjustment Handler
+    let isSavingAdj = false;
+    saveAdjBtn.onclick = () => {
+      if (isSavingAdj) return;
+      const isValid = calculateStockUpdate();
+      if (!isValid) return;
+
+      const targetSz = adjSizeSelect ? adjSizeSelect.value : (variants[0].size || 'Standard');
+      const targetVar = variants.find(v => v.size === targetSz) || variants[0];
+      const curStock = targetVar ? (Number(targetVar.stock) || 0) : 0;
+      const type = adjTypeSelect ? adjTypeSelect.value : 'ADD';
+      const rawQty = (adjQtyInput ? adjQtyInput.value : '').trim();
+      const qty = parseInt(rawQty, 10);
+      const reason = (adjReasonSelect ? adjReasonSelect.value : '').trim();
+
+      if (!qty || isNaN(qty) || qty <= 0) {
+        toast.show({ message: 'Quantity must be a positive whole number.', type: 'danger' });
+        if (adjQtyInput) adjQtyInput.focus();
+        return;
+      }
+
+      if (type === 'REMOVE' && qty > curStock) {
+        toast.show({ message: `Cannot remove ${qty} units. Maximum available stock is ${curStock} units.`, type: 'danger' });
+        if (adjQtyInput) adjQtyInput.focus();
+        return;
+      }
+
+      if (!reason) {
+        toast.show({ message: 'Please select a reason for the adjustment.', type: 'danger' });
+        if (adjReasonSelect) adjReasonSelect.focus();
+        return;
+      }
+
+      isSavingAdj = true;
+      saveAdjBtn.disabled = true;
+      saveAdjBtn.style.opacity = '0.6';
+
+      try {
+        const result = store.adjustProductStock({
+          productId: product.id,
+          size: targetSz,
+          adjustmentType: type,
+          quantity: qty,
+          reason: reason
+        });
+
+        const sizeLabel = (hasSizes && targetSz && targetSz !== 'Standard') ? ` (${targetSz})` : '';
+        toast.show({ message: `Stock adjusted successfully: ${product.name}${sizeLabel} updated to ${result.newStock} units.`, type: 'success' });
+        renderPage();
+      } catch (err) {
+        toast.show({ message: err.message || 'Error saving stock adjustment.', type: 'danger' });
+        isSavingAdj = false;
+        saveAdjBtn.disabled = false;
+        saveAdjBtn.style.opacity = '';
+      }
+    };
+
+    // 6. SECTION 04 — Stock History
+    const sec4Card = document.createElement('div');
+    sec4Card.className = 'card';
+    sec4Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
+
+    const allMovements = store.data.stockMovements || [];
+    const productMovements = allMovements.filter(m => {
+      return (m.product && m.product.toLowerCase() === product.name.toLowerCase()) ||
+             (m.productId && m.productId === product.id);
+    });
+
+    let historyTableHtml = '';
+    if (productMovements.length === 0) {
+      historyTableHtml = `
+        <div style="text-align: center; color: var(--text-secondary); padding: 2.25rem 1rem; border: 1px dashed var(--border-color); border-radius: var(--radius-sm); background: var(--bg-secondary);">
+          <i data-lucide="history" style="width: 32px; height: 32px; margin-bottom: 0.5rem; opacity: 0.5; color: var(--text-secondary);"></i>
+          <div style="font-weight: 500; font-size: 0.9rem; color: var(--text-primary); margin-bottom: 0.25rem;">No Stock Movements Recorded</div>
+          <div style="font-size: 0.8rem; color: var(--text-secondary);">Stock adjustments, purchases, and sales for this product will be recorded here automatically.</div>
+        </div>
+      `;
+    } else {
+      historyTableHtml = `
+        <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface); max-height: 400px; overflow-y: auto;">
+          <table class="admin-table" style="font-size: 0.825rem; margin: 0; width: 100%;">
+            <thead>
+              <tr style="background: var(--bg-secondary); position: sticky; top: 0; z-index: 2;">
+                <th style="width: 18%; padding: 0.65rem 0.75rem;">Date & Time</th>
+                <th style="width: 12%; padding: 0.65rem 0.75rem;">Size / SKU</th>
+                <th style="width: 14%; padding: 0.65rem 0.75rem;">Movement Type</th>
+                <th style="width: 12%; text-align: center; padding: 0.65rem 0.75rem;">Qty Change</th>
+                <th style="width: 20%; padding: 0.65rem 0.75rem;">Reason / Reference</th>
+                <th style="width: 14%; text-align: center; padding: 0.65rem 0.75rem;">Prev → New Stock</th>
+                <th style="width: 10%; text-align: right; padding: 0.65rem 0.75rem;">Logged By</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${productMovements.map(m => {
+                let badgeVariant = 'secondary';
+                if (m.type === 'Stock In') badgeVariant = 'success';
+                else if (m.type === 'Sale') badgeVariant = 'info';
+                else if (m.type === 'Adjustment') badgeVariant = 'warning';
+                else if (m.type === 'Damage') badgeVariant = 'danger';
+
+                const sizeDisplay = m.size || (m.sku ? m.sku.split('-').pop() : 'Standard');
+                const qtyVal = Number(m.quantity) || 0;
+                const qtyFormatted = qtyVal > 0 ? `+${qtyVal}` : `${qtyVal}`;
+                const qtyColor = qtyVal > 0 ? 'var(--status-success)' : 'var(--status-danger)';
+                const stockTransition = (m.previousStock !== undefined && m.newStock !== undefined)
+                  ? `${m.previousStock} → ${m.newStock} units`
+                  : '—';
+
+                return `
+                  <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="color: var(--text-secondary); padding: 0.65rem 0.75rem;">${m.date || '—'}</td>
+                    <td style="padding: 0.65rem 0.75rem;">
+                      <span class="badge badge-secondary" style="font-size: 0.75rem; font-weight: 600; padding: 0.15rem 0.45rem;">
+                        ${sizeDisplay}
+                      </span>
+                    </td>
+                    <td style="padding: 0.65rem 0.75rem;">
+                      ${createBadge({ label: m.adjustmentType || m.type || 'Adjustment', variant: badgeVariant }).outerHTML}
+                    </td>
+                    <td style="text-align: center; font-weight: 700; color: ${qtyColor}; padding: 0.65rem 0.75rem;">
+                      ${qtyFormatted} units
+                    </td>
+                    <td style="color: var(--text-primary); padding: 0.65rem 0.75rem; font-size: 0.8rem;">
+                      ${m.reason || m.reference || m.notes || '—'}
+                    </td>
+                    <td style="text-align: center; color: var(--text-secondary); padding: 0.65rem 0.75rem; font-size: 0.8rem; font-family: monospace;">
+                      ${stockTransition}
+                    </td>
+                    <td style="text-align: right; color: var(--text-secondary); padding: 0.65rem 0.75rem; font-size: 0.8rem;">
+                      ${m.user || 'Admin'}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    sec4Card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="history" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+          <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: var(--text-primary);">Section 04 — Stock Movement History</h3>
+        </div>
+        <span style="font-size: 0.775rem; color: var(--text-secondary);">${productMovements.length} Movement${productMovements.length === 1 ? '' : 's'} Logged</span>
+      </div>
+      ${historyTableHtml}
+    `;
+    container.appendChild(sec4Card);
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  renderPage();
+  return container;
+}
+
 // INVENTORY PAGE (GROUPED PRODUCTS + EXPANDABLE SIZE DETAILS)
 function renderInventory(params = {}, onNavigate = null) {
+  if (params && (params.action === 'manage-product' || params.action === 'edit' || params.view === 'manage-product' || params.action === 'manage')) {
+    return renderProductManagementPage(params, onNavigate);
+  }
+
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -4462,7 +5229,13 @@ function renderInventory(params = {}, onNavigate = null) {
 
       tr.querySelector('.edit-inv-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        openEditProductModal(p, () => renderInventoryTable());
+        if (onNavigate) {
+          onNavigate('inventory', { action: 'manage-product', id: p.id });
+        } else if (window.appInstance && window.appInstance.navigateTo) {
+          window.appInstance.navigateTo('inventory', { action: 'manage-product', id: p.id });
+        } else {
+          openEditProductModal(p, () => renderInventoryTable());
+        }
       });
 
       tr.querySelector('.adjust-inv-btn').addEventListener('click', (e) => {
@@ -7543,7 +8316,7 @@ class MasterWebAdminApp {
       }
     }
 
-    const validNavIds = NAV_ITEMS.map(i => i.id);
+    const validNavIds = [...NAV_ITEMS.map(i => i.id), 'manage-product'];
     const targetNavId = validNavIds.includes(navId) ? navId : 'overview';
 
     this.activeNavId = targetNavId;
@@ -7586,7 +8359,8 @@ class MasterWebAdminApp {
     if (!this.appEl) return;
     this.appEl.innerHTML = '';
 
-    const activeItem = NAV_ITEMS.find(item => item.id === this.activeNavId) || NAV_ITEMS[0];
+    const effectiveActiveId = this.activeNavId === 'manage-product' ? 'inventory' : this.activeNavId;
+    const activeItem = NAV_ITEMS.find(item => item.id === effectiveActiveId) || NAV_ITEMS[0];
 
     const layout = document.createElement('div');
     layout.className = 'app-layout';
@@ -7605,6 +8379,7 @@ class MasterWebAdminApp {
       case 'overview': pageView = renderOverview(this.navigateTo); break;
       case 'inventory': pageView = renderInventory(this.navParams, this.navigateTo); break;
       case 'products': pageView = renderInventory(this.navParams, this.navigateTo); break;
+      case 'manage-product': pageView = renderProductManagementPage(this.navParams, this.navigateTo); break;
       case 'purchases': pageView = renderPurchases(this.navParams, this.navigateTo); break;
       case 'sales': pageView = renderSales(this.navParams, this.navigateTo); break;
       case 'customers': pageView = renderCustomers(this.navigateTo); break;
