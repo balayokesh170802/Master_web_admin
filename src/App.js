@@ -4092,6 +4092,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
   const requestedSize = (params && (params.size || params.variantSize)) || null;
   const requestedSection = (params && (params.section || params.tab)) || null;
   let activeSelectedSize = requestedSize;
+  let hasInitialScrolled = false;
 
   function renderPage() {
     container.innerHTML = '';
@@ -4680,10 +4681,12 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
 
     if (adjSizeSelect) adjSizeSelect.onchange = () => {
       activeSelectedSize = adjSizeSelect.value;
+      if (adjQtyInput) adjQtyInput.value = '1';
       calculateStockUpdate();
       syncVariantHighlight();
     };
     if (adjTypeSelect) adjTypeSelect.onchange = () => {
+      if (adjQtyInput) adjQtyInput.value = '1';
       updateStockReasons(adjTypeSelect.value);
       calculateStockUpdate();
     };
@@ -4701,11 +4704,15 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           adjTypeSelect.value = 'ADD';
           updateStockReasons('ADD');
         }
+        if (adjQtyInput) adjQtyInput.value = '1';
         calculateStockUpdate();
         syncVariantHighlight();
         const panel = sec3Card.querySelector('#manage-adjustment-form-panel');
         if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        if (adjQtyInput) adjQtyInput.focus();
+        if (adjQtyInput) {
+          adjQtyInput.focus();
+          adjQtyInput.select();
+        }
       };
     });
 
@@ -4718,11 +4725,15 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           adjTypeSelect.value = 'REMOVE';
           updateStockReasons('REMOVE');
         }
+        if (adjQtyInput) adjQtyInput.value = '1';
         calculateStockUpdate();
         syncVariantHighlight();
         const panel = sec3Card.querySelector('#manage-adjustment-form-panel');
         if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        if (adjQtyInput) adjQtyInput.focus();
+        if (adjQtyInput) {
+          adjQtyInput.focus();
+          adjQtyInput.select();
+        }
       };
     });
 
@@ -4881,8 +4892,9 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
 
     if (window.lucide) window.lucide.createIcons();
 
-    // Auto-scroll to Stock Management section if requested (e.g. from size row adjust action)
-    if (requestedSection === 'stock' || requestedSize) {
+    // Auto-scroll to Stock Management section on initial navigation if requested (e.g. from size row adjust action)
+    if (!hasInitialScrolled && (requestedSection === 'stock' || requestedSize)) {
+      hasInitialScrolled = true;
       setTimeout(() => {
         if (sec3Card && sec3Card.isConnected) {
           sec3Card.scrollIntoView({ behavior: 'smooth', block: 'start' });
