@@ -4089,6 +4089,9 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
   container.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; max-width: 1200px; margin: 0 auto; width: 100%;';
 
   const productId = (params && (params.id || params.productId)) || null;
+  const requestedSize = (params && (params.size || params.variantSize)) || null;
+  const requestedSection = (params && (params.section || params.tab)) || null;
+  let activeSelectedSize = requestedSize;
 
   function renderPage() {
     container.innerHTML = '';
@@ -4427,8 +4430,13 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
       ? store.getLowStockThreshold()
       : 5;
 
+    const initialSelectedSize = (activeSelectedSize && variants.some(v => v.size === activeSelectedSize))
+      ? activeSelectedSize
+      : (variants[0] ? variants[0].size : 'Standard');
+
     const sec3Card = document.createElement('div');
     sec3Card.className = 'card';
+    sec3Card.id = 'product-stock-management-section';
     sec3Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
 
     const ADD_STOCK_REASONS = [
@@ -4475,10 +4483,14 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
             <tbody>
               ${variants.map(v => {
                 const varStatus = getSizeStockStatus(v.stock, lowStockThreshold);
+                const isSelectedRow = (v.size === initialSelectedSize);
+                const rowStyle = isSelectedRow
+                  ? 'border-bottom: 1px solid var(--border-color); background: rgba(79, 70, 229, 0.08); transition: background-color 0.2s ease;'
+                  : 'border-bottom: 1px solid var(--border-color); transition: background-color 0.2s ease;';
                 return `
-                  <tr style="border-bottom: 1px solid var(--border-color);">
+                  <tr style="${rowStyle}" class="variant-stock-row ${isSelectedRow ? 'selected-variant-row' : ''}" data-variant-size="${v.size}">
                     <td style="padding: 0.65rem 0.85rem;">
-                      <span class="badge badge-secondary" style="font-weight: 700; font-size: 0.825rem; padding: 0.2rem 0.55rem;">
+                      <span class="badge ${isSelectedRow ? 'badge-primary' : 'badge-secondary'}" style="font-weight: 700; font-size: 0.825rem; padding: 0.2rem 0.55rem;">
                         ${hasSizes ? `Size ${v.size}` : 'Standard'}
                       </span>
                     </td>
@@ -4525,11 +4537,11 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
                 Size Variant <span style="color: var(--status-danger);">*</span>
               </label>
               <select id="manage-adj-size-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
-                ${variants.map(v => `<option value="${v.size}">Size ${v.size} (${v.stock || 0} available)</option>`).join('')}
+                ${variants.map(v => `<option value="${v.size}" ${v.size === initialSelectedSize ? 'selected' : ''}>Size ${v.size} (${v.stock || 0} available)</option>`).join('')}
               </select>
             </div>
           ` : `
-            <input type="hidden" id="manage-adj-size-select" value="Standard">
+            <input type="hidden" id="manage-adj-size-select" value="${initialSelectedSize}">
           `}
 
           <div class="form-group" style="margin: 0;">
@@ -4562,9 +4574,12 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
         <div id="manage-adj-qty-error" style="font-size: 0.775rem; color: var(--status-danger); margin-bottom: 0.65rem; display: none;"></div>
 
         <!-- Calculated New Stock Card -->
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.85rem; background: var(--bg-surface); margin-bottom: 0.85rem;">
-          <div style="color: var(--text-secondary); font-weight: 500;">
-            Current: <span id="manage-adj-cur-stock-label" style="font-weight: 600; color: var(--text-primary);">0 units</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.85rem; background: var(--bg-surface); margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.65rem;">
+            <div style="color: var(--text-secondary); font-weight: 500;">
+              Selected Size Stock: <span id="manage-adj-cur-stock-label" style="font-weight: 600; color: var(--text-primary);">0 units</span>
+            </div>
+            <div id="manage-adj-cur-status-badge"></div>
           </div>
           <div style="display: flex; align-items: center; gap: 0.5rem;">
             <span style="color: var(--text-secondary); font-weight: 500;">Calculated New Stock:</span>
@@ -4589,6 +4604,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     const adjReasonSelect = sec3Card.querySelector('#manage-adj-reason-select');
     const curStockLabel = sec3Card.querySelector('#manage-adj-cur-stock-label');
     const newStockLabel = sec3Card.querySelector('#manage-adj-new-stock-label');
+    const curStatusBadgeEl = sec3Card.querySelector('#manage-adj-cur-status-badge');
     const qtyErrorEl = sec3Card.querySelector('#manage-adj-qty-error');
     const saveAdjBtn = sec3Card.querySelector('#manage-save-adj-btn');
 
@@ -4602,15 +4618,20 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     }
 
     function calculateStockUpdate() {
-      const selectedSz = adjSizeSelect ? adjSizeSelect.value : (variants[0].size || 'Standard');
+      const selectedSz = adjSizeSelect ? adjSizeSelect.value : (initialSelectedSize || (variants[0] && variants[0].size) || 'Standard');
+      activeSelectedSize = selectedSz;
       const targetVar = variants.find(v => v.size === selectedSz) || variants[0];
       const curStock = targetVar ? (Number(targetVar.stock) || 0) : 0;
+      const curStatus = getSizeStockStatus(curStock, lowStockThreshold);
       const type = adjTypeSelect ? adjTypeSelect.value : 'ADD';
       const rawQty = (adjQtyInput ? adjQtyInput.value : '').trim();
       const numQty = Number(rawQty);
       const parsedQty = parseInt(rawQty, 10);
 
       if (curStockLabel) curStockLabel.textContent = `${curStock} units`;
+      if (curStatusBadgeEl) {
+        curStatusBadgeEl.innerHTML = createBadge({ label: curStatus.label, variant: curStatus.variant }).outerHTML;
+      }
 
       let hasErr = false;
       if (!rawQty || isNaN(numQty) || numQty <= 0 || !Number.isInteger(numQty)) {
@@ -4640,7 +4661,28 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
       return !hasErr;
     }
 
-    if (adjSizeSelect) adjSizeSelect.onchange = calculateStockUpdate;
+    function syncVariantHighlight() {
+      sec3Card.querySelectorAll('.variant-stock-row').forEach(row => {
+        const rowSz = row.getAttribute('data-variant-size');
+        if (rowSz === activeSelectedSize) {
+          row.style.background = 'rgba(79, 70, 229, 0.08)';
+          row.classList.add('selected-variant-row');
+          const b = row.querySelector('.badge');
+          if (b) { b.classList.remove('badge-secondary'); b.classList.add('badge-primary'); }
+        } else {
+          row.style.background = '';
+          row.classList.remove('selected-variant-row');
+          const b = row.querySelector('.badge');
+          if (b) { b.classList.remove('badge-primary'); b.classList.add('badge-secondary'); }
+        }
+      });
+    }
+
+    if (adjSizeSelect) adjSizeSelect.onchange = () => {
+      activeSelectedSize = adjSizeSelect.value;
+      calculateStockUpdate();
+      syncVariantHighlight();
+    };
     if (adjTypeSelect) adjTypeSelect.onchange = () => {
       updateStockReasons(adjTypeSelect.value);
       calculateStockUpdate();
@@ -4653,12 +4695,14 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     sec3Card.querySelectorAll('.quick-add-stock-btn').forEach(btn => {
       btn.onclick = () => {
         const sz = btn.getAttribute('data-size');
+        activeSelectedSize = sz;
         if (adjSizeSelect) adjSizeSelect.value = sz;
         if (adjTypeSelect) {
           adjTypeSelect.value = 'ADD';
           updateStockReasons('ADD');
         }
         calculateStockUpdate();
+        syncVariantHighlight();
         const panel = sec3Card.querySelector('#manage-adjustment-form-panel');
         if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         if (adjQtyInput) adjQtyInput.focus();
@@ -4668,12 +4712,14 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     sec3Card.querySelectorAll('.quick-remove-stock-btn').forEach(btn => {
       btn.onclick = () => {
         const sz = btn.getAttribute('data-size');
+        activeSelectedSize = sz;
         if (adjSizeSelect) adjSizeSelect.value = sz;
         if (adjTypeSelect) {
           adjTypeSelect.value = 'REMOVE';
           updateStockReasons('REMOVE');
         }
         calculateStockUpdate();
+        syncVariantHighlight();
         const panel = sec3Card.querySelector('#manage-adjustment-form-panel');
         if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         if (adjQtyInput) adjQtyInput.focus();
@@ -4687,7 +4733,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
       const isValid = calculateStockUpdate();
       if (!isValid) return;
 
-      const targetSz = adjSizeSelect ? adjSizeSelect.value : (variants[0].size || 'Standard');
+      const targetSz = adjSizeSelect ? adjSizeSelect.value : (initialSelectedSize || (variants[0] && variants[0].size) || 'Standard');
       const targetVar = variants.find(v => v.size === targetSz) || variants[0];
       const curStock = targetVar ? (Number(targetVar.stock) || 0) : 0;
       const type = adjTypeSelect ? adjTypeSelect.value : 'ADD';
@@ -4726,6 +4772,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           reason: reason
         });
 
+        activeSelectedSize = targetSz;
         const sizeLabel = (hasSizes && targetSz && targetSz !== 'Standard') ? ` (${targetSz})` : '';
         toast.show({ message: `Stock adjusted successfully: ${product.name}${sizeLabel} updated to ${result.newStock} units.`, type: 'success' });
         renderPage();
@@ -4833,6 +4880,20 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     container.appendChild(sec4Card);
 
     if (window.lucide) window.lucide.createIcons();
+
+    // Auto-scroll to Stock Management section if requested (e.g. from size row adjust action)
+    if (requestedSection === 'stock' || requestedSize) {
+      setTimeout(() => {
+        if (sec3Card && sec3Card.isConnected) {
+          sec3Card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          const qtyInp = sec3Card.querySelector('#manage-adj-qty-input');
+          if (qtyInp) {
+            qtyInp.focus();
+            qtyInp.select();
+          }
+        }
+      }, 120);
+    }
   }
 
   renderPage();
@@ -5187,10 +5248,6 @@ function renderInventory(params = {}, onNavigate = null) {
               <i data-lucide="pencil"></i>
               <span class="sr-only">Edit</span>
             </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn adjust-inv-btn" title="Adjust Stock" aria-label="Adjust Stock">
-              <i data-lucide="sliders"></i>
-              <span class="sr-only">Adjust Stock</span>
-            </button>
           </div>
         </td>
       `;
@@ -5238,10 +5295,13 @@ function renderInventory(params = {}, onNavigate = null) {
         }
       });
 
-      tr.querySelector('.adjust-inv-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        openRowStockAdjustModal(p, null, () => renderInventoryTable());
-      });
+      const parentAdjBtn = tr.querySelector('.adjust-inv-btn');
+      if (parentAdjBtn) {
+        tr.querySelector('.adjust-inv-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          openRowStockAdjustModal(p, null, () => renderInventoryTable());
+        });
+      }
 
       tbody.appendChild(tr);
 
@@ -5276,7 +5336,7 @@ function renderInventory(params = {}, onNavigate = null) {
               <td style="padding: 0.6rem 0.85rem; font-weight: 600; font-size: 0.85rem; color: ${vStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${vStock} units</td>
               <td style="padding: 0.6rem 0.85rem;">${vBadge}</td>
               <td style="padding: 0.6rem 0.85rem; text-align: right;">
-                <button type="button" class="btn btn-sm btn-secondary table-action-btn size-adjust-btn" data-size="${v.size}" title="Adjust Stock" aria-label="Adjust Stock">
+                <button type="button" class="btn btn-sm btn-secondary table-action-btn size-adjust-btn adjust-inv-btn" data-size="${v.size}" title="Adjust Stock" aria-label="Adjust Stock">
                   <i data-lucide="sliders"></i>
                   <span class="sr-only">Adjust Stock</span>
                 </button>
@@ -5323,7 +5383,13 @@ function renderInventory(params = {}, onNavigate = null) {
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const sz = btn.getAttribute('data-size');
-            openRowStockAdjustModal(p, sz, () => renderInventoryTable());
+            if (onNavigate) {
+              onNavigate('inventory', { action: 'manage-product', id: p.id, size: sz, section: 'stock' });
+            } else if (window.appInstance && window.appInstance.navigateTo) {
+              window.appInstance.navigateTo('inventory', { action: 'manage-product', id: p.id, size: sz, section: 'stock' });
+            } else {
+              openRowStockAdjustModal(p, sz, () => renderInventoryTable());
+            }
           });
         });
 
