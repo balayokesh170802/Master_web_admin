@@ -3660,7 +3660,7 @@ function renderOverview(onNavigate) {
     subtext: outSubtext,
     icon: 'alert-circle',
     variant: (outCount > 0 || outVariantsCount > 0) ? 'danger' : 'default',
-    onClick: () => onNavigate('inventory', { status: outCount > 0 ? 'OUT' : (outVariantsCount > 0 ? 'PARTIAL' : 'OUT') })
+    onClick: () => onNavigate('inventory', { status: 'OUT' })
   }));
 
   container.appendChild(kpiGrid);
@@ -5626,7 +5626,7 @@ function renderInventory(params = {}, onNavigate = null) {
       } else if (selectedStatus === 'LOW' || selectedStatus === 'LOW_STOCK') {
         matchStat = (p.status !== 'Inactive') && stockInfo.status === 'LOW_STOCK';
       } else if (selectedStatus === 'OUT' || selectedStatus === 'OUT_OF_STOCK') {
-        matchStat = (p.status !== 'Inactive') && stockInfo.status === 'OUT_OF_STOCK';
+        matchStat = (p.status !== 'Inactive') && (stockInfo.status === 'OUT_OF_STOCK' || stockInfo.outOfStockSizes > 0);
       } else if (selectedStatus === 'Inactive') {
         matchStat = (p.status === 'Inactive');
       }

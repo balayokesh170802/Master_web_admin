@@ -135,7 +135,7 @@ export function renderOverview(onNavigate) {
     subtext: outSubtext,
     icon: 'alert-circle',
     variant: (outCount > 0 || outVariantsCount > 0) ? 'danger' : 'default',
-    onClick: () => onNavigate('inventory', { status: outCount > 0 ? 'OUT' : (outVariantsCount > 0 ? 'PARTIAL' : 'OUT') })
+    onClick: () => onNavigate('inventory', { status: 'OUT' })
   }));
 
   container.appendChild(kpiGrid);
