@@ -2209,6 +2209,30 @@ class StoreManager {
     }
   }
 
+  deleteProduct(id) {
+    const idx = (this.data.products || []).findIndex(p => p.id === id);
+    if (idx === -1) throw new Error('Product not found.');
+    const deletedProduct = this.data.products[idx];
+    this.data.products.splice(idx, 1);
+
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+    this.data.stockMovements.unshift({
+      id: `MOV-DEL-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+      date: new Date().toLocaleString(),
+      product: deletedProduct.name,
+      productId: deletedProduct.id,
+      size: 'All',
+      sku: `${(deletedProduct.name || 'PRD').slice(0,3).toUpperCase()}-ALL`,
+      type: 'Delete Product',
+      quantity: -(deletedProduct.totalStock || 0),
+      reference: `DELETE-${deletedProduct.id}`,
+      user: 'Admin'
+    });
+
+    this.save();
+    return deletedProduct;
+  }
+
   adjustStock(sku, newStock, reason) {
     for (let p of (this.data.products || [])) {
       const variants = p.variants || [];
@@ -5693,6 +5717,10 @@ function renderInventory(params = {}, onNavigate = null) {
               <i data-lucide="pencil"></i>
               <span class="sr-only">Edit</span>
             </button>
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn delete-inv-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
+              <i data-lucide="trash-2"></i>
+              <span class="sr-only">Delete</span>
+            </button>
           </div>
         </td>
       `;
@@ -5739,6 +5767,26 @@ function renderInventory(params = {}, onNavigate = null) {
           openEditProductModal(p, () => renderInventoryTable());
         }
       });
+
+      const deleteInvBtn = tr.querySelector('.delete-inv-btn');
+      if (deleteInvBtn) {
+        deleteInvBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const confirmed = confirm(`Are you sure you want to delete "${p.name}" (${p.id})?\n\nThis will remove the product and all its size variants from inventory.`);
+          if (confirmed) {
+            try {
+              if (expandedProductIds.has(p.id)) {
+                expandedProductIds.delete(p.id);
+              }
+              store.deleteProduct(p.id);
+              toast.show({ message: `Product "${p.name}" deleted successfully.`, type: 'info' });
+              renderInventoryTable();
+            } catch (err) {
+              toast.show({ message: err.message, type: 'danger' });
+            }
+          }
+        });
+      }
 
       const parentAdjBtn = tr.querySelector('.adjust-inv-btn');
       if (parentAdjBtn) {
