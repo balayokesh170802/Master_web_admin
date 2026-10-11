@@ -4097,8 +4097,7 @@ function renderOverview(onNavigate) {
 }
 
 // HELPER: CALCULATE OVERALL PRODUCT STOCK STATUS ACCORDING TO SIZE-WISE RULES
-function getProductStockStatus(product) {
-  const customThreshold = arguments[1];
+function getProductStockStatus(product, customThreshold) {
   if (!product) {
     return {
       status: 'OUT_OF_STOCK',
@@ -4108,7 +4107,9 @@ function getProductStockStatus(product) {
       hasSizes: false,
       totalSizes: 0,
       availableSizes: 0,
-      outOfStockSizes: 0
+      outOfStockSizes: 0,
+      lowStockSizes: 0,
+      stockSummary: 'All sizes out of stock'
     };
   }
 
@@ -4121,7 +4122,9 @@ function getProductStockStatus(product) {
       hasSizes: false,
       totalSizes: 0,
       availableSizes: 0,
-      outOfStockSizes: 0
+      outOfStockSizes: 0,
+      lowStockSizes: 0,
+      stockSummary: 'Inactive'
     };
   }
 
@@ -4137,8 +4140,8 @@ function getProductStockStatus(product) {
     const totalSizes = variants.length;
     let availableSizes = 0;
     let outOfStockSizes = 0;
+    let lowStockSizes = 0;
     let totalStock = 0;
-    let hasLowStockSize = false;
 
     variants.forEach(v => {
       const stock = Math.max(0, Number(v.stock) || 0);
@@ -4148,13 +4151,14 @@ function getProductStockStatus(product) {
       } else {
         availableSizes++;
         if (stock <= threshold) {
-          hasLowStockSize = true;
+          lowStockSizes++;
         }
       }
     });
 
-    // Priority rules:
-    // 1. If all sizes have zero stock, show Out of Stock.
+    // Parent Status Priority:
+    // 1. All sizes have 0 stock → Out of Stock.
+    // Display: All sizes out of stock
     if (outOfStockSizes === totalSizes || totalStock === 0) {
       return {
         status: 'OUT_OF_STOCK',
@@ -4164,11 +4168,14 @@ function getProductStockStatus(product) {
         hasSizes: true,
         totalSizes,
         availableSizes,
-        outOfStockSizes
+        outOfStockSizes,
+        lowStockSizes,
+        stockSummary: 'All sizes out of stock'
       };
     }
 
-    // 2. If some sizes have stock and others have zero stock, show Partial Stock.
+    // 2. Some sizes have 0 stock and others have stock → Partial Stock.
+    // Display: X sizes out of stock, where X is the number of zero-stock sizes.
     if (availableSizes > 0 && outOfStockSizes > 0) {
       return {
         status: 'PARTIAL_STOCK',
@@ -4178,12 +4185,15 @@ function getProductStockStatus(product) {
         hasSizes: true,
         totalSizes,
         availableSizes,
-        outOfStockSizes
+        outOfStockSizes,
+        lowStockSizes,
+        stockSummary: `${outOfStockSizes} ${outOfStockSizes === 1 ? 'size' : 'sizes'} out of stock`
       };
     }
 
-    // 3. If no sizes are out of stock but at least one size is at or below the low-stock threshold, show Low Stock.
-    if (hasLowStockSize) {
+    // 3. No sizes have 0 stock, but at least one size is at or below the low-stock threshold → Low Stock.
+    // Display: Low stock in X sizes, where X is the number of low-stock sizes.
+    if (lowStockSizes > 0) {
       return {
         status: 'LOW_STOCK',
         label: 'Low Stock',
@@ -4192,11 +4202,14 @@ function getProductStockStatus(product) {
         hasSizes: true,
         totalSizes,
         availableSizes,
-        outOfStockSizes: 0
+        outOfStockSizes: 0,
+        lowStockSizes,
+        stockSummary: `Low stock in ${lowStockSizes} ${lowStockSizes === 1 ? 'size' : 'sizes'}`
       };
     }
 
-    // 4. Otherwise, show In Stock.
+    // 4. All sizes are above the threshold → In Stock.
+    // Display: All sizes in stock
     return {
       status: 'IN_STOCK',
       label: 'In Stock',
@@ -4205,7 +4218,9 @@ function getProductStockStatus(product) {
       hasSizes: true,
       totalSizes,
       availableSizes,
-      outOfStockSizes: 0
+      outOfStockSizes: 0,
+      lowStockSizes: 0,
+      stockSummary: 'All sizes in stock'
     };
   } else {
     // Products Without Sizes:
@@ -4224,7 +4239,9 @@ function getProductStockStatus(product) {
         hasSizes: false,
         totalSizes: 0,
         availableSizes: 0,
-        outOfStockSizes: 0
+        outOfStockSizes: 0,
+        lowStockSizes: 0,
+        stockSummary: 'All sizes out of stock'
       };
     }
 
@@ -4237,7 +4254,9 @@ function getProductStockStatus(product) {
         hasSizes: false,
         totalSizes: 0,
         availableSizes: 0,
-        outOfStockSizes: 0
+        outOfStockSizes: 0,
+        lowStockSizes: 1,
+        stockSummary: 'Low stock in 1 size'
       };
     }
 
@@ -4249,7 +4268,9 @@ function getProductStockStatus(product) {
       hasSizes: false,
       totalSizes: 0,
       availableSizes: 0,
-      outOfStockSizes: 0
+      outOfStockSizes: 0,
+      lowStockSizes: 0,
+      stockSummary: 'All sizes in stock'
     };
   }
 }
@@ -5670,13 +5691,13 @@ function renderInventory(params = {}, onNavigate = null) {
       // Subtitle under Total Available Stock for products with sizes
       let stockSubtitle = '';
       if (hasSizes) {
-        if (stockInfo.outOfStockSizes > 0) {
-          const isAllOut = stockInfo.outOfStockSizes === stockInfo.totalSizes;
-          const color = isAllOut ? 'var(--status-danger-text)' : 'var(--status-warning-text)';
-          stockSubtitle = `<div style="font-size: 0.75rem; font-weight: 500; color: ${color}; margin-top: 2px;">${stockInfo.outOfStockSizes} ${stockInfo.outOfStockSizes === 1 ? 'size' : 'sizes'} out of stock</div>`;
-        } else {
-          stockSubtitle = `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">All sizes in stock</div>`;
+        let subColor = 'var(--text-secondary)';
+        if (stockInfo.status === 'OUT_OF_STOCK') {
+          subColor = 'var(--status-danger-text)';
+        } else if (stockInfo.status === 'PARTIAL_STOCK' || stockInfo.status === 'LOW_STOCK') {
+          subColor = 'var(--status-warning-text)';
         }
+        stockSubtitle = `<div class="product-stock-summary" style="font-size: 0.75rem; font-weight: 500; color: ${subColor}; margin-top: 2px;">${stockInfo.stockSummary}</div>`;
       }
 
       // Main Product Row
