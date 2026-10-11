@@ -4521,111 +4521,89 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
         </div>
       </div>
 
-      <!-- Dedicated Stock Adjustment Form -->
+      <!-- Dedicated Stock Adjustment Form / Multi-Entries Panel -->
       <div id="manage-adjustment-form-panel" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1.15rem 1.25rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
-          <div style="font-size: 0.875rem; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 0.4rem;">
-            <i data-lucide="sliders" style="width: 16px; height: 16px; color: var(--brand-primary);"></i>
-            <span>Adjust Inventory Stock</span>
-          </div>
-          <div style="font-size: 0.75rem; color: var(--text-secondary);">Audit record will be generated automatically</div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin-bottom: 0.85rem;">
-          ${hasSizes ? `
-            <div class="form-group" style="margin: 0;">
-              <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
-                Size Variant <span style="color: var(--status-danger);">*</span>
-              </label>
-              <select id="manage-adj-size-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
-                ${variants.map(v => `<option value="${v.size}" ${v.size === initialSelectedSize ? 'selected' : ''}>Size ${v.size} (${v.stock || 0} available)</option>`).join('')}
-              </select>
-            </div>
-          ` : `
-            <input type="hidden" id="manage-adj-size-select" value="${initialSelectedSize}">
-          `}
-
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
-              Adjustment Type <span style="color: var(--status-danger);">*</span>
-            </label>
-            <select id="manage-adj-type-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
-              <option value="ADD" selected>Add Stock (+)</option>
-              <option value="REMOVE">Remove Stock (−)</option>
-            </select>
-          </div>
-
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
-              Quantity <span style="color: var(--status-danger);">*</span>
-            </label>
-            <input type="number" id="manage-adj-qty-input" class="form-input" min="1" step="1" value="1" placeholder="Enter positive whole number" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
-          </div>
-
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
-              Reason for Adjustment <span style="color: var(--status-danger);">*</span>
-            </label>
-            <select id="manage-adj-reason-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
-              ${ADD_STOCK_REASONS.map(r => `<option value="${r}">${r}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-
-        <div id="manage-adj-qty-error" style="font-size: 0.775rem; color: var(--status-danger); margin-bottom: 0.65rem; display: none;"></div>
-
-        <!-- Calculated New Stock Card -->
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.85rem; background: var(--bg-surface); margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
-          <div style="display: flex; align-items: center; gap: 0.65rem;">
-            <div style="color: var(--text-secondary); font-weight: 500;">
-              Selected Size Stock: <span id="manage-adj-cur-stock-label" style="font-weight: 600; color: var(--text-primary);">0 units</span>
-            </div>
-            <div id="manage-adj-cur-status-badge"></div>
-          </div>
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <span style="color: var(--text-secondary); font-weight: 500;">Calculated New Stock:</span>
-            <strong id="manage-adj-new-stock-label" style="font-size: 1.1rem; color: var(--brand-primary); font-weight: 700;">0 units</strong>
-          </div>
-        </div>
-
-        <div style="display: flex; justify-content: flex-end;">
-          <button type="button" id="manage-save-adj-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-size: 0.85rem; font-weight: 600;">
-            <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
-            <span>Save Adjustment</span>
-          </button>
-        </div>
       </div>
     `;
     container.appendChild(sec3Card);
 
-    // Stock Management Form Live Calculation & Handlers
-    const adjSizeSelect = sec3Card.querySelector('#manage-adj-size-select');
-    const adjTypeSelect = sec3Card.querySelector('#manage-adj-type-select');
-    const adjQtyInput = sec3Card.querySelector('#manage-adj-qty-input');
-    const adjReasonSelect = sec3Card.querySelector('#manage-adj-reason-select');
-    const curStockLabel = sec3Card.querySelector('#manage-adj-cur-stock-label');
-    const newStockLabel = sec3Card.querySelector('#manage-adj-new-stock-label');
-    const curStatusBadgeEl = sec3Card.querySelector('#manage-adj-cur-status-badge');
-    const qtyErrorEl = sec3Card.querySelector('#manage-adj-qty-error');
-    const saveAdjBtn = sec3Card.querySelector('#manage-save-adj-btn');
+    // Stock Management Multi-Adjustment State & Handlers
+    const adjPanel = sec3Card.querySelector('#manage-adjustment-form-panel');
+    let entryIdCounter = 1;
+    let adjustmentEntries = [];
 
-    function updateStockReasons(type) {
-      if (!adjReasonSelect) return;
-      const cur = adjReasonSelect.value;
-      const reasonsList = type === 'ADD' ? ADD_STOCK_REASONS : REMOVE_STOCK_REASONS;
-      adjReasonSelect.innerHTML = reasonsList.map(r => `<option value="${r}">${r}</option>`).join('');
-      if (reasonsList.includes(cur)) adjReasonSelect.value = cur;
-      else adjReasonSelect.value = reasonsList[0];
+    // If a specific size was requested in URL/params, initialize with an entry for that size
+    if (requestedSize && variants.some(v => v.size === requestedSize)) {
+      adjustmentEntries.push({
+        id: entryIdCounter++,
+        size: requestedSize,
+        type: 'ADD',
+        qty: 1,
+        reason: ADD_STOCK_REASONS[0]
+      });
     }
 
-    function calculateStockUpdate() {
-      const selectedSz = adjSizeSelect ? adjSizeSelect.value : (initialSelectedSize || (variants[0] && variants[0].size) || 'Standard');
-      activeSelectedSize = selectedSz;
+    function syncEntriesFromDOM() {
+      if (!adjPanel) return;
+      const cards = adjPanel.querySelectorAll('.adjustment-entry-card');
+      cards.forEach(card => {
+        const eid = Number(card.getAttribute('data-entry-id'));
+        const entry = adjustmentEntries.find(e => e.id === eid);
+        if (!entry) return;
+        const szSelect = card.querySelector('.manage-adj-size-select');
+        const typeSelect = card.querySelector('.manage-adj-type-select');
+        const qtyInp = card.querySelector('.manage-adj-qty-input');
+        const reasonSelect = card.querySelector('.manage-adj-reason-select');
+        if (szSelect) entry.size = szSelect.value;
+        if (typeSelect) entry.type = typeSelect.value;
+        if (qtyInp) {
+          const raw = (qtyInp.value || '').trim();
+          entry.rawQty = raw;
+          const parsed = parseInt(raw, 10);
+          entry.qty = (!isNaN(parsed) && parsed > 0) ? parsed : 1;
+        }
+        if (reasonSelect) entry.reason = reasonSelect.value;
+      });
+    }
+
+    function syncVariantHighlight() {
+      const activeSizes = new Set(adjustmentEntries.map(e => e.size));
+      if (activeSelectedSize) activeSizes.add(activeSelectedSize);
+      sec3Card.querySelectorAll('.variant-stock-row').forEach(row => {
+        const rowSz = row.getAttribute('data-variant-size');
+        const isSelected = rowSz === activeSelectedSize || activeSizes.has(rowSz);
+        if (isSelected) {
+          row.style.background = 'rgba(79, 70, 229, 0.08)';
+          row.classList.add('selected-variant-row');
+          const b = row.querySelector('.badge');
+          if (b) { b.classList.remove('badge-secondary'); b.classList.add('badge-primary'); }
+        } else {
+          row.style.background = '';
+          row.classList.remove('selected-variant-row');
+          const b = row.querySelector('.badge');
+          if (b) { b.classList.remove('badge-primary'); b.classList.add('badge-secondary'); }
+        }
+      });
+    }
+
+    function validateAndCalculateEntry(card) {
+      if (!card) return false;
+      const eid = Number(card.getAttribute('data-entry-id'));
+      const entry = adjustmentEntries.find(e => e.id === eid);
+      const szSelect = card.querySelector('.manage-adj-size-select');
+      const typeSelect = card.querySelector('.manage-adj-type-select');
+      const qtyInp = card.querySelector('.manage-adj-qty-input');
+      const curStockLabel = card.querySelector('.manage-adj-cur-stock-label');
+      const curStatusBadgeEl = card.querySelector('.manage-adj-cur-status-badge');
+      const newStockLabel = card.querySelector('.manage-adj-new-stock-label');
+      const qtyErrorEl = card.querySelector('.manage-adj-entry-error');
+
+      const selectedSz = szSelect ? szSelect.value : (entry ? entry.size : (variants[0] && variants[0].size));
       const targetVar = variants.find(v => v.size === selectedSz) || variants[0];
       const curStock = targetVar ? (Number(targetVar.stock) || 0) : 0;
       const curStatus = getSizeStockStatus(curStock, lowStockThreshold);
-      const type = adjTypeSelect ? adjTypeSelect.value : 'ADD';
-      const rawQty = (adjQtyInput ? adjQtyInput.value : '').trim();
+      const type = typeSelect ? typeSelect.value : (entry ? entry.type : 'ADD');
+      const rawQty = (qtyInp ? qtyInp.value : (entry ? String(entry.qty) : '1')).trim();
       const numQty = Number(rawQty);
       const parsedQty = parseInt(rawQty, 10);
 
@@ -4641,8 +4619,8 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           qtyErrorEl.textContent = 'Please enter a positive whole number quantity (1 or greater).';
           qtyErrorEl.style.display = 'block';
         }
-        if (adjQtyInput) adjQtyInput.style.borderColor = 'var(--status-danger)';
-        if (newStockLabel) newStockLabel.innerHTML = `<span style="color: var(--text-secondary); font-size: 0.9rem;">Invalid quantity</span>`;
+        if (qtyInp) qtyInp.style.borderColor = 'var(--status-danger)';
+        if (newStockLabel) newStockLabel.innerHTML = `<span style="color: var(--text-secondary); font-size: 0.85rem;">Invalid quantity</span>`;
       } else if (type === 'REMOVE' && parsedQty > curStock) {
         hasErr = true;
         const deficit = curStock - parsedQty;
@@ -4650,150 +4628,433 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           qtyErrorEl.textContent = `Cannot remove ${parsedQty} units. Maximum available stock is ${curStock} units. (Negative stock prevented)`;
           qtyErrorEl.style.display = 'block';
         }
-        if (adjQtyInput) adjQtyInput.style.borderColor = 'var(--status-danger)';
-        if (newStockLabel) newStockLabel.innerHTML = `<span style="color: var(--status-danger); font-size: 0.95rem;">${deficit} units (Negative stock prevented)</span>`;
+        if (qtyInp) qtyInp.style.borderColor = 'var(--status-danger)';
+        if (newStockLabel) newStockLabel.innerHTML = `<span style="color: var(--status-danger); font-size: 0.875rem; font-weight: 600;">${deficit} units (Negative stock prevented)</span>`;
       } else {
         if (qtyErrorEl) qtyErrorEl.style.display = 'none';
-        if (adjQtyInput) adjQtyInput.style.borderColor = '';
+        if (qtyInp) qtyInp.style.borderColor = '';
         const computedNew = type === 'ADD' ? (curStock + parsedQty) : (curStock - parsedQty);
-        if (newStockLabel) newStockLabel.innerHTML = `<span style="color: var(--brand-primary); font-weight: 700;">${computedNew} units</span>`;
+        const sign = type === 'ADD' ? '+' : '−';
+        if (newStockLabel) {
+          newStockLabel.innerHTML = `<strong style="color: var(--brand-primary); font-size: 0.95rem;">${computedNew} units</strong> <span style="font-size: 0.775rem; color: var(--text-secondary); margin-left: 0.25rem;">(${sign}${parsedQty})</span>`;
+        }
       }
 
       return !hasErr;
     }
 
-    function syncVariantHighlight() {
-      sec3Card.querySelectorAll('.variant-stock-row').forEach(row => {
-        const rowSz = row.getAttribute('data-variant-size');
-        if (rowSz === activeSelectedSize) {
-          row.style.background = 'rgba(79, 70, 229, 0.08)';
-          row.classList.add('selected-variant-row');
-          const b = row.querySelector('.badge');
-          if (b) { b.classList.remove('badge-secondary'); b.classList.add('badge-primary'); }
-        } else {
-          row.style.background = '';
-          row.classList.remove('selected-variant-row');
-          const b = row.querySelector('.badge');
-          if (b) { b.classList.remove('badge-primary'); b.classList.add('badge-secondary'); }
-        }
+    function renderAdjustmentEntries() {
+      if (!adjPanel) return;
+
+      if (adjustmentEntries.length === 0) {
+        adjPanel.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <i data-lucide="sliders" style="width: 16px; height: 16px; color: var(--brand-primary);"></i>
+              <h4 style="margin: 0; font-size: 0.95rem; font-weight: 600; color: var(--text-primary);">Adjust Inventory Stock</h4>
+            </div>
+            <button type="button" class="btn btn-sm btn-primary add-new-adj-entry-btn" style="padding: 0.35rem 0.75rem; font-size: 0.775rem;">
+              <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+              <span>Add Adjustment Entry</span>
+            </button>
+          </div>
+          <div style="text-align: center; padding: 2.25rem 1.5rem; background: var(--bg-surface); border: 1px dashed var(--border-color); border-radius: var(--radius-sm);">
+            <i data-lucide="layers" style="width: 32px; height: 32px; margin-bottom: 0.5rem; opacity: 0.4; color: var(--text-secondary);"></i>
+            <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary); margin-bottom: 0.35rem;">No Adjustment Entries Added</div>
+            <div style="font-size: 0.8rem; color: var(--text-secondary); max-width: 480px; margin: 0 auto 1.15rem; line-height: 1.4;">
+              Click <strong>Add Stock</strong> or <strong>Remove Stock</strong> for any size in the table above to queue adjustments, or click below to add an entry manually.
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary add-new-adj-entry-btn">
+              <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+              <span>+ Add Adjustment Entry</span>
+            </button>
+          </div>
+          <div style="display: none;">
+            <select id="manage-adj-size-select"><option value="${initialSelectedSize}">${initialSelectedSize}</option></select>
+            <select id="manage-adj-type-select"><option value="ADD">Add Stock (+)</option></select>
+            <input type="number" id="manage-adj-qty-input" value="1" />
+            <select id="manage-adj-reason-select"><option value="${ADD_STOCK_REASONS[0]}">${ADD_STOCK_REASONS[0]}</option></select>
+            <span id="manage-adj-cur-status-badge"></span>
+            <span id="manage-adj-cur-stock-label"></span>
+            <span id="manage-adj-new-stock-label"></span>
+            <div id="manage-adj-qty-error"></div>
+          </div>
+        `;
+        if (typeof lucide !== 'undefined') lucide.createIcons({ root: adjPanel });
+
+        adjPanel.querySelectorAll('.add-new-adj-entry-btn').forEach(btn => {
+          btn.onclick = () => {
+            addAdjustmentEntry(initialSelectedSize, 'ADD');
+          };
+        });
+        return;
+      }
+
+      // Render Entries List
+      let entriesHtml = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color);">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="sliders" style="width: 16px; height: 16px; color: var(--brand-primary);"></i>
+            <h4 style="margin: 0; font-size: 0.95rem; font-weight: 600; color: var(--text-primary);">Adjust Inventory Stock</h4>
+            <span class="badge badge-primary" style="font-size: 0.725rem; padding: 0.15rem 0.5rem; border-radius: 999px;">
+              ${adjustmentEntries.length} ${adjustmentEntries.length === 1 ? 'entry' : 'entries'}
+            </span>
+          </div>
+          <button type="button" class="btn btn-sm btn-secondary add-new-adj-entry-btn" style="padding: 0.35rem 0.75rem; font-size: 0.775rem;">
+            <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+            <span>Add Another Entry</span>
+          </button>
+        </div>
+
+        <div class="adjustment-entries-container" style="display: flex; flex-direction: column; gap: 0.85rem;">
+      `;
+
+      adjustmentEntries.forEach((entry, index) => {
+        const targetVar = variants.find(v => v.size === entry.size) || variants[0];
+        const curStock = targetVar ? (Number(targetVar.stock) || 0) : 0;
+        const curStatus = getSizeStockStatus(curStock, lowStockThreshold);
+        const reasonsList = entry.type === 'ADD' ? ADD_STOCK_REASONS : REMOVE_STOCK_REASONS;
+
+        entriesHtml += `
+          <div class="adjustment-entry-card" data-entry-id="${entry.id}" style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem 1.15rem; transition: border-color 0.2s ease;">
+            <!-- Entry Header -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border-color);">
+              <div style="display: flex; align-items: center; gap: 0.6rem;">
+                <span style="font-weight: 700; font-size: 0.825rem; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.03em;">Entry #${index + 1}</span>
+                <span class="badge ${entry.type === 'ADD' ? 'badge-success' : 'badge-danger'}" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">
+                  <i data-lucide="${entry.type === 'ADD' ? 'plus' : 'minus'}" style="width: 12px; height: 12px; margin-right: 3px;"></i>
+                  ${entry.type === 'ADD' ? 'Add Stock' : 'Remove Stock'}
+                </span>
+                <span style="font-size: 0.8rem; color: var(--text-secondary);">Size: <strong style="color: var(--text-primary);">${hasSizes ? `Size ${entry.size}` : 'Standard'}</strong></span>
+              </div>
+              <button type="button" class="btn btn-sm btn-ghost remove-adj-entry-btn" data-entry-id="${entry.id}" title="Remove this adjustment entry" style="color: var(--status-danger); padding: 0.25rem 0.55rem; font-size: 0.775rem; display: flex; align-items: center; gap: 0.35rem;">
+                <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                <span>Remove Entry</span>
+              </button>
+            </div>
+
+            <!-- Form Grid -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-bottom: 0.75rem;">
+              <div>
+                <label class="form-label" style="font-size: 0.75rem; margin-bottom: 0.25rem;">Size Variant</label>
+                <select ${index === 0 ? 'id="manage-adj-size-select"' : ''} class="form-input manage-adj-size-select" data-entry-id="${entry.id}" style="font-size: 0.825rem; padding: 0.45rem 0.65rem;">
+                  ${variants.map(v => `
+                    <option value="${v.size}" ${v.size === entry.size ? 'selected' : (v.size === initialSelectedSize ? 'selected' : '')}>
+                      ${hasSizes ? `Size ${v.size}` : 'Standard'} (Current: ${v.stock || 0} units)
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
+
+              <div>
+                <label class="form-label" style="font-size: 0.75rem; margin-bottom: 0.25rem;">Adjustment Type</label>
+                <select ${index === 0 ? 'id="manage-adj-type-select"' : ''} class="form-input manage-adj-type-select" data-entry-id="${entry.id}" style="font-size: 0.825rem; padding: 0.45rem 0.65rem;">
+                  <option value="ADD" ${entry.type === 'ADD' ? 'selected' : ''}>Add Stock (+)</option>
+                  <option value="REMOVE" ${entry.type === 'REMOVE' ? 'selected' : ''}>Remove Stock (−)</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="form-label" style="font-size: 0.75rem; margin-bottom: 0.25rem;">Quantity (Units)</label>
+                <input type="number" min="1" step="1" ${index === 0 ? 'id="manage-adj-qty-input"' : ''} class="form-input manage-adj-qty-input" data-entry-id="${entry.id}" value="${entry.qty}" placeholder="e.g. 5" style="font-size: 0.825rem; padding: 0.45rem 0.65rem;">
+              </div>
+
+              <div>
+                <label class="form-label" style="font-size: 0.75rem; margin-bottom: 0.25rem;">Reason for Adjustment</label>
+                <select ${index === 0 ? 'id="manage-adj-reason-select"' : ''} class="form-input manage-adj-reason-select" data-entry-id="${entry.id}" style="font-size: 0.825rem; padding: 0.45rem 0.65rem;">
+                  ${reasonsList.map(r => `
+                    <option value="${r}" ${entry.reason === r ? 'selected' : ''}>${r}</option>
+                  `).join('')}
+                </select>
+              </div>
+            </div>
+
+            <!-- Error container -->
+            <div ${index === 0 ? 'id="manage-adj-qty-error"' : ''} class="manage-adj-entry-error" style="display: none; color: var(--status-danger); font-size: 0.775rem; margin-bottom: 0.6rem; font-weight: 500;"></div>
+
+            <!-- Stock Preview bar -->
+            <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.6rem 0.85rem; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; font-size: 0.825rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="color: var(--text-secondary);">Current Available:</span>
+                <strong ${index === 0 ? 'id="manage-adj-cur-stock-label"' : ''} class="manage-adj-cur-stock-label" style="color: var(--text-primary); font-size: 0.875rem;">${curStock} units</strong>
+                <span ${index === 0 ? 'id="manage-adj-cur-status-badge"' : ''} class="manage-adj-cur-status-badge">
+                  ${createBadge({ label: curStatus.label, variant: curStatus.variant }).outerHTML}
+                </span>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="arrow-right" style="width: 14px; height: 14px; color: var(--text-secondary);"></i>
+                <span style="color: var(--text-secondary);">Calculated New Stock:</span>
+                <span ${index === 0 ? 'id="manage-adj-new-stock-label"' : ''} class="manage-adj-new-stock-label"></span>
+              </div>
+            </div>
+          </div>
+        `;
       });
+
+      entriesHtml += `
+        </div>
+
+        <!-- Action Bar Footer -->
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.75rem; margin-top: 1.15rem; padding-top: 0.95rem; border-top: 1px solid var(--border-color);">
+          <div style="display: flex; align-items: center; gap: 0.65rem;">
+            <button type="button" class="btn btn-sm btn-secondary add-new-adj-entry-btn" style="padding: 0.45rem 0.85rem;">
+              <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+              <span>+ Add Another Adjustment</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-ghost clear-all-adj-entries-btn" style="color: var(--text-secondary); padding: 0.45rem 0.75rem;">
+              <i data-lucide="x" style="width: 14px; height: 14px;"></i>
+              <span>Clear All</span>
+            </button>
+            <span style="font-size: 0.8rem; color: var(--text-secondary);">
+              Total: <strong style="color: var(--text-primary);">${adjustmentEntries.length} ${adjustmentEntries.length === 1 ? 'adjustment' : 'adjustments'}</strong> queued
+            </span>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <button type="button" id="manage-save-adj-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-weight: 600; display: flex; align-items: center; gap: 0.45rem;">
+              <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+              <span>Save All Adjustments</span>
+            </button>
+          </div>
+        </div>
+      `;
+
+      adjPanel.innerHTML = entriesHtml;
+      if (typeof lucide !== 'undefined') lucide.createIcons({ root: adjPanel });
+
+      // Wire up card elements and listeners
+      const cards = adjPanel.querySelectorAll('.adjustment-entry-card');
+      cards.forEach(card => {
+        const eid = Number(card.getAttribute('data-entry-id'));
+        const entry = adjustmentEntries.find(e => e.id === eid);
+        if (!entry) return;
+
+        const szSelect = card.querySelector('.manage-adj-size-select');
+        const typeSelect = card.querySelector('.manage-adj-type-select');
+        const qtyInp = card.querySelector('.manage-adj-qty-input');
+        const reasonSelect = card.querySelector('.manage-adj-reason-select');
+        const removeBtn = card.querySelector('.remove-adj-entry-btn');
+
+        if (szSelect) {
+          szSelect.onchange = () => {
+            entry.size = szSelect.value;
+            activeSelectedSize = szSelect.value;
+            validateAndCalculateEntry(card);
+            syncVariantHighlight();
+          };
+        }
+
+        if (typeSelect) {
+          typeSelect.onchange = () => {
+            const newType = typeSelect.value;
+            entry.type = newType;
+            const reasonsList = newType === 'ADD' ? ADD_STOCK_REASONS : REMOVE_STOCK_REASONS;
+            const curReason = reasonSelect ? reasonSelect.value : '';
+            if (reasonSelect) {
+              reasonSelect.innerHTML = reasonsList.map(r => `<option value="${r}">${r}</option>`).join('');
+              if (reasonsList.includes(curReason)) {
+                reasonSelect.value = curReason;
+                entry.reason = curReason;
+              } else {
+                reasonSelect.value = reasonsList[0];
+                entry.reason = reasonsList[0];
+              }
+            }
+            const headerBadge = card.querySelector('.badge');
+            if (headerBadge) {
+              headerBadge.className = `badge ${newType === 'ADD' ? 'badge-success' : 'badge-danger'}`;
+              headerBadge.innerHTML = `<i data-lucide="${newType === 'ADD' ? 'plus' : 'minus'}" style="width: 12px; height: 12px; margin-right: 3px;"></i>${newType === 'ADD' ? 'Add Stock' : 'Remove Stock'}`;
+              if (typeof lucide !== 'undefined') lucide.createIcons({ root: headerBadge });
+            }
+            validateAndCalculateEntry(card);
+          };
+        }
+
+        if (qtyInp) {
+          qtyInp.oninput = () => {
+            entry.rawQty = qtyInp.value;
+            const parsed = parseInt(qtyInp.value, 10);
+            if (!isNaN(parsed)) entry.qty = parsed;
+            validateAndCalculateEntry(card);
+          };
+        }
+
+        if (reasonSelect) {
+          reasonSelect.onchange = () => {
+            entry.reason = reasonSelect.value;
+          };
+        }
+
+        if (removeBtn) {
+          removeBtn.onclick = () => {
+            syncEntriesFromDOM();
+            adjustmentEntries = adjustmentEntries.filter(e => e.id !== eid);
+            renderAdjustmentEntries();
+            syncVariantHighlight();
+          };
+        }
+
+        // Calculate initial preview
+        validateAndCalculateEntry(card);
+      });
+
+      // Wire bottom / top buttons
+      adjPanel.querySelectorAll('.add-new-adj-entry-btn').forEach(btn => {
+        btn.onclick = () => {
+          addAdjustmentEntry(initialSelectedSize, 'ADD');
+        };
+      });
+
+      const clearAllBtn = adjPanel.querySelector('.clear-all-adj-entries-btn');
+      if (clearAllBtn) {
+        clearAllBtn.onclick = () => {
+          adjustmentEntries = [];
+          renderAdjustmentEntries();
+          syncVariantHighlight();
+        };
+      }
+
+      const saveAllBtn = adjPanel.querySelector('#manage-save-adj-btn');
+      if (saveAllBtn) {
+        saveAllBtn.onclick = handleSaveAllAdjustments;
+      }
     }
 
-    if (adjSizeSelect) adjSizeSelect.onchange = () => {
-      activeSelectedSize = adjSizeSelect.value;
-      if (adjQtyInput) adjQtyInput.value = '1';
-      calculateStockUpdate();
+    function addAdjustmentEntry(sz, type = 'ADD') {
+      syncEntriesFromDOM();
+      const selectedSz = sz || (initialSelectedSize || (variants[0] && variants[0].size) || 'Standard');
+      activeSelectedSize = selectedSz;
+      const reasonsList = type === 'ADD' ? ADD_STOCK_REASONS : REMOVE_STOCK_REASONS;
+      const newEntry = {
+        id: entryIdCounter++,
+        size: selectedSz,
+        type: type,
+        qty: 1,
+        reason: reasonsList[0]
+      };
+      adjustmentEntries.push(newEntry);
+      renderAdjustmentEntries();
       syncVariantHighlight();
-    };
-    if (adjTypeSelect) adjTypeSelect.onchange = () => {
-      if (adjQtyInput) adjQtyInput.value = '1';
-      updateStockReasons(adjTypeSelect.value);
-      calculateStockUpdate();
-    };
-    if (adjQtyInput) adjQtyInput.oninput = calculateStockUpdate;
+      if (adjPanel) {
+        adjPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      setTimeout(() => {
+        const card = adjPanel.querySelector(`.adjustment-entry-card[data-entry-id="${newEntry.id}"]`);
+        if (card) {
+          const qInp = card.querySelector('.manage-adj-qty-input');
+          if (qInp) {
+            qInp.focus();
+            qInp.select();
+          }
+        }
+      }, 50);
+    }
 
-    calculateStockUpdate();
-
-    // Quick Action button listeners
+    // Quick Action button listeners in table
     sec3Card.querySelectorAll('.quick-add-stock-btn').forEach(btn => {
       btn.onclick = () => {
         const sz = btn.getAttribute('data-size');
-        activeSelectedSize = sz;
-        if (adjSizeSelect) adjSizeSelect.value = sz;
-        if (adjTypeSelect) {
-          adjTypeSelect.value = 'ADD';
-          updateStockReasons('ADD');
-        }
-        if (adjQtyInput) adjQtyInput.value = '1';
-        calculateStockUpdate();
-        syncVariantHighlight();
-        const panel = sec3Card.querySelector('#manage-adjustment-form-panel');
-        if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        if (adjQtyInput) {
-          adjQtyInput.focus();
-          adjQtyInput.select();
-        }
+        addAdjustmentEntry(sz, 'ADD');
       };
     });
 
     sec3Card.querySelectorAll('.quick-remove-stock-btn').forEach(btn => {
       btn.onclick = () => {
         const sz = btn.getAttribute('data-size');
-        activeSelectedSize = sz;
-        if (adjSizeSelect) adjSizeSelect.value = sz;
-        if (adjTypeSelect) {
-          adjTypeSelect.value = 'REMOVE';
-          updateStockReasons('REMOVE');
-        }
-        if (adjQtyInput) adjQtyInput.value = '1';
-        calculateStockUpdate();
-        syncVariantHighlight();
-        const panel = sec3Card.querySelector('#manage-adjustment-form-panel');
-        if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        if (adjQtyInput) {
-          adjQtyInput.focus();
-          adjQtyInput.select();
-        }
+        addAdjustmentEntry(sz, 'REMOVE');
       };
     });
 
-    // Save Adjustment Handler
+    // Save All Adjustments handler
     let isSavingAdj = false;
-    saveAdjBtn.onclick = () => {
+    async function handleSaveAllAdjustments() {
       if (isSavingAdj) return;
-      const isValid = calculateStockUpdate();
-      if (!isValid) return;
-
-      const targetSz = adjSizeSelect ? adjSizeSelect.value : (initialSelectedSize || (variants[0] && variants[0].size) || 'Standard');
-      const targetVar = variants.find(v => v.size === targetSz) || variants[0];
-      const curStock = targetVar ? (Number(targetVar.stock) || 0) : 0;
-      const type = adjTypeSelect ? adjTypeSelect.value : 'ADD';
-      const rawQty = (adjQtyInput ? adjQtyInput.value : '').trim();
-      const qty = parseInt(rawQty, 10);
-      const reason = (adjReasonSelect ? adjReasonSelect.value : '').trim();
-
-      if (!qty || isNaN(qty) || qty <= 0) {
-        toast.show({ message: 'Quantity must be a positive whole number.', type: 'danger' });
-        if (adjQtyInput) adjQtyInput.focus();
+      if (!adjustmentEntries || adjustmentEntries.length === 0) {
+        toast.show({ message: 'No adjustment entries to save. Please add at least one adjustment.', type: 'warning' });
         return;
       }
 
-      if (type === 'REMOVE' && qty > curStock) {
-        toast.show({ message: `Cannot remove ${qty} units. Maximum available stock is ${curStock} units.`, type: 'danger' });
-        if (adjQtyInput) adjQtyInput.focus();
+      syncEntriesFromDOM();
+
+      const cards = adjPanel.querySelectorAll('.adjustment-entry-card');
+      let hasErrors = false;
+      cards.forEach(card => {
+        const valid = validateAndCalculateEntry(card);
+        if (!valid) hasErrors = true;
+      });
+
+      if (hasErrors) {
+        toast.show({ message: 'Please fix invalid quantities or negative stock before saving.', type: 'danger' });
         return;
       }
 
-      if (!reason) {
-        toast.show({ message: 'Please select a reason for the adjustment.', type: 'danger' });
-        if (adjReasonSelect) adjReasonSelect.focus();
-        return;
+      // Check cumulative removals per size
+      const removalTotalsBySize = {};
+      for (const entry of adjustmentEntries) {
+        if (entry.type === 'REMOVE') {
+          removalTotalsBySize[entry.size] = (removalTotalsBySize[entry.size] || 0) + entry.qty;
+        }
+      }
+
+      for (const [sz, totalRemove] of Object.entries(removalTotalsBySize)) {
+        const v = variants.find(variant => variant.size === sz);
+        const available = v ? (Number(v.stock) || 0) : 0;
+        if (totalRemove > available) {
+          toast.show({
+            message: `Cannot remove total of ${totalRemove} units for Size ${sz}. Maximum available stock is ${available} units. (Negative stock prevented)`,
+            type: 'danger'
+          });
+          return;
+        }
       }
 
       isSavingAdj = true;
-      saveAdjBtn.disabled = true;
-      saveAdjBtn.style.opacity = '0.6';
+      const saveBtn = adjPanel.querySelector('#manage-save-adj-btn');
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.style.opacity = '0.6';
+      }
 
+      let appliedCount = 0;
+      const updatedSizes = [];
       try {
-        const result = store.adjustProductStock({
-          productId: product.id,
-          size: targetSz,
-          adjustmentType: type,
-          quantity: qty,
-          reason: reason
+        for (const entry of adjustmentEntries) {
+          const targetSz = entry.size;
+          const result = store.adjustProductStock({
+            productId: product.id,
+            size: targetSz,
+            adjustmentType: entry.type,
+            quantity: entry.qty,
+            reason: entry.reason
+          });
+          appliedCount++;
+          if (!updatedSizes.includes(targetSz)) {
+            updatedSizes.push(targetSz);
+          }
+          activeSelectedSize = targetSz;
+        }
+
+        toast.show({
+          message: `Stock adjusted successfully: ${appliedCount} adjustment${appliedCount > 1 ? 's' : ''} applied for ${product.name} (${updatedSizes.join(', ')}).`,
+          type: 'success'
         });
 
-        activeSelectedSize = targetSz;
-        const sizeLabel = (hasSizes && targetSz && targetSz !== 'Standard') ? ` (${targetSz})` : '';
-        toast.show({ message: `Stock adjusted successfully: ${product.name}${sizeLabel} updated to ${result.newStock} units.`, type: 'success' });
+        adjustmentEntries = [];
         renderPage();
       } catch (err) {
         toast.show({ message: err.message || 'Error saving stock adjustment.', type: 'danger' });
         isSavingAdj = false;
-        saveAdjBtn.disabled = false;
-        saveAdjBtn.style.opacity = '';
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.style.opacity = '';
+        }
       }
-    };
+    }
+
+    // Initial render of adjustment entries panel
+    renderAdjustmentEntries();
+    syncVariantHighlight();
 
     // 6. SECTION 04 — Stock History
     const sec4Card = document.createElement('div');
