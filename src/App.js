@@ -3833,7 +3833,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
 // 1. MOCK DATA & REACTIVE STORE MANAGER
 // ==========================================
 // OVERVIEW PAGE
-let activeOverviewSalesPeriod = '1W';
+let activeOverviewSalesPeriod = '1D';
 function renderOverview(onNavigate) {
   const container = document.createElement('div');
   container.className = 'page-container';
@@ -4027,7 +4027,49 @@ function renderOverview(onNavigate) {
     let startRevLabel = 'Start of Period';
     let endRevLabel = 'End of Period';
 
-    if (periodKey === '1W') {
+    if (periodKey === '1D') {
+      startRevLabel = 'Start of Day';
+      endRevLabel = 'End of Day';
+
+      const dayStart = new Date(refYear, refMonth, refDate, 0, 0, 0, 0).getTime();
+      const dayEnd = new Date(refYear, refMonth, refDate, 23, 59, 59, 999).getTime();
+
+      const todaySales = salesWithDates.filter(s => {
+        const t = s.date.getTime();
+        return t >= dayStart && t <= dayEnd;
+      });
+
+      const intervals = [
+        { label: '12 AM', startH: 0, endH: 2, rangeStr: '12:00 AM – 3:00 AM' },
+        { label: '3 AM', startH: 3, endH: 5, rangeStr: '3:00 AM – 6:00 AM' },
+        { label: '6 AM', startH: 6, endH: 8, rangeStr: '6:00 AM – 9:00 AM' },
+        { label: '9 AM', startH: 9, endH: 11, rangeStr: '9:00 AM – 12:00 PM' },
+        { label: '12 PM', startH: 12, endH: 14, rangeStr: '12:00 PM – 3:00 PM' },
+        { label: '3 PM', startH: 15, endH: 17, rangeStr: '3:00 PM – 6:00 PM' },
+        { label: '6 PM', startH: 18, endH: 20, rangeStr: '6:00 PM – 9:00 PM' },
+        { label: '9 PM', startH: 21, endH: 23, rangeStr: '9:00 PM – 12:00 AM' }
+      ];
+
+      intervals.forEach(iv => {
+        const slotStart = new Date(refYear, refMonth, refDate, iv.startH, 0, 0, 0).getTime();
+        const slotEnd = new Date(refYear, refMonth, refDate, iv.endH, 59, 59, 999).getTime();
+
+        const slotSales = todaySales.filter(s => {
+          const t = s.date.getTime();
+          return t >= slotStart && t <= slotEnd;
+        });
+
+        const rev = slotSales.reduce((sum, s) => sum + s.revenue, 0);
+        const cogs = slotSales.reduce((sum, s) => sum + s.cogs, 0);
+
+        buckets.push({
+          label: iv.label,
+          tooltipLabel: `${refDate} ${shortMonths[refMonth]} ${refYear} (${iv.rangeStr})`,
+          revenue: rev,
+          cogs: cogs
+        });
+      });
+    } else if (periodKey === '1W') {
       startRevLabel = 'Start of Week';
       endRevLabel = 'End of Week';
 
@@ -4208,7 +4250,7 @@ function renderOverview(onNavigate) {
         </div>
         
         <div style="display: flex; gap: 0.2rem; background: var(--bg-secondary); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-          ${['1W', '1M', '6M', '1Y'].map(p => `
+          ${['1D', '1W', '6M', '1Y'].map(p => `
             <button class="btn period-btn" data-period="${p}" style="padding: 0.25rem 0.6rem; font-size: 0.75rem; font-weight: 600; border: none; cursor: pointer;">${p}</button>
           `).join('')}
         </div>
@@ -4271,7 +4313,7 @@ function renderOverview(onNavigate) {
             ${ds.coords.map((c, idx) => `
               <circle cx="${c.x}" cy="${c.y}" r="4.5" class="chart-point-dot" data-index="${idx}" fill="var(--brand-primary)" stroke="var(--bg-surface)" stroke-width="2.5" style="transition: r 0.15s ease, stroke-width 0.15s ease;" />
               <circle cx="${c.x}" cy="${c.y}" r="16" class="chart-point-hit" data-index="${idx}" fill="transparent" style="cursor: pointer;" />
-              <text x="${c.x}" y="150" text-anchor="middle" fill="var(--text-secondary)" font-size="${periodKey === '1Y' ? '10' : '11'}" font-weight="500">${c.axisLabel}</text>
+              <text x="${c.x}" y="150" text-anchor="middle" fill="var(--text-secondary)" font-size="${periodKey === '1Y' || periodKey === '1D' ? '10' : '11'}" font-weight="500">${c.axisLabel}</text>
             `).join('')}
           </svg>
         </div>
