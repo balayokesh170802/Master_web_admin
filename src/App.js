@@ -9050,27 +9050,8 @@ function renderAddSalePage(onNavigate = null) {
 
     productsData.forEach((prod, pIdx) => {
       let candidateProducts = prods;
-      if (prod.brand && prod.brand.trim() !== '') {
-        candidateProducts = prods.filter(p => (p.brand || '').trim().toLowerCase() === prod.brand.trim().toLowerCase());
-      }
 
-      if (prod.productId && !candidateProducts.some(p => p.id === prod.productId)) {
-        if (candidateProducts.length > 0) {
-          prod.productId = candidateProducts[0].id;
-          prod.productName = candidateProducts[0].name;
-          prod.category = candidateProducts[0].category || 'General';
-          const newV = candidateProducts[0].variants;
-          prod.sizes = [{
-            id: 'ssize_' + Date.now() + '_1',
-            size: (newV && newV.length > 0) ? newV[0].size : 'Standard',
-            qty: 1
-          }];
-        } else {
-          prod.productId = '';
-          prod.productName = '';
-          prod.category = '—';
-        }
-      } else if (!prod.productId && candidateProducts.length > 0) {
+      if (!prod.productId && candidateProducts.length > 0) {
         prod.productId = candidateProducts[0].id;
         prod.productName = candidateProducts[0].name;
         prod.category = candidateProducts[0].category || 'General';
@@ -9196,15 +9177,19 @@ function renderAddSalePage(onNavigate = null) {
         <!-- Scrollable wrapper for compact product inputs & size grid -->
         <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
           <div style="min-width: 680px; display: flex; flex-direction: column; gap: 0.45rem;">
-            <!-- Horizontal Product Details Row: Product Name, Brand, Category -->
+            <!-- Horizontal Product Details Row: Product Name (Searchable Combobox), Brand, Category -->
             <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.55rem; align-items: end;">
-              <div class="form-group" style="margin: 0;">
+              <div class="form-group" style="margin: 0; position: relative;">
                 <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
-                <div style="display: flex; gap: 0.35rem; align-items: center;">
-                  <input type="text" class="form-input sale-prod-search" placeholder="🔍 Search..." value="${prod.searchQuery || ''}" style="width: 38%; height: 32px; padding: 0.25rem 0.45rem; font-size: 0.8rem; box-sizing: border-box;" title="Type to filter products">
-                  <select class="form-select sale-prod-select" style="flex: 1; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+                <div class="sale-combobox-container" style="position: relative; width: 100%;">
+                  <input type="text" class="form-input sale-combobox-input" placeholder="Search or select product..." autocomplete="off" spellcheck="false" value="${selectedProd ? `${selectedProd.name}${selectedProd.brand ? ' [' + selectedProd.brand + ']' : ''}` : ''}" style="width: 100%; height: 32px; padding: 0.25rem 1.85rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; cursor: pointer; text-overflow: ellipsis; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);" title="Click to search or select product">
+                  <div class="sale-combobox-chevron" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-secondary); display: flex; align-items: center;">
+                    <i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i>
+                  </div>
+                  <select class="form-select sale-prod-select" style="display: none;">
                     ${prodOptionsHtml}
                   </select>
+                  <div class="sale-combobox-menu" style="display: none; position: absolute; top: calc(100% + 2px); left: 0; right: 0; max-height: 220px; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: 1000; padding: 0.25rem 0;"></div>
                 </div>
               </div>
 
@@ -9253,31 +9238,207 @@ function renderAddSalePage(onNavigate = null) {
         </div>
       `;
 
-      const prodSearchInp = sectionEl.querySelector('.sale-prod-search');
+      const comboboxContainer = sectionEl.querySelector('.sale-combobox-container');
+      const comboboxInp = sectionEl.querySelector('.sale-combobox-input');
+      const comboboxMenu = sectionEl.querySelector('.sale-combobox-menu');
+      const comboboxChevron = sectionEl.querySelector('.sale-combobox-chevron');
       const prodSelect = sectionEl.querySelector('.sale-prod-select');
       const brandSelect = sectionEl.querySelector('.sale-brand-select');
       const removeProdBtn = sectionEl.querySelector('.sale-remove-product-btn');
       const addSizeBtn = sectionEl.querySelector('.sale-add-size-btn');
 
-      // 1. Live search input
-      prodSearchInp.addEventListener('input', (e) => {
-        prod.searchQuery = e.target.value;
-        const searchQ = (prod.searchQuery || '').toLowerCase().trim();
-        const filtered = candidateProducts.filter(p => !searchQ || p.name.toLowerCase().includes(searchQ) || (p.brand && p.brand.toLowerCase().includes(searchQ)));
-        if (filtered.length === 0) {
-          prodSelect.innerHTML = '<option value="" disabled>No products match</option>';
+      let activeHighlightIndex = -1;
+      let currentFilteredProducts = [];
+      let isMenuOpen = false;
+
+      function getFilteredProducts(filterText = '') {
+        const query = filterText.toLowerCase().trim();
+        return candidateProducts.filter(p => {
+          if (!query) return true;
+          const name = (p.name || '').toLowerCase();
+          const brand = (p.brand || '').toLowerCase();
+          const cat = (p.category || '').toLowerCase();
+          const fullLabel = `${name} [${brand}]`;
+          return name.includes(query) || brand.includes(query) || cat.includes(query) || fullLabel.includes(query);
+        });
+      }
+
+      function updateHighlight(index) {
+        const items = comboboxMenu.querySelectorAll('.sale-combobox-item');
+        items.forEach((el, i) => {
+          if (i === index) {
+            el.style.backgroundColor = 'var(--bg-secondary)';
+            el.scrollIntoView({ block: 'nearest' });
+          } else {
+            el.style.backgroundColor = (currentFilteredProducts[i] && currentFilteredProducts[i].id === prod.productId) ? 'var(--bg-secondary)' : '';
+          }
+        });
+        activeHighlightIndex = index;
+      }
+
+      function renderComboboxMenu(filterText = '') {
+        currentFilteredProducts = getFilteredProducts(filterText);
+        comboboxMenu.innerHTML = '';
+        activeHighlightIndex = -1;
+
+        if (currentFilteredProducts.length === 0) {
+          const emptyEl = document.createElement('div');
+          emptyEl.className = 'sale-combobox-empty';
+          emptyEl.style.cssText = 'padding: 0.65rem 0.75rem; font-size: 0.8rem; color: var(--text-secondary); text-align: center; font-style: italic;';
+          emptyEl.textContent = 'No matching products found';
+          comboboxMenu.appendChild(emptyEl);
         } else {
-          prodSelect.innerHTML = filtered.map(p => {
-            const bLabel = p.brand ? ` [${p.brand}]` : '';
-            return `<option value="${p.id}" ${p.id === prod.productId ? 'selected' : ''}>${p.name}${bLabel}</option>`;
-          }).join('');
+          currentFilteredProducts.forEach((p, idx) => {
+            const isSelected = p.id === prod.productId;
+            const itemEl = document.createElement('div');
+            itemEl.className = 'sale-combobox-item';
+            itemEl.setAttribute('data-product-id', p.id);
+            itemEl.setAttribute('role', 'option');
+            itemEl.style.cssText = `padding: 0.4rem 0.65rem; font-size: 0.825rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; transition: background 0.12s ease; ${isSelected ? 'background: var(--bg-secondary); font-weight: 600;' : ''}`;
+
+            const brandStr = p.brand ? ` [${p.brand}]` : '';
+            const priceVal = (p.sellingPrice || (p.variants && p.variants[0] ? p.variants[0].sellingPrice : 0));
+
+            itemEl.innerHTML = `
+              <div style="display: flex; align-items: center; gap: 0.35rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                <span style="color: var(--text-primary); font-weight: ${isSelected ? '700' : '500'};">${p.name}${brandStr}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0;">
+                <span style="font-size: 0.75rem; color: var(--brand-primary); font-weight: 600;">₹${priceVal.toLocaleString('en-IN')}</span>
+                ${isSelected ? '<i data-lucide="check" style="width: 13px; height: 13px; color: var(--brand-primary);"></i>' : ''}
+              </div>
+            `;
+
+            itemEl.addEventListener('mouseenter', () => {
+              updateHighlight(idx);
+            });
+
+            itemEl.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              applyProductSelection(p);
+            });
+
+            comboboxMenu.appendChild(itemEl);
+          });
+          if (window.lucide) window.lucide.createIcons();
+        }
+      }
+
+      function openCombobox() {
+        if (isMenuOpen) return;
+        isMenuOpen = true;
+        renderComboboxMenu('');
+        comboboxMenu.style.display = 'block';
+        if (comboboxChevron) {
+          comboboxChevron.style.transform = 'translateY(-50%) rotate(180deg)';
+          comboboxChevron.style.transition = 'transform 0.15s ease';
+        }
+      }
+
+      function closeCombobox(restoreText = true) {
+        if (!isMenuOpen) return;
+        isMenuOpen = false;
+        comboboxMenu.style.display = 'none';
+        if (comboboxChevron) {
+          comboboxChevron.style.transform = 'translateY(-50%)';
+        }
+        activeHighlightIndex = -1;
+        if (restoreText) {
+          if (selectedProd) {
+            comboboxInp.value = `${selectedProd.name}${selectedProd.brand ? ' [' + selectedProd.brand + ']' : ''}`;
+          } else {
+            comboboxInp.value = '';
+          }
+        }
+      }
+
+      function applyProductSelection(p) {
+        prod.productId = p.id;
+        prod.productName = p.name;
+        prod.brand = (p.brand || '').trim();
+        prod.category = p.category || 'General';
+        const newV = p.variants;
+        prod.sizes = [{
+          id: 'ssize_' + Date.now() + '_1',
+          size: (newV && newV.length > 0) ? newV[0].size : 'Standard',
+          qty: 1
+        }];
+        comboboxInp.value = `${p.name}${p.brand ? ' [' + p.brand + ']' : ''}`;
+        if (prodSelect) {
+          prodSelect.value = p.id;
+        }
+        closeCombobox(false);
+        renderSaleItems();
+        updateSaleSummary();
+      }
+
+      // Combobox Interaction Events
+      comboboxInp.addEventListener('focus', () => {
+        openCombobox();
+        comboboxInp.select();
+      });
+
+      comboboxInp.addEventListener('click', () => {
+        if (!isMenuOpen) {
+          openCombobox();
+          comboboxInp.select();
         }
       });
 
-      // 2. Product select change
+      comboboxInp.addEventListener('input', (e) => {
+        if (!isMenuOpen) {
+          isMenuOpen = true;
+          comboboxMenu.style.display = 'block';
+          if (comboboxChevron) {
+            comboboxChevron.style.transform = 'translateY(-50%) rotate(180deg)';
+          }
+        }
+        renderComboboxMenu(e.target.value);
+      });
+
+      comboboxInp.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (!isMenuOpen) {
+            openCombobox();
+          } else if (currentFilteredProducts.length > 0) {
+            const nextIdx = (activeHighlightIndex + 1) % currentFilteredProducts.length;
+            updateHighlight(nextIdx);
+          }
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (isMenuOpen && currentFilteredProducts.length > 0) {
+            const prevIdx = (activeHighlightIndex - 1 + currentFilteredProducts.length) % currentFilteredProducts.length;
+            updateHighlight(prevIdx);
+          }
+        } else if (e.key === 'Enter') {
+          if (isMenuOpen) {
+            e.preventDefault();
+            if (activeHighlightIndex >= 0 && activeHighlightIndex < currentFilteredProducts.length) {
+              applyProductSelection(currentFilteredProducts[activeHighlightIndex]);
+            } else if (currentFilteredProducts.length > 0) {
+              applyProductSelection(currentFilteredProducts[0]);
+            }
+          }
+        } else if (e.key === 'Escape') {
+          if (isMenuOpen) {
+            e.preventDefault();
+            closeCombobox(true);
+          }
+        } else if (e.key === 'Tab') {
+          closeCombobox(true);
+        }
+      });
+
+      comboboxInp.addEventListener('blur', () => {
+        setTimeout(() => {
+          closeCombobox(true);
+        }, 180);
+      });
+
+      // Product select change (fallback for programmatic interaction)
       prodSelect.addEventListener('change', (e) => {
         prod.productId = e.target.value;
-        prod.searchQuery = '';
         const newP = prods.find(p => p.id === prod.productId);
         if (newP) {
           prod.productName = newP.name;
