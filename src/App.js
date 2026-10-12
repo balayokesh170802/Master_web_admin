@@ -7724,21 +7724,21 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     </div>
 
     <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS (Manual Entry Rows) -->
-    <div style="display: flex; flex-direction: column; gap: 1.25rem;">
-      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
         <div>
           <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
             <i data-lucide="boxes" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
             Product & Size-wise Items
           </h3>
-          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
             Enter product details manually (Name, Category, Brand) and add size-wise quantities and prices.
           </p>
         </div>
       </div>
 
       <!-- Items List Container -->
-      <div id="pur-items-container" style="display: flex; flex-direction: column; gap: 0.85rem;"></div>
+      <div id="pur-items-container" style="display: flex; flex-direction: column; gap: 0.55rem;"></div>
 
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding-top: 0.5rem;">
         <button type="button" id="btn-add-pur-item" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
@@ -7833,7 +7833,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     purchaseItemsData.forEach((item, index) => {
       const row = document.createElement('div');
       row.className = 'purchase-item-card';
-      row.style.cssText = 'display: flex; flex-direction: column; gap: 0.75rem; padding: 0.95rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
+      row.style.cssText = 'display: flex; flex-direction: column; gap: 0.45rem; padding: 0.65rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);';
 
       const q = parseInt(item.qty, 10) || 0;
       const bPrice = parseFloat(item.buyingPrice) !== undefined ? parseFloat(item.buyingPrice) : 200;
@@ -7853,85 +7853,97 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       const sameProdCount = purchaseItemsData.filter(i => (i.productName || '').trim().toLowerCase() === (item.productName || '').trim().toLowerCase()).length;
 
       row.innerHTML = `
-        <!-- Tier 1: Product Definition (Name, Category, Brand, Actions) -->
-        <div style="display: grid; grid-template-columns: 2fr 1.3fr 1.3fr auto; gap: 0.75rem; align-items: end;">
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product Name <span style="color: #ef4444;">*</span></label>
-            <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${item.productName || ''}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
-          </div>
-          <div class="form-group pur-cat-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Category <span style="color: #ef4444;">*</span></label>
-            <div class="pur-cat-container" style="position: relative; width: 100%;">
-              <select class="form-select pur-cat-select" style="display: ${isCustomCat ? 'none' : 'block'}; padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500; width: 100%;">
-                <option value="">Select Category *</option>
-                ${categoriesList.map(c => `<option value="${c}" ${(!isCustomCat && c === item.category) ? 'selected' : ''}>${c}</option>`).join('')}
-                <option value="__CUSTOM__">+ Custom Category...</option>
-              </select>
-              <div class="pur-cat-custom-wrapper" style="display: ${isCustomCat ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
-                <input type="text" class="form-input pur-cat-custom-input" placeholder="Enter category" value="${isCustomCat ? (item.category || '') : ''}" style="width: 100%; padding: 0.45rem 2.2rem 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
-                <button type="button" class="btn btn-ghost pur-cat-back-btn" title="Switch back to Category dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.25rem 0.35rem; height: 26px; width: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
-                  <i data-lucide="list" style="width: 14px; height: 14px;"></i>
+        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
+          <div style="min-width: 680px; display: flex; flex-direction: column; gap: 0.45rem;">
+            <!-- Row 1: Product Definition (Product Name, Category, Brand in one horizontal row, plus Remove) -->
+            <div style="display: grid; grid-template-columns: 2fr 1.25fr 1.25fr 34px; gap: 0.55rem; align-items: end;">
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
+                <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${item.productName || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+              </div>
+              <div class="form-group pur-cat-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Category <span style="color: #ef4444;">*</span></label>
+                <div class="pur-cat-container" style="position: relative; width: 100%;">
+                  <select class="form-select pur-cat-select" style="display: ${isCustomCat ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
+                    <option value="">Select Category *</option>
+                    ${categoriesList.map(c => `<option value="${c}" ${(!isCustomCat && c === item.category) ? 'selected' : ''}>${c}</option>`).join('')}
+                    <option value="__CUSTOM__">+ Custom Category...</option>
+                  </select>
+                  <div class="pur-cat-custom-wrapper" style="display: ${isCustomCat ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
+                    <input type="text" class="form-input pur-cat-custom-input" placeholder="Enter category" value="${isCustomCat ? (item.category || '') : ''}" style="width: 100%; height: 32px; padding: 0.25rem 2rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; box-sizing: border-box;">
+                    <button type="button" class="btn btn-ghost pur-cat-back-btn" title="Switch back to Category dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.15rem; height: 24px; width: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
+                      <i data-lucide="list" style="width: 13px; height: 13px;"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Brand</label>
+                <input type="text" class="form-input pur-brand-input" placeholder="e.g. ClassicFit" list="pur-brands-list" value="${item.brand || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; box-sizing: border-box;">
+              </div>
+              <div style="display: flex; justify-content: flex-end; align-items: flex-end;">
+                <button type="button" class="btn btn-ghost pur-remove-btn" style="height: 32px; width: 32px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);" title="Remove this row">
+                  <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
                 </button>
               </div>
             </div>
-          </div>
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Brand</label>
-            <input type="text" class="form-input pur-brand-input" placeholder="e.g. ClassicFit" list="pur-brands-list" value="${item.brand || ''}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
-          </div>
-          <div style="display: flex; gap: 0.4rem; align-items: center; padding-bottom: 2px;">
-            ${sameProdCount > 1 ? `
-              <button type="button" class="btn btn-secondary btn-sm pur-apply-price-btn" title="Copy product details & prices to all other sizes of this product" style="font-size: 0.72rem; padding: 0.35rem 0.6rem; color: var(--brand-primary); height: 34px;">
-                <i data-lucide="copy" style="width: 12px; height: 12px;"></i> Apply to all sizes
-              </button>
-            ` : ''}
-            <button type="button" class="btn btn-ghost pur-remove-btn" style="padding: 0.45rem; color: var(--status-danger); height: 34px;" title="Remove this row">
-              <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
-            </button>
-          </div>
-        </div>
 
-        <!-- Tier 2: Size & Financials (Size, Qty, Buying Price, Total Cost, Selling Price, Est Value) -->
-        <div style="display: grid; grid-template-columns: 1.2fr 1fr 1.2fr 1.2fr 1.2fr 1.2fr; gap: 0.75rem; align-items: end; border-top: 1px dashed var(--border-color); padding-top: 0.65rem;">
-          <div class="form-group pur-size-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size / Variant <span style="color: #ef4444;">*</span></label>
-            <div class="pur-size-container" style="position: relative; width: 100%;">
-              <select class="form-select pur-size-select" style="display: ${isCustomSize ? 'none' : 'block'}; padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500; width: 100%;">
-                ${standardSizes.map(s => `<option value="${s}" ${(!isCustomSize && s === item.size) ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
-                <option value="__CUSTOM__">+ Custom Size...</option>
-              </select>
-              <div class="pur-size-custom-wrapper" style="display: ${isCustomSize ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
-                <input type="text" class="form-input pur-size-custom-input" placeholder="Enter size / variant" value="${isCustomSize ? (item.size || '') : ''}" style="width: 100%; padding: 0.45rem 2.2rem 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
-                <button type="button" class="btn btn-ghost pur-size-back-btn" title="Switch back to Size dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.25rem 0.35rem; height: 26px; width: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
-                  <i data-lucide="list" style="width: 14px; height: 14px;"></i>
+            <!-- Size-wise section heading with Apply to All Sizes action beside it -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.35rem; border-top: 1px dashed var(--border-color);">
+              <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); display: flex; align-items: center; gap: 0.35rem;">
+                <i data-lucide="layers" style="width: 12px; height: 12px; color: var(--brand-primary);"></i>
+                <span>Size-wise Quantities & Prices</span>
+              </div>
+              ${sameProdCount > 1 ? `
+                <button type="button" class="btn btn-ghost btn-sm pur-apply-price-btn" title="Copy product details & prices to all other sizes of this product" style="font-size: 0.72rem; padding: 0.15rem 0.5rem; color: var(--brand-primary); height: 24px; border: 1px solid var(--border-color); background: var(--bg-secondary); border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                  <i data-lucide="copy" style="width: 11px; height: 11px;"></i> Apply to All Sizes
                 </button>
+              ` : ''}
+            </div>
+
+            <!-- Row 2: Size, Quantity, Buying Price, Total Cost, Selling Price, and Estimated Value in a compact aligned row -->
+            <div style="display: grid; grid-template-columns: 1.15fr 0.85fr 1.1fr 1.15fr 1.1fr 1.15fr; gap: 0.55rem; align-items: end;">
+              <div class="form-group pur-size-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Size / Variant <span style="color: #ef4444;">*</span></label>
+                <div class="pur-size-container" style="position: relative; width: 100%;">
+                  <select class="form-select pur-size-select" style="display: ${isCustomSize ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
+                    ${standardSizes.map(s => `<option value="${s}" ${(!isCustomSize && s === item.size) ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
+                    <option value="__CUSTOM__">+ Custom Size...</option>
+                  </select>
+                  <div class="pur-size-custom-wrapper" style="display: ${isCustomSize ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
+                    <input type="text" class="form-input pur-size-custom-input" placeholder="Enter size / variant" value="${isCustomSize ? (item.size || '') : ''}" style="width: 100%; height: 32px; padding: 0.25rem 2rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; box-sizing: border-box;">
+                    <button type="button" class="btn btn-ghost pur-size-back-btn" title="Switch back to Size dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.15rem; height: 24px; width: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
+                      <i data-lucide="list" style="width: 13px; height: 13px;"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Quantity <span style="color: #ef4444;">*</span></label>
+                <input type="number" class="form-input pur-qty-input" min="1" value="${q}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+              </div>
+
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Buying Price (₹) <span style="color: #ef4444;">*</span></label>
+                <input type="number" class="form-input pur-buying-input" min="0" step="any" value="${bPrice}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+              </div>
+
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Total Cost (₹)</label>
+                <input type="text" class="form-input pur-cost-display" value="₹${lineCost.toLocaleString()}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; background: var(--bg-secondary); color: var(--brand-primary); box-sizing: border-box;">
+              </div>
+
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Selling Price (₹)</label>
+                <input type="number" class="form-input pur-selling-input" min="0" step="any" value="${sPrice}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+              </div>
+
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Estimated Value (₹)</label>
+                <input type="text" class="form-input pur-value-display" value="₹${lineValue.toLocaleString()}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; background: var(--bg-secondary); color: var(--status-success); box-sizing: border-box;">
               </div>
             </div>
-          </div>
-
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Qty <span style="color: #ef4444;">*</span></label>
-            <input type="number" class="form-input pur-qty-input" min="1" value="${q}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
-          </div>
-
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Buying Price (₹) <span style="color: #ef4444;">*</span></label>
-            <input type="number" class="form-input pur-buying-input" min="0" step="any" value="${bPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
-          </div>
-
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Cost (₹)</label>
-            <input type="text" class="form-input pur-cost-display" value="₹${lineCost.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--brand-primary);">
-          </div>
-
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Selling Price (₹)</label>
-            <input type="number" class="form-input pur-selling-input" min="0" step="any" value="${sPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
-          </div>
-
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Est. Value (₹)</label>
-            <input type="text" class="form-input pur-value-display" value="₹${lineValue.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--status-success);">
           </div>
         </div>
       `;
