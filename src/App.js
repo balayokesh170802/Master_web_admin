@@ -3833,6 +3833,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
 // 1. MOCK DATA & REACTIVE STORE MANAGER
 // ==========================================
 // OVERVIEW PAGE
+let activeOverviewSalesPeriod = '1W';
 function renderOverview(onNavigate) {
   const container = document.createElement('div');
   container.className = 'page-container';
@@ -3913,7 +3914,7 @@ function renderOverview(onNavigate) {
   grid2Col.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; width: 100%; align-items: stretch;';
   if (window.innerWidth <= 1024) grid2Col.style.gridTemplateColumns = '1fr';
 
-  let activePeriod = '1W';
+  let activePeriod = activeOverviewSalesPeriod || '1W';
   const salesTrendCard = document.createElement('div');
   salesTrendCard.className = 'card';
   salesTrendCard.style.display = 'flex';
@@ -3921,8 +3922,67 @@ function renderOverview(onNavigate) {
   salesTrendCard.style.justifyContent = 'space-between';
 
   // Dynamic Sales Trend Calculation Engine derived from actual sales & purchase costs
+  function parseSaleDate(dateStr) {
+    if (!dateStr) return null;
+    if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? null : dateStr;
+
+    const s = String(dateStr).trim();
+    const monthNames = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
+
+    // Format 1: "Oct 6, 08:15 PM" or "Oct 6, 2026, 08:15 PM" or "Sep 30, 07:30 PM"
+    const m1 = s.match(/^([a-z]{3})\s+(\d{1,2})(?:,\s*(\d{4}))?(?:,\s*(\d{1,2}):(\d{2})\s*(am|pm)?)?/i);
+    if (m1) {
+      const month = monthNames[m1[1].toLowerCase()];
+      if (month !== undefined) {
+        const day = parseInt(m1[2], 10);
+        const year = m1[3] ? parseInt(m1[3], 10) : 2026;
+        let hours = m1[4] ? parseInt(m1[4], 10) : 12;
+        const mins = m1[5] ? parseInt(m1[5], 10) : 0;
+        const ampm = (m1[6] || '').toLowerCase();
+        if (ampm === 'pm' && hours < 12) hours += 12;
+        if (ampm === 'am' && hours === 12) hours = 0;
+        return new Date(year, month, day, hours, mins);
+      }
+    }
+
+    // Format 2: "10/12/26, 3:45 PM" or "10/12/2026, 3:45 PM" or "10/12/2026"
+    const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:,\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?)?/i);
+    if (m2) {
+      const month = parseInt(m2[1], 10) - 1;
+      const day = parseInt(m2[2], 10);
+      let year = parseInt(m2[3], 10);
+      if (year < 100) year += 2000;
+      let hours = m2[4] ? parseInt(m2[4], 10) : 12;
+      const mins = m2[5] ? parseInt(m2[5], 10) : 0;
+      const ampm = (m2[6] || '').toLowerCase();
+      if (ampm === 'pm' && hours < 12) hours += 12;
+      if (ampm === 'am' && hours === 12) hours = 0;
+      return new Date(year, month, day, hours, mins);
+    }
+
+    // Format 3: "2026-10-12" or "2026-10-06 08:15 PM" or ISO
+    const m3 = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?)?/i);
+    if (m3) {
+      const year = parseInt(m3[1], 10);
+      const month = parseInt(m3[2], 10) - 1;
+      const day = parseInt(m3[3], 10);
+      let hours = m3[4] ? parseInt(m3[4], 10) : 12;
+      const mins = m3[5] ? parseInt(m3[5], 10) : 0;
+      const ampm = (m3[6] || '').toLowerCase();
+      if (ampm === 'pm' && hours < 12) hours += 12;
+      if (ampm === 'am' && hours === 12) hours = 0;
+      return new Date(year, month, day, hours, mins);
+    }
+
+    const fallback = new Date(s);
+    return isNaN(fallback.getTime()) ? null : fallback;
+  }
+
   function getDynamicSalesTrend(periodKey, salesList, productsList) {
-    const qualifyingSales = (salesList || []).filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed');
+    const qualifyingSales = (salesList || []).filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed' && s.status !== 'Draft');
 
     const prodCostMap = {};
     (productsList || []).forEach(p => {
@@ -3948,147 +4008,198 @@ function renderOverview(onNavigate) {
       return cost;
     }
 
+    const salesWithDates = qualifyingSales.map(s => ({
+      sale: s,
+      date: parseSaleDate(s.date),
+      revenue: Number(s.totalAmount || 0),
+      cogs: calculateSaleCogs(s)
+    })).filter(s => s.date !== null);
+
+    const now = new Date();
+    const refYear = Math.max(now.getFullYear(), 2026);
+    const refMonth = now.getMonth();
+    const refDate = now.getDate();
+
+    const shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const fullMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    let buckets = [];
+    let startRevLabel = 'Start of Period';
+    let endRevLabel = 'End of Period';
+
     if (periodKey === '1W') {
-      const dayBuckets = [
-        { label: 'Mon', revenue: 0, cogs: 0 },
-        { label: 'Tue', revenue: 0, cogs: 0 },
-        { label: 'Wed', revenue: 0, cogs: 0 },
-        { label: 'Thu', revenue: 0, cogs: 0 },
-        { label: 'Fri', revenue: 0, cogs: 0 },
-        { label: 'Sat', revenue: 0, cogs: 0 },
-        { label: 'Sun', revenue: 0, cogs: 0 }
-      ];
+      startRevLabel = 'Start of Week';
+      endRevLabel = 'End of Week';
 
-      qualifyingSales.forEach((s, idx) => {
-        const bIdx = idx % 7;
-        const rev = Number(s.totalAmount || 0);
-        dayBuckets[bIdx].revenue += rev;
-        dayBuckets[bIdx].cogs += calculateSaleCogs(s);
-      });
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(refYear, refMonth, refDate - i);
+        const y = d.getFullYear();
+        const m = d.getMonth();
+        const dayNum = d.getDate();
+        const dayStart = new Date(y, m, dayNum, 0, 0, 0, 0).getTime();
+        const dayEnd = new Date(y, m, dayNum, 23, 59, 59, 999).getTime();
 
-      const totalPeriodRev = dayBuckets.reduce((sum, b) => sum + b.revenue, 0);
-      const totalPeriodCogs = dayBuckets.reduce((sum, b) => sum + b.cogs, 0);
-      const totalPeriodProfit = Math.max(0, totalPeriodRev - totalPeriodCogs);
-      const profitMarginPct = totalPeriodRev > 0 ? ((totalPeriodProfit / totalPeriodRev) * 100).toFixed(1) : '0.0';
+        const daySales = salesWithDates.filter(s => {
+          const t = s.date.getTime();
+          return t >= dayStart && t <= dayEnd;
+        });
 
-      const startRev = dayBuckets[0].revenue;
-      const endRev = dayBuckets[dayBuckets.length - 1].revenue;
-      const revDiffNum = endRev - startRev;
-      const revGrowthPct = startRev > 0 ? ((revDiffNum / startRev) * 100).toFixed(1) : (endRev > 0 ? '+100.0' : '0.0');
-      const isRevPos = revDiffNum >= 0;
+        const rev = daySales.reduce((sum, s) => sum + s.revenue, 0);
+        const cogs = daySales.reduce((sum, s) => sum + s.cogs, 0);
 
-      const maxVal = Math.max(...dayBuckets.map(b => b.revenue), 1000);
-      const yMaxStr = `₹${Math.round(maxVal / 1000)}k`;
-      const yMidStr = `₹${Math.round((maxVal / 2) / 1000)}k`;
+        buckets.push({
+          label: `${dayNum} ${shortMonths[m]}`,
+          tooltipLabel: `${dayNum} ${shortMonths[m]} ${y}`,
+          revenue: rev,
+          cogs: cogs
+        });
+      }
+    } else if (periodKey === '1M') {
+      startRevLabel = 'Start of Month';
+      endRevLabel = 'End of Month';
 
-      const coords = dayBuckets.map((b, i) => {
-        const x = Math.round(25 + i * (450 / 6));
-        const normalized = b.revenue / maxVal;
-        const y = Math.round(130 - (normalized * 110));
-        return {
-          x,
-          y,
-          val: `₹${b.revenue.toLocaleString('en-IN')}`,
-          label: b.label
-        };
-      });
+      for (let w = 3; w >= 0; w--) {
+        const wIdx = 3 - w;
+        const startD = new Date(refYear, refMonth, refDate - (w * 7 + 6), 0, 0, 0, 0);
+        const endD = new Date(refYear, refMonth, refDate - (w * 7), 23, 59, 59, 999);
+        const startT = startD.getTime();
+        const endT = endD.getTime();
 
-      const pointsPath = coords.map(c => `${c.x},${c.y}`).join(' ');
-      const areaPoly = `${coords[0].x},130 ${pointsPath} ${coords[coords.length - 1].x},130 ${coords[0].x},130`;
+        const weekSales = salesWithDates.filter(s => {
+          const t = s.date.getTime();
+          return t >= startT && t <= endT;
+        });
 
-      return {
-        periodLabel: '1W',
-        startRevLabel: 'Start of Week',
-        startRevVal: `₹${startRev.toLocaleString('en-IN')}`,
-        endRevLabel: 'End of Week',
-        endRevVal: `₹${endRev.toLocaleString('en-IN')}`,
-        revDiff: `${isRevPos ? '+' : '-'}₹${Math.abs(revDiffNum).toLocaleString('en-IN')}`,
-        revGrowth: `${isRevPos ? '+' : ''}${revGrowthPct}%`,
-        isRevPositive: isRevPos,
-        cogs: `₹${totalPeriodCogs.toLocaleString('en-IN')}`,
-        profitLabel: 'Profit',
-        profitVal: `₹${totalPeriodProfit.toLocaleString('en-IN')}`,
-        profitMargin: `${profitMarginPct}%`,
-        isProfit: totalPeriodProfit >= 0,
-        yMax: yMaxStr,
-        yMid: yMidStr,
-        labels: dayBuckets.map(b => b.label),
-        coords,
-        pointsPath,
-        areaPoly
-      };
-    } else {
-      const weekBuckets = [
-        { label: 'Week 1', revenue: 0, cogs: 0 },
-        { label: 'Week 2', revenue: 0, cogs: 0 },
-        { label: 'Week 3', revenue: 0, cogs: 0 },
-        { label: 'Week 4', revenue: 0, cogs: 0 }
-      ];
+        const rev = weekSales.reduce((sum, s) => sum + s.revenue, 0);
+        const cogs = weekSales.reduce((sum, s) => sum + s.cogs, 0);
 
-      qualifyingSales.forEach((s, idx) => {
-        const bucketIdx = Math.floor((idx / Math.max(1, qualifyingSales.length)) * 4);
-        const bIdx = Math.min(bucketIdx, 3);
-        const rev = Number(s.totalAmount || 0);
-        weekBuckets[bIdx].revenue += rev;
-        weekBuckets[bIdx].cogs += calculateSaleCogs(s);
-      });
+        buckets.push({
+          label: `Week ${wIdx + 1}`,
+          tooltipLabel: `Week ${wIdx + 1} (${startD.getDate()} ${shortMonths[startD.getMonth()]} – ${endD.getDate()} ${shortMonths[endD.getMonth()]} ${endD.getFullYear()})`,
+          revenue: rev,
+          cogs: cogs
+        });
+      }
+    } else if (periodKey === '6M') {
+      startRevLabel = 'Start of Period';
+      endRevLabel = 'End of Period';
 
-      const totalPeriodRev = weekBuckets.reduce((sum, b) => sum + b.revenue, 0);
-      const totalPeriodCogs = weekBuckets.reduce((sum, b) => sum + b.cogs, 0);
-      const totalPeriodProfit = Math.max(0, totalPeriodRev - totalPeriodCogs);
-      const profitMarginPct = totalPeriodRev > 0 ? ((totalPeriodProfit / totalPeriodRev) * 100).toFixed(1) : '0.0';
+      for (let i = 5; i >= 0; i--) {
+        const mDate = new Date(refYear, refMonth - i, 1);
+        const y = mDate.getFullYear();
+        const m = mDate.getMonth();
+        const mStart = new Date(y, m, 1, 0, 0, 0, 0).getTime();
+        const mEnd = new Date(y, m + 1, 0, 23, 59, 59, 999).getTime();
 
-      const startRev = weekBuckets[0].revenue;
-      const endRev = weekBuckets[weekBuckets.length - 1].revenue;
-      const revDiffNum = endRev - startRev;
-      const revGrowthPct = startRev > 0 ? ((revDiffNum / startRev) * 100).toFixed(1) : (endRev > 0 ? '+100.0' : '0.0');
-      const isRevPos = revDiffNum >= 0;
+        const monthSales = salesWithDates.filter(s => {
+          const t = s.date.getTime();
+          return t >= mStart && t <= mEnd;
+        });
 
-      const maxVal = Math.max(...weekBuckets.map(b => b.revenue), 1000);
-      const yMaxStr = `₹${Math.round(maxVal / 1000)}k`;
-      const yMidStr = `₹${Math.round((maxVal / 2) / 1000)}k`;
+        const rev = monthSales.reduce((sum, s) => sum + s.revenue, 0);
+        const cogs = monthSales.reduce((sum, s) => sum + s.cogs, 0);
 
-      const coords = weekBuckets.map((b, i) => {
-        const x = Math.round(40 + i * (420 / 3));
-        const normalized = b.revenue / maxVal;
-        const y = Math.round(130 - (normalized * 110));
-        return {
-          x,
-          y,
-          val: `₹${b.revenue.toLocaleString('en-IN')}`,
-          label: b.label
-        };
-      });
+        buckets.push({
+          label: shortMonths[m],
+          tooltipLabel: `${fullMonths[m]} ${y}`,
+          revenue: rev,
+          cogs: cogs
+        });
+      }
+    } else if (periodKey === '1Y') {
+      startRevLabel = 'Start of Year';
+      endRevLabel = 'End of Year';
 
-      const pointsPath = coords.map(c => `${c.x},${c.y}`).join(' ');
-      const areaPoly = `${coords[0].x},130 ${pointsPath} ${coords[coords.length - 1].x},130 ${coords[0].x},130`;
+      for (let i = 11; i >= 0; i--) {
+        const mDate = new Date(refYear, refMonth - i, 1);
+        const y = mDate.getFullYear();
+        const m = mDate.getMonth();
+        const mStart = new Date(y, m, 1, 0, 0, 0, 0).getTime();
+        const mEnd = new Date(y, m + 1, 0, 23, 59, 59, 999).getTime();
 
-      return {
-        periodLabel: '1M',
-        startRevLabel: 'Start of Month',
-        startRevVal: `₹${startRev.toLocaleString('en-IN')}`,
-        endRevLabel: 'End of Month',
-        endRevVal: `₹${endRev.toLocaleString('en-IN')}`,
-        revDiff: `${isRevPos ? '+' : '-'}₹${Math.abs(revDiffNum).toLocaleString('en-IN')}`,
-        revGrowth: `${isRevPos ? '+' : ''}${revGrowthPct}%`,
-        isRevPositive: isRevPos,
-        cogs: `₹${totalPeriodCogs.toLocaleString('en-IN')}`,
-        profitLabel: 'Profit',
-        profitVal: `₹${totalPeriodProfit.toLocaleString('en-IN')}`,
-        profitMargin: `${profitMarginPct}%`,
-        isProfit: totalPeriodProfit >= 0,
-        yMax: yMaxStr,
-        yMid: yMidStr,
-        labels: weekBuckets.map(b => b.label),
-        coords,
-        pointsPath,
-        areaPoly
-      };
+        const monthSales = salesWithDates.filter(s => {
+          const t = s.date.getTime();
+          return t >= mStart && t <= mEnd;
+        });
+
+        const rev = monthSales.reduce((sum, s) => sum + s.revenue, 0);
+        const cogs = monthSales.reduce((sum, s) => sum + s.cogs, 0);
+
+        buckets.push({
+          label: shortMonths[m],
+          tooltipLabel: `${fullMonths[m]} ${y}`,
+          revenue: rev,
+          cogs: cogs
+        });
+      }
     }
+
+    const totalPeriodRev = buckets.reduce((sum, b) => sum + b.revenue, 0);
+    const totalPeriodCogs = buckets.reduce((sum, b) => sum + b.cogs, 0);
+    const totalPeriodProfit = Math.max(0, totalPeriodRev - totalPeriodCogs);
+    const profitMarginPct = totalPeriodRev > 0 ? ((totalPeriodProfit / totalPeriodRev) * 100).toFixed(1) : '0.0';
+
+    const startRev = buckets[0] ? buckets[0].revenue : 0;
+    const endRev = buckets[buckets.length - 1] ? buckets[buckets.length - 1].revenue : 0;
+    const revDiffNum = endRev - startRev;
+    const revGrowthPct = startRev > 0 ? ((revDiffNum / startRev) * 100).toFixed(1) : (endRev > 0 ? '+100.0' : '0.0');
+    const isRevPos = revDiffNum >= 0;
+
+    const maxVal = Math.max(...buckets.map(b => b.revenue), 1000);
+    function formatAxisVal(val) {
+      if (val >= 100000) return `₹${(val / 100000).toFixed(1)}L`;
+      if (val >= 1000) return `₹${Math.round(val / 1000)}k`;
+      return `₹${val}`;
+    }
+    const yMaxStr = formatAxisVal(maxVal);
+    const yMidStr = formatAxisVal(Math.round(maxVal / 2));
+
+    const N = buckets.length;
+    const coords = buckets.map((b, i) => {
+      const x = N <= 1 ? 250 : Math.round(25 + i * (450 / (N - 1)));
+      const normalized = maxVal > 0 ? (b.revenue / maxVal) : 0;
+      const y = Math.round(130 - (normalized * 110));
+      return {
+        x,
+        y,
+        val: `₹${b.revenue.toLocaleString('en-IN')}`,
+        rawRevenue: b.revenue,
+        axisLabel: b.label,
+        tooltipLabel: b.tooltipLabel
+      };
+    });
+
+    const pointsPath = coords.map(c => `${c.x},${c.y}`).join(' ');
+    const areaPoly = coords.length > 0 ? `${coords[0].x},130 ${pointsPath} ${coords[coords.length - 1].x},130 ${coords[0].x},130` : '';
+
+    return {
+      periodLabel: periodKey,
+      startRevLabel,
+      startRevVal: `₹${startRev.toLocaleString('en-IN')}`,
+      endRevLabel,
+      endRevVal: `₹${endRev.toLocaleString('en-IN')}`,
+      totalPeriodRevVal: `₹${totalPeriodRev.toLocaleString('en-IN')}`,
+      revDiff: `${isRevPos ? '+' : '-'}₹${Math.abs(revDiffNum).toLocaleString('en-IN')}`,
+      revGrowth: `${isRevPos ? '+' : ''}${revGrowthPct}%`,
+      isRevPositive: isRevPos,
+      cogs: `₹${totalPeriodCogs.toLocaleString('en-IN')}`,
+      profitLabel: 'Gross Profit',
+      profitVal: `₹${totalPeriodProfit.toLocaleString('en-IN')}`,
+      profitMargin: `${profitMarginPct}%`,
+      isProfit: totalPeriodProfit >= 0,
+      yMax: yMaxStr,
+      yMid: yMidStr,
+      coords,
+      pointsPath,
+      areaPoly
+    };
   }
 
   function renderSalesChart(periodKey) {
-    const ds = getDynamicSalesTrend(periodKey, sales, products);
+    const currentSales = store.data.sales || [];
+    const currentProducts = store.data.products || [];
+    const ds = getDynamicSalesTrend(periodKey, currentSales, currentProducts);
+
     salesTrendCard.innerHTML = `
       <div class="card-header" style="flex-wrap: wrap; gap: 0.75rem; align-items: center; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); margin-bottom: 0.75rem;">
         <div>
@@ -4097,7 +4208,7 @@ function renderOverview(onNavigate) {
         </div>
         
         <div style="display: flex; gap: 0.2rem; background: var(--bg-secondary); padding: 0.2rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-          ${['1W', '1M'].map(p => `
+          ${['1W', '1M', '6M', '1Y'].map(p => `
             <button class="btn period-btn" data-period="${p}" style="padding: 0.25rem 0.6rem; font-size: 0.75rem; font-weight: 600; border: none; cursor: pointer;">${p}</button>
           `).join('')}
         </div>
@@ -4105,11 +4216,11 @@ function renderOverview(onNavigate) {
 
       <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; background: var(--bg-secondary); padding: 0.75rem 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-color); margin-bottom: 0.75rem;">
         <div>
-          <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);">Total Revenue</div>
+          <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary);">Period Revenue</div>
           <div style="display: flex; align-items: baseline; gap: 0.5rem; margin-top: 0.15rem; flex-wrap: wrap;">
-            <span style="font-size: 1.45rem; font-weight: 700; color: var(--text-primary); letter-spacing: -0.02em;">${ds.endRevVal}</span>
+            <span style="font-size: 1.45rem; font-weight: 700; color: var(--text-primary); letter-spacing: -0.02em;">${ds.totalPeriodRevVal}</span>
             <span style="font-size: 0.825rem; font-weight: 600; color: ${ds.isRevPositive ? 'var(--status-success)' : 'var(--status-danger)'}; display: inline-flex; align-items: center; gap: 0.25rem;">
-              ${ds.isRevPositive ? '↑' : '↓'} ${ds.revDiff} (${ds.revGrowth}) <span style="color: var(--text-secondary); font-weight: 400;">vs ${ds.periodLabel}</span>
+              ${ds.isRevPositive ? '↑' : '↓'} ${ds.revDiff} (${ds.revGrowth}) <span style="color: var(--text-secondary); font-weight: 400;">trend</span>
             </span>
           </div>
         </div>
@@ -4137,7 +4248,12 @@ function renderOverview(onNavigate) {
           <span>₹0</span>
         </div>
 
-        <div style="flex: 1; position: relative; display: flex; flex-direction: column;">
+        <div class="sales-chart-wrapper" style="flex: 1; position: relative; display: flex; flex-direction: column;">
+          <!-- Floating Tooltip -->
+          <div class="sales-chart-tooltip" style="position: absolute; display: none; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.45rem 0.75rem; box-shadow: 0 4px 14px rgba(0,0,0,0.4); pointer-events: none; z-index: 50; transform: translate(-50%, -125%); font-size: 0.8rem; white-space: nowrap;">
+            <span class="tooltip-text" style="color: var(--text-primary); font-weight: 500;"></span>
+          </div>
+
           <svg width="100%" height="155" viewBox="0 0 500 155" style="overflow: visible;">
             <defs>
               <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
@@ -4145,23 +4261,85 @@ function renderOverview(onNavigate) {
                 <stop offset="100%" stop-color="var(--brand-primary)" stop-opacity="0.0"/>
               </linearGradient>
             </defs>
-            <line x1="0" y1="15" x2="500" y2="15" stroke="var(--border-color)" stroke-dasharray="4" vector-effect="non-scaling-stroke" />
-            <line x1="0" y1="72" x2="500" y2="72" stroke="var(--border-color)" stroke-dasharray="4" vector-effect="non-scaling-stroke" />
+            <line x1="0" y1="20" x2="500" y2="20" stroke="var(--border-color)" stroke-dasharray="4" vector-effect="non-scaling-stroke" />
+            <line x1="0" y1="75" x2="500" y2="75" stroke="var(--border-color)" stroke-dasharray="4" vector-effect="non-scaling-stroke" />
             <line x1="0" y1="130" x2="500" y2="130" stroke="var(--border-color)" vector-effect="non-scaling-stroke" />
             
             <polygon points="${ds.areaPoly}" fill="url(#salesGrad)" />
             <polyline points="${ds.pointsPath}" fill="none" stroke="var(--brand-primary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
             
-            ${ds.coords.map(c => `
-              <circle cx="${c.x}" cy="${c.y}" r="5" fill="var(--brand-primary)" stroke="var(--bg-surface)" stroke-width="2.5">
-                <title>${c.label}: ${c.val}</title>
-              </circle>
-              <text x="${c.x}" y="152" text-anchor="middle" fill="var(--text-secondary)" font-size="12" font-weight="500">${c.label}</text>
+            ${ds.coords.map((c, idx) => `
+              <circle cx="${c.x}" cy="${c.y}" r="4.5" class="chart-point-dot" data-index="${idx}" fill="var(--brand-primary)" stroke="var(--bg-surface)" stroke-width="2.5" style="transition: r 0.15s ease, stroke-width 0.15s ease;" />
+              <circle cx="${c.x}" cy="${c.y}" r="16" class="chart-point-hit" data-index="${idx}" fill="transparent" style="cursor: pointer;" />
+              <text x="${c.x}" y="150" text-anchor="middle" fill="var(--text-secondary)" font-size="${periodKey === '1Y' ? '10' : '11'}" font-weight="500">${c.axisLabel}</text>
             `).join('')}
           </svg>
         </div>
       </div>
     `;
+
+    const tooltipEl = salesTrendCard.querySelector('.sales-chart-tooltip');
+    const tooltipTextEl = tooltipEl.querySelector('.tooltip-text');
+    const hitAreas = salesTrendCard.querySelectorAll('.chart-point-hit');
+    const dots = salesTrendCard.querySelectorAll('.chart-point-dot');
+
+    hitAreas.forEach(hit => {
+      const idx = parseInt(hit.dataset.index, 10);
+      const c = ds.coords[idx];
+      if (!c) return;
+
+      const showPointTooltip = () => {
+        tooltipTextEl.innerHTML = `<span style="font-weight: 600; color: var(--text-primary);">${c.tooltipLabel}</span> — <span style="font-weight: 700; color: var(--brand-primary);">Sales: ${c.val}</span>`;
+        const leftPct = (c.x / 500) * 100;
+        let translateX = '-50%';
+        if (leftPct < 15) {
+          translateX = '0%';
+        } else if (leftPct > 85) {
+          translateX = '-100%';
+        }
+        tooltipEl.style.transform = `translate(${translateX}, -125%)`;
+        tooltipEl.style.left = `${leftPct}%`;
+        tooltipEl.style.top = `${(c.y / 155) * 100}%`;
+        tooltipEl.style.display = 'block';
+
+        dots.forEach((d, i) => {
+          if (i === idx) {
+            d.setAttribute('r', '7');
+            d.setAttribute('stroke-width', '3');
+            d.setAttribute('fill', 'var(--brand-primary)');
+          } else {
+            d.setAttribute('r', '4.5');
+            d.setAttribute('stroke-width', '2.5');
+          }
+        });
+      };
+
+      const hidePointTooltip = () => {
+        tooltipEl.style.display = 'none';
+        dots.forEach(d => {
+          d.setAttribute('r', '4.5');
+          d.setAttribute('stroke-width', '2.5');
+        });
+      };
+
+      hit.addEventListener('mouseenter', showPointTooltip);
+      hit.addEventListener('mouseleave', hidePointTooltip);
+      hit.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showPointTooltip();
+      });
+      hit.addEventListener('touchstart', (e) => {
+        e.stopPropagation();
+        showPointTooltip();
+      }, { passive: true });
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!salesTrendCard.contains(e.target) && tooltipEl) {
+        tooltipEl.style.display = 'none';
+        dots.forEach(d => d.setAttribute('r', '4.5'));
+      }
+    });
 
     salesTrendCard.querySelectorAll('.period-btn').forEach(btn => {
       const p = btn.dataset.period;
@@ -4177,7 +4355,8 @@ function renderOverview(onNavigate) {
       }
 
       btn.addEventListener('click', (e) => {
-        activePeriod = e.target.dataset.period;
+        activePeriod = e.currentTarget.dataset.period;
+        activeOverviewSalesPeriod = activePeriod;
         renderSalesChart(activePeriod);
       });
     });
