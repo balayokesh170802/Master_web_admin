@@ -1740,7 +1740,7 @@ class StoreManager {
     return { product, purchase: purchaseRecord };
   }
 
-    savePurchaseDraft(payload, existingId = null) {
+  savePurchaseDraft(payload, existingId = null) {
     // Saves purchase as Draft WITHOUT updating inventory stock
     let totalQty = 0;
     let totalAmount = 0;
@@ -1755,16 +1755,39 @@ class StoreManager {
       totalQty += q;
       totalAmount += lineCost;
 
+      let prodId = item.productId || '';
+      let prodSku = item.sku || '';
+      let prodVariantId = item.variantId || '';
       let prodName = item.productName || item.product || '';
-      if (!prodName && item.productId) {
-        const found = (this.data.products || []).find(p => p.id === item.productId);
-        if (found) prodName = found.name;
+
+      let foundProd = null;
+      if (prodId) {
+        foundProd = (this.data.products || []).find(p => p.id === prodId);
+      } else if (prodSku) {
+        foundProd = (this.data.products || []).find(p => (p.variants || []).some(v => v.sku && v.sku.toLowerCase() === prodSku.toLowerCase()));
+        if (foundProd) prodId = foundProd.id;
+      } else if (prodName) {
+        foundProd = (this.data.products || []).find(p => p.name && p.name.trim().toLowerCase() === prodName.trim().toLowerCase());
+        if (foundProd) prodId = foundProd.id;
+      }
+
+      if (foundProd && !prodName) prodName = foundProd.name;
+
+      const targetSize = (item.size || 'Standard').trim();
+      if (foundProd && (!prodSku || !prodVariantId) && Array.isArray(foundProd.variants)) {
+        const matchingVar = foundProd.variants.find(v => (v.size || 'Standard').trim().toUpperCase() === targetSize.toUpperCase());
+        if (matchingVar) {
+          if (!prodSku && matchingVar.sku) prodSku = matchingVar.sku;
+          if (!prodVariantId && matchingVar.id) prodVariantId = matchingVar.id;
+        }
       }
 
       itemRecords.push({
-        productId: item.productId || '',
+        productId: prodId,
+        variantId: prodVariantId,
+        sku: prodSku,
         product: prodName || 'Standard Item',
-        size: item.size || 'Standard',
+        size: targetSize,
         qty: q,
         buyingPrice: buyPrice,
         sellingPrice: sellPrice,
@@ -1825,87 +1848,193 @@ class StoreManager {
     const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
     if (!purchase) throw new Error('Purchase not found');
     if (purchase.status !== 'Approved' && purchase.status !== 'Partially Received') {
-      throw new Error('Only Approved or Partially Received purchases can be received');
+      if (purchase.status === 'Received' || purchase.status === 'Completed') {
+        throw new Error(`Purchase order ${purchaseId} has already been received.`);
+      }
+      throw new Error(`Only Approved or Partially Received purchases can be received (current status: ${purchase.status})`);
     }
 
-    let totalNewlyReceived = 0;
-    const receiptEventItems = [];
+    if (!this._receivingLocks) this._receivingLocks = new Set();
+    if (this._receivingLocks.has(purchaseId)) {
+      throw new Error(`A stock receiving operation is already in progress for purchase ${purchaseId}.`);
+    }
 
-    (purchase.items || []).forEach((item, index) => {
-      const newlyReceived = parseInt(receivedQuantitiesMap[index], 10) || 0;
-      if (newlyReceived > 0) {
-        totalNewlyReceived += newlyReceived;
-        item.receivedQty = (item.receivedQty || 0) + newlyReceived;
+    this._receivingLocks.add(purchaseId);
 
-        // Increase Inventory Stock for the specific product and size
-        let product = (this.data.products || []).find(p => p.id === item.productId || (p.name && p.name.toLowerCase() === item.product.toLowerCase()));
-        if (product) {
-          if (!product.variants || product.variants.length === 0) {
-            product.variants = [{ size: item.size || 'Standard', stock: 0, damaged: 0, purchasePrice: item.buyingPrice || 0, sellingPrice: item.sellingPrice || 0 }];
-          }
+    try {
+      // 1. Pre-validation phase (All-or-Nothing / Transaction Safety)
+      const itemsToProcess = [];
+      let totalNewlyReceived = 0;
 
-          const targetSize = item.size || 'Standard';
-          let variant = product.variants.find(v => v.size === targetSize);
-          if (!variant) {
-            variant = { size: targetSize, stock: 0, damaged: 0, purchasePrice: item.buyingPrice || 0, sellingPrice: item.sellingPrice || 0 };
-            product.variants.push(variant);
-          }
+      const itemsList = Array.isArray(purchase.items) ? purchase.items : [];
+      if (itemsList.length === 0) {
+        throw new Error('Purchase order contains no items to receive.');
+      }
 
-          variant.stock = (variant.stock || 0) + newlyReceived;
-          if (item.buyingPrice > 0) variant.purchasePrice = item.buyingPrice;
-          if (item.sellingPrice > 0) variant.sellingPrice = item.sellingPrice;
+      for (let index = 0; index < itemsList.length; index++) {
+        const item = itemsList[index];
+        const rawRequested = (receivedQuantitiesMap !== undefined && receivedQuantitiesMap !== null && receivedQuantitiesMap[index] !== undefined)
+          ? receivedQuantitiesMap[index]
+          : 0;
+        const requested = parseInt(rawRequested, 10) || 0;
 
-          product.totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
-          if (item.sellingPrice > 0) product.sellingPrice = item.sellingPrice;
-          if (item.buyingPrice > 0) product.purchasePrice = item.buyingPrice;
+        if (requested < 0) {
+          throw new Error(`Received quantity cannot be negative for item ${index + 1} (${item.product || 'Product'}).`);
         }
+
+        const ordered = Math.max(0, Number(item.qty !== undefined ? item.qty : (item.received || 0)));
+        const alreadyRec = Math.max(0, Number(item.receivedQty !== undefined ? item.receivedQty : (item.received !== undefined && (purchase.status === 'Received' || purchase.status === 'Completed') ? ordered : 0)));
+        const outstanding = Math.max(0, ordered - alreadyRec);
+
+        if (requested > outstanding) {
+          throw new Error(`Cannot receive ${requested} units for "${item.product || 'item'}". Maximum outstanding balance is ${outstanding} units.`);
+        }
+
+        if (requested > 0) {
+          // Authoritative Product Lookup: Match by ID first, then SKU, then normalized name
+          let product = null;
+          if (item.productId) {
+            product = (this.data.products || []).find(p => p.id === item.productId);
+          }
+          if (!product && item.sku) {
+            product = (this.data.products || []).find(p => (p.variants || []).some(v => v.sku && v.sku.toLowerCase() === item.sku.toLowerCase()));
+          }
+          if (!product && item.product) {
+            const cleanName = item.product.trim().toLowerCase();
+            product = (this.data.products || []).find(p => p.name && p.name.trim().toLowerCase() === cleanName);
+          }
+
+          if (!product) {
+            throw new Error(`Product "${item.product || item.productId || 'Unknown'}" not found in inventory. Stock intake cannot proceed without an authoritative product record.`);
+          }
+
+          totalNewlyReceived += requested;
+          itemsToProcess.push({
+            item,
+            index,
+            product,
+            requested,
+            alreadyRec,
+            ordered
+          });
+        }
+      }
+
+      if (totalNewlyReceived <= 0) {
+        throw new Error('Please enter at least 1 unit to receive.');
+      }
+
+      // 2. Execution phase — Apply inventory updates accurately
+      const receiptEventItems = [];
+
+      itemsToProcess.forEach(({ item, product, requested, alreadyRec }) => {
+        item.receivedQty = alreadyRec + requested;
+
+        if (!Array.isArray(product.variants) || product.variants.length === 0) {
+          product.variants = [{
+            size: item.size || 'Standard',
+            stock: Number(product.stock || product.totalStock) || 0,
+            damaged: 0,
+            purchasePrice: Number(item.buyingPrice || item.price || product.purchasePrice || 0),
+            sellingPrice: product.sellingPrice || null
+          }];
+        }
+
+        const targetSize = (item.size || 'Standard').trim().toUpperCase();
+        let variant = null;
+
+        // Match by variantId if available
+        if (item.variantId) {
+          variant = product.variants.find(v => v.id === item.variantId);
+        }
+        // Match by SKU if available
+        if (!variant && item.sku) {
+          variant = product.variants.find(v => v.sku && v.sku.toLowerCase() === item.sku.toLowerCase());
+        }
+        // Match by normalized size
+        if (!variant) {
+          variant = product.variants.find(v => (v.size || 'Standard').trim().toUpperCase() === targetSize);
+        }
+
+        // If variant doesn't exist on this product, safely create it on the existing product record
+        if (!variant) {
+          variant = {
+            size: item.size || 'Standard',
+            sku: item.sku || (product.name ? `${product.name.slice(0, 3).toUpperCase()}-${targetSize}` : ''),
+            stock: 0,
+            damaged: 0,
+            purchasePrice: Number(item.buyingPrice || item.price || product.purchasePrice || 0),
+            sellingPrice: product.sellingPrice || null
+          };
+          product.variants.push(variant);
+        }
+
+        // Add actual received quantity
+        variant.stock = Math.max(0, Number(variant.stock) || 0) + requested;
+
+        // Update purchase / cost price if positive; NEVER modify selling prices
+        const bPrice = Number(item.buyingPrice || item.price || 0);
+        if (bPrice > 0) {
+          variant.purchasePrice = bPrice;
+          product.purchasePrice = bPrice;
+        }
+
+        // Recalculate parent product total available stock directly from size-wise quantities
+        product.totalStock = product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+        product.stock = product.totalStock;
 
         // Log Stock Movement
         if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+        const movementSku = variant.sku || item.sku || `${(product.name || 'PRD').slice(0, 3).toUpperCase()}-${variant.size || 'STD'}`;
         this.data.stockMovements.unshift({
-          id: `MOV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+          id: `MOV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 1000)}`,
           date: receiptDate || new Date().toLocaleString(),
-          product: item.product,
-          sku: `${(item.product || 'PRD').slice(0,3).toUpperCase()}-${item.size || 'STD'}`,
+          product: product.name,
+          productId: product.id,
+          size: variant.size || item.size || 'Standard',
+          sku: movementSku,
           type: 'Stock In',
-          quantity: newlyReceived,
+          quantity: requested,
           reference: purchase.id,
           user: 'Manager'
         });
 
         receiptEventItems.push({
-          product: item.product,
-          size: item.size,
-          quantityReceived: newlyReceived
+          productId: product.id,
+          product: product.name,
+          size: variant.size || item.size || 'Standard',
+          quantityReceived: requested
         });
+      });
+
+      // 3. Purchase status, totals, and receipt history update
+      const totalOrdered = itemsList.reduce((s, i) => s + Math.max(0, Number(i.qty !== undefined ? i.qty : (i.received || 0))), 0);
+      const totalReceivedAll = itemsList.reduce((s, i) => s + Math.max(0, Number(i.receivedQty !== undefined ? i.receivedQty : (i.received || 0))), 0);
+
+      purchase.totalReceived = totalReceivedAll;
+      purchase.receivedQuantity = totalReceivedAll;
+
+      if (totalReceivedAll >= totalOrdered) {
+        purchase.status = 'Received';
+        purchase.receivedAt = receiptDate || new Date().toISOString();
+      } else {
+        purchase.status = 'Partially Received';
       }
-    });
 
-    if (totalNewlyReceived <= 0) {
-      throw new Error('Please enter at least 1 unit to receive.');
+      if (!Array.isArray(purchase.receiptHistory)) purchase.receiptHistory = [];
+      purchase.receiptHistory.unshift({
+        date: receiptDate || new Date().toISOString().split('T')[0],
+        totalReceived: totalNewlyReceived,
+        notes: notes || '',
+        items: receiptEventItems
+      });
+
+      // 4. Authoritative persistence & reactive UI broadcast
+      this.save();
+      return purchase;
+    } finally {
+      this._receivingLocks.delete(purchaseId);
     }
-
-    // Determine final status
-    const totalOrdered = purchase.totalQuantity !== undefined ? Number(purchase.totalQuantity) : (purchase.items || []).reduce((s, i) => s + Number(i.qty || i.received || 0), 0);
-    const totalReceivedAll = (purchase.items || []).reduce((s, i) => s + Number(i.receivedQty !== undefined ? i.receivedQty : (i.received !== undefined ? i.received : 0)), 0);
-    purchase.totalReceived = totalReceivedAll;
-
-    if (totalReceivedAll >= totalOrdered) {
-      purchase.status = 'Received';
-    } else {
-      purchase.status = 'Partially Received';
-    }
-
-    if (!Array.isArray(purchase.receiptHistory)) purchase.receiptHistory = [];
-    purchase.receiptHistory.unshift({
-      date: receiptDate || new Date().toISOString().split('T')[0],
-      totalReceived: totalNewlyReceived,
-      notes: notes || '',
-      items: receiptEventItems
-    });
-
-    this.save();
-    return purchase;
   }
 
   deleteDraftPurchase(purchaseId) {
@@ -1933,27 +2062,28 @@ class StoreManager {
       totalQty += q;
       totalAmount += lineCost;
 
-      let product = (this.data.products || []).find(p => p.id === item.productId || (p.name && p.name.toLowerCase() === (item.productName || '').toLowerCase()));
+      let product = (this.data.products || []).find(p => p.id === item.productId || (p.name && p.name.trim().toLowerCase() === (item.productName || '').trim().toLowerCase()));
 
       if (product) {
         if (!product.variants || product.variants.length === 0) {
-          product.variants = [{ size: 'Standard', stock: 0, damaged: 0, purchasePrice: buyPrice, sellingPrice: sellPrice }];
+          product.variants = [{ size: 'Standard', stock: Number(product.stock || product.totalStock) || 0, damaged: 0, purchasePrice: buyPrice, sellingPrice: product.sellingPrice || null }];
         }
 
-        const targetSize = item.size || 'Standard';
-        let variant = product.variants.find(v => v.size === targetSize);
+        const targetSize = (item.size || 'Standard').trim().toUpperCase();
+        let variant = product.variants.find(v => (v.size || 'Standard').trim().toUpperCase() === targetSize);
         if (!variant) {
-          variant = { size: targetSize, stock: 0, damaged: 0, purchasePrice: buyPrice, sellingPrice: sellPrice };
+          variant = { size: item.size || 'Standard', stock: 0, damaged: 0, purchasePrice: buyPrice, sellingPrice: product.sellingPrice || null };
           product.variants.push(variant);
         }
 
         variant.stock = (variant.stock || 0) + q;
-        if (buyPrice > 0) variant.purchasePrice = buyPrice;
-        if (sellPrice > 0) variant.sellingPrice = sellPrice;
+        if (buyPrice > 0) {
+          variant.purchasePrice = buyPrice;
+          product.purchasePrice = buyPrice;
+        }
 
         product.totalStock = product.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
-        if (sellPrice > 0) product.sellingPrice = sellPrice;
-        if (buyPrice > 0) product.purchasePrice = buyPrice;
+        product.stock = product.totalStock;
 
         itemRecords.push({
           product: product.name,
@@ -2260,6 +2390,8 @@ class StoreManager {
 }
 
 const store = new StoreManager();
+window.store = store;
+window.StoreManager = StoreManager;
 
 // ==========================================
 // 2. UI HELPER COMPONENTS
@@ -7324,12 +7456,16 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
     if (purchaseItemsData.length === 0) {
       const defaultP = productsList[0];
+      const hasDefSizes = defaultP && defaultP.variants && defaultP.variants.length > 0;
+      const defVar = hasDefSizes ? defaultP.variants[0] : null;
       purchaseItemsData.push({
         productId: defaultP ? defaultP.id : '',
-        size: 'Standard',
+        size: defVar ? defVar.size : 'Standard',
+        sku: defVar ? (defVar.sku || '') : '',
+        variantId: defVar ? (defVar.id || '') : '',
         qty: 50,
-        buyingPrice: defaultP ? (defaultP.purchasePrice || 200) : 200,
-        sellingPrice: defaultP ? (defaultP.sellingPrice || 400) : 400
+        buyingPrice: defVar ? (defVar.purchasePrice || defaultP.purchasePrice || 200) : 200,
+        sellingPrice: defVar ? (defVar.sellingPrice || defaultP.sellingPrice || 400) : 400
       });
     }
 
@@ -7422,10 +7558,14 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         const newP = productsList.find(p => p.id === item.productId);
         if (newP && newP.variants && newP.variants.length > 0) {
           item.size = newP.variants[0].size;
+          item.sku = newP.variants[0].sku || '';
+          item.variantId = newP.variants[0].id || '';
           item.buyingPrice = newP.variants[0].purchasePrice || newP.purchasePrice || 200;
           item.sellingPrice = newP.variants[0].sellingPrice || newP.sellingPrice || Math.round(item.buyingPrice * 1.5);
         } else {
           item.size = 'Standard';
+          item.sku = '';
+          item.variantId = '';
           item.buyingPrice = newP ? (newP.purchasePrice || 200) : 200;
           item.sellingPrice = newP ? (newP.sellingPrice || Math.round(item.buyingPrice * 1.5)) : 300;
         }
@@ -7437,8 +7577,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         const selectedP = productsList.find(p => p.id === item.productId);
         if (selectedP && selectedP.variants) {
           const v = selectedP.variants.find(varItem => varItem.size === item.size);
-          if (v && v.purchasePrice) item.buyingPrice = v.purchasePrice;
-          if (v && v.sellingPrice) item.sellingPrice = v.sellingPrice;
+          if (v) {
+            item.sku = v.sku || '';
+            item.variantId = v.id || '';
+            if (v.purchasePrice) item.buyingPrice = v.purchasePrice;
+            if (v.sellingPrice) item.sellingPrice = v.sellingPrice;
+          }
         }
         renderPurchaseItems();
       });
@@ -7490,12 +7634,16 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   mainCard.querySelector('#btn-add-pur-item').addEventListener('click', () => {
     const productsList = store.data.products || [];
     const defaultP = productsList[0];
+    const hasDefSizes = defaultP && defaultP.variants && defaultP.variants.length > 0;
+    const defVar = hasDefSizes ? defaultP.variants[0] : null;
     purchaseItemsData.push({
       productId: defaultP ? defaultP.id : '',
-      size: 'Standard',
+      size: defVar ? defVar.size : 'Standard',
+      sku: defVar ? (defVar.sku || '') : '',
+      variantId: defVar ? (defVar.id || '') : '',
       qty: 50,
-      buyingPrice: defaultP ? (defaultP.purchasePrice || 200) : 200,
-      sellingPrice: defaultP ? (defaultP.sellingPrice || 400) : 400
+      buyingPrice: defVar ? (defVar.purchasePrice || defaultP.purchasePrice || 200) : 200,
+      sellingPrice: defVar ? (defVar.sellingPrice || defaultP.sellingPrice || 400) : 400
     });
     renderPurchaseItems();
   });
