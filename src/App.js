@@ -1802,8 +1802,26 @@ class StoreManager {
       totalAmount += lineCost;
 
       const prodName = (item.productName || item.product || '').trim();
-      const enteredCat = (item.category || '').trim();
-      const enteredBrand = (item.brand || '').trim();
+      let enteredCat = (item.category || '').trim();
+      let enteredBrand = (item.brand || '').trim();
+
+      // Normalize category casing or register custom category
+      if (enteredCat && Array.isArray(this.data.categories)) {
+        const catMatch = this.data.categories.find(c => c.trim().toLowerCase() === enteredCat.toLowerCase());
+        if (catMatch) {
+          enteredCat = catMatch;
+        } else {
+          this.data.categories.push(enteredCat);
+        }
+      }
+      if (enteredBrand && Array.isArray(this.data.brands)) {
+        const brandMatch = this.data.brands.find(b => b.trim().toLowerCase() === enteredBrand.toLowerCase());
+        if (brandMatch) {
+          enteredBrand = brandMatch;
+        } else {
+          this.data.brands.push(enteredBrand);
+        }
+      }
 
       // 1. Check if a product with this name + brand was created during this save
       let foundProd = findMatch(newlyCreatedThisRun, prodName, enteredBrand, enteredCat, item.productId);
@@ -1832,12 +1850,12 @@ class StoreManager {
         if (!Array.isArray(this.data.products)) this.data.products = [];
         this.data.products.unshift(foundProd);
         newlyCreatedThisRun.push(foundProd);
-
-        if (enteredCat && Array.isArray(this.data.categories) && !this.data.categories.includes(enteredCat)) {
-          this.data.categories.push(enteredCat);
+      } else if (foundProd) {
+        if (enteredCat && (!foundProd.category || foundProd.category === 'General')) {
+          foundProd.category = enteredCat;
         }
-        if (enteredBrand && Array.isArray(this.data.brands) && !this.data.brands.includes(enteredBrand)) {
-          this.data.brands.push(enteredBrand);
+        if (enteredBrand && (!foundProd.brand || foundProd.brand === 'Generic')) {
+          foundProd.brand = enteredBrand;
         }
       }
 
@@ -2032,9 +2050,11 @@ class StoreManager {
 
         // If variant doesn't exist on this product, safely create it on the existing product record
         if (!variant) {
+          const varId = `VAR-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 900 + 100)}`;
           variant = {
+            id: varId,
             size: item.size || 'Standard',
-            sku: item.sku || (product.name ? `${product.name.slice(0, 3).toUpperCase()}-${targetSize}` : ''),
+            sku: item.sku || (product.name ? `${product.name.slice(0, 3).toUpperCase()}-${targetSize.replace(/\s+/g, '')}` : ''),
             stock: 0,
             damaged: 0,
             purchasePrice: Number(item.buyingPrice || item.price || product.purchasePrice || 0),
@@ -7581,7 +7601,9 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         size: (defaultP && defaultP.variants && defaultP.variants[0]) ? defaultP.variants[0].size : 'M',
         qty: 50,
         buyingPrice: defaultP ? (defaultP.purchasePrice || 200) : 200,
-        sellingPrice: defaultP ? (defaultP.sellingPrice || 400) : 400
+        sellingPrice: defaultP ? (defaultP.sellingPrice || 400) : 400,
+        isCustomCategory: false,
+        isCustomSize: false
       });
     }
 
@@ -7601,7 +7623,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       item.sellingPrice = sPrice;
       const lineValue = q * sPrice;
 
-      const isCustomCat = item.category && !categoriesList.includes(item.category);
+      const isCustomCat = !!item.isCustomCategory || (item.category && !categoriesList.includes(item.category));
+      item.isCustomCategory = isCustomCat;
+
+      const isCustomSize = !!item.isCustomSize || (item.size && !standardSizes.includes(item.size));
+      item.isCustomSize = isCustomSize;
+
       const sameProdCount = purchaseItemsData.filter(i => (i.productName || '').trim().toLowerCase() === (item.productName || '').trim().toLowerCase()).length;
 
       row.innerHTML = `
@@ -7611,14 +7638,21 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product Name <span style="color: #ef4444;">*</span></label>
             <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${item.productName || ''}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
           </div>
-          <div class="form-group" style="margin: 0;">
+          <div class="form-group pur-cat-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Category <span style="color: #ef4444;">*</span></label>
-            <select class="form-select pur-cat-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
-              <option value="">Select Category *</option>
-              ${categoriesList.map(c => `<option value="${c}" ${c === item.category ? 'selected' : ''}>${c}</option>`).join('')}
-              <option value="__CUSTOM__" ${isCustomCat ? 'selected' : ''}>+ Custom Category...</option>
-            </select>
-            <input type="text" class="form-input pur-cat-custom-input" placeholder="Enter category" value="${isCustomCat ? item.category : ''}" style="display: ${isCustomCat ? 'block' : 'none'}; margin-top: 0.35rem; padding: 0.4rem 0.65rem; font-size: 0.85rem;">
+            <div class="pur-cat-container" style="position: relative; width: 100%;">
+              <select class="form-select pur-cat-select" style="display: ${isCustomCat ? 'none' : 'block'}; padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500; width: 100%;">
+                <option value="">Select Category *</option>
+                ${categoriesList.map(c => `<option value="${c}" ${(!isCustomCat && c === item.category) ? 'selected' : ''}>${c}</option>`).join('')}
+                <option value="__CUSTOM__">+ Custom Category...</option>
+              </select>
+              <div class="pur-cat-custom-wrapper" style="display: ${isCustomCat ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
+                <input type="text" class="form-input pur-cat-custom-input" placeholder="Enter category" value="${isCustomCat ? (item.category || '') : ''}" style="width: 100%; padding: 0.45rem 2.2rem 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
+                <button type="button" class="btn btn-ghost pur-cat-back-btn" title="Switch back to Category dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.25rem 0.35rem; height: 26px; width: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
+                  <i data-lucide="list" style="width: 14px; height: 14px;"></i>
+                </button>
+              </div>
+            </div>
           </div>
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Brand</label>
@@ -7638,13 +7672,20 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
         <!-- Tier 2: Size & Financials (Size, Qty, Buying Price, Total Cost, Selling Price, Est Value) -->
         <div style="display: grid; grid-template-columns: 1.2fr 1fr 1.2fr 1.2fr 1.2fr 1.2fr; gap: 0.75rem; align-items: end; border-top: 1px dashed var(--border-color); padding-top: 0.65rem;">
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size / Variant</label>
-            <select class="form-select pur-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
-              ${standardSizes.map(s => `<option value="${s}" ${s === item.size ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
-              ${(item.size && !standardSizes.includes(item.size)) ? `<option value="${item.size}" selected>${item.size}</option>` : ''}
-              <option value="__CUSTOM__">+ Custom Size...</option>
-            </select>
+          <div class="form-group pur-size-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size / Variant <span style="color: #ef4444;">*</span></label>
+            <div class="pur-size-container" style="position: relative; width: 100%;">
+              <select class="form-select pur-size-select" style="display: ${isCustomSize ? 'none' : 'block'}; padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500; width: 100%;">
+                ${standardSizes.map(s => `<option value="${s}" ${(!isCustomSize && s === item.size) ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
+                <option value="__CUSTOM__">+ Custom Size...</option>
+              </select>
+              <div class="pur-size-custom-wrapper" style="display: ${isCustomSize ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
+                <input type="text" class="form-input pur-size-custom-input" placeholder="Enter size / variant" value="${isCustomSize ? (item.size || '') : ''}" style="width: 100%; padding: 0.45rem 2.2rem 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
+                <button type="button" class="btn btn-ghost pur-size-back-btn" title="Switch back to Size dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.25rem 0.35rem; height: 26px; width: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
+                  <i data-lucide="list" style="width: 14px; height: 14px;"></i>
+                </button>
+              </div>
+            </div>
           </div>
 
           <div class="form-group" style="margin: 0;">
@@ -7676,9 +7717,17 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
       const nameInp = row.querySelector('.pur-name-input');
       const catSel = row.querySelector('.pur-cat-select');
+      const catCustomWrapper = row.querySelector('.pur-cat-custom-wrapper');
       const catCustomInp = row.querySelector('.pur-cat-custom-input');
+      const catBackBtn = row.querySelector('.pur-cat-back-btn');
+
       const brandInp = row.querySelector('.pur-brand-input');
+
       const sizeSel = row.querySelector('.pur-size-select');
+      const sizeCustomWrapper = row.querySelector('.pur-size-custom-wrapper');
+      const sizeCustomInp = row.querySelector('.pur-size-custom-input');
+      const sizeBackBtn = row.querySelector('.pur-size-back-btn');
+
       const qtyInp = row.querySelector('.pur-qty-input');
       const buyInp = row.querySelector('.pur-buying-input');
       const sellInp = row.querySelector('.pur-selling-input');
@@ -7695,7 +7744,17 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         if (matched) {
           if (!item.category || item.category === 'General') {
             item.category = matched.category || '';
-            if (catSel) catSel.value = item.category;
+            if (categoriesList.includes(item.category)) {
+              item.isCustomCategory = false;
+              catSel.style.display = 'block';
+              catCustomWrapper.style.display = 'none';
+              catSel.value = item.category;
+            } else {
+              item.isCustomCategory = true;
+              catSel.style.display = 'none';
+              catCustomWrapper.style.display = 'flex';
+              catCustomInp.value = item.category;
+            }
           }
           if (!item.brand || item.brand === 'Generic') {
             item.brand = matched.brand || '';
@@ -7719,35 +7778,78 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
       catSel.addEventListener('change', (e) => {
         if (e.target.value === '__CUSTOM__') {
-          catCustomInp.style.display = 'block';
+          item.isCustomCategory = true;
+          catSel.style.display = 'none';
+          catCustomWrapper.style.display = 'flex';
+          if (item.category && categoriesList.includes(item.category)) {
+            catCustomInp.value = '';
+            item.category = '';
+          } else {
+            catCustomInp.value = item.category || '';
+          }
           catCustomInp.focus();
-          item.category = catCustomInp.value.trim();
+          if (window.lucide) window.lucide.createIcons();
         } else {
-          catCustomInp.style.display = 'none';
+          item.isCustomCategory = false;
           item.category = e.target.value;
         }
       });
 
       catCustomInp.addEventListener('input', (e) => {
-        item.category = e.target.value.trim();
+        item.category = e.target.value;
       });
 
-      brandInp.addEventListener('input', (e) => {
-        item.brand = e.target.value;
+      catBackBtn.addEventListener('click', () => {
+        item.isCustomCategory = false;
+        catCustomWrapper.style.display = 'none';
+        catSel.style.display = 'block';
+        if (item.category && categoriesList.includes(item.category.trim())) {
+          catSel.value = item.category.trim();
+        } else {
+          catSel.value = categoriesList[0] || '';
+          item.category = catSel.value;
+        }
+        catSel.focus();
       });
 
       sizeSel.addEventListener('change', (e) => {
         if (e.target.value === '__CUSTOM__') {
-          const custom = prompt('Enter custom size / variant (e.g. 32, 34, UK 8):');
-          if (custom && custom.trim()) {
-            item.size = custom.trim().toUpperCase();
-            renderPurchaseItems();
+          item.isCustomSize = true;
+          sizeSel.style.display = 'none';
+          sizeCustomWrapper.style.display = 'flex';
+          if (item.size && standardSizes.includes(item.size)) {
+            sizeCustomInp.value = '';
+            item.size = '';
           } else {
-            sizeSel.value = item.size || 'Standard';
+            sizeCustomInp.value = item.size || '';
           }
-          return;
+          sizeCustomInp.focus();
+          if (window.lucide) window.lucide.createIcons();
+        } else {
+          item.isCustomSize = false;
+          item.size = e.target.value;
         }
+      });
+
+      sizeCustomInp.addEventListener('input', (e) => {
         item.size = e.target.value;
+      });
+
+      sizeBackBtn.addEventListener('click', () => {
+        item.isCustomSize = false;
+        sizeCustomWrapper.style.display = 'none';
+        sizeSel.style.display = 'block';
+        if (item.size && standardSizes.includes(item.size.trim())) {
+          sizeSel.value = item.size.trim();
+        } else {
+          sizeSel.value = standardSizes[0] || 'M';
+          item.size = sizeSel.value;
+        }
+        sizeSel.focus();
+      });
+
+      brandInp.addEventListener('input', (e) => {
+        item.brand = e.target.value;
       });
 
       qtyInp.addEventListener('input', (e) => {
@@ -7773,7 +7875,10 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             if ((other.productName || '').trim().toLowerCase() === targetName && other !== item) {
               other.buyingPrice = item.buyingPrice;
               other.sellingPrice = item.sellingPrice;
-              if (item.category) other.category = item.category;
+              if (item.category) {
+                other.category = item.category;
+                other.isCustomCategory = item.isCustomCategory;
+              }
               if (item.brand) other.brand = item.brand;
               affected++;
             }
@@ -7812,6 +7917,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     const buyingPrice = lastItem ? (lastItem.buyingPrice || 200) : 200;
     const sellingPrice = lastItem ? (lastItem.sellingPrice || 350) : 350;
     const qty = lastItem ? (lastItem.qty || 50) : 50;
+    const isCustomCat = lastItem ? !!lastItem.isCustomCategory : false;
 
     // Determine next size to suggest for this product
     const usedSizes = new Set(purchaseItemsData.filter(i => (i.productName || '').trim().toLowerCase() === prodName.trim().toLowerCase()).map(i => i.size));
@@ -7825,7 +7931,9 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       size: nextSize,
       qty: qty,
       buyingPrice: buyingPrice,
-      sellingPrice: sellingPrice
+      sellingPrice: sellingPrice,
+      isCustomCategory: isCustomCat,
+      isCustomSize: false
     });
     renderPurchaseItems();
   });
@@ -7865,6 +7973,16 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         toast.show({ message: `Row #${i + 1}: Category is required.`, type: 'danger' });
         return;
       }
+      const pSize = (item.size || '').trim();
+      if (!pSize) {
+        toast.show({ message: `Row #${i + 1}: Size / Variant is required.`, type: 'danger' });
+        return;
+      }
+      item.productName = pName;
+      item.category = pCat;
+      item.size = pSize;
+      item.brand = (item.brand || '').trim();
+
       const q = parseInt(item.qty, 10);
       if (isNaN(q) || q <= 0) {
         toast.show({ message: `Row #${i + 1}: Quantity must be a positive whole number greater than 0.`, type: 'danger' });
@@ -7924,6 +8042,16 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         toast.show({ message: `Row #${i + 1}: Category is required.`, type: 'danger' });
         return;
       }
+      const pSize = (item.size || '').trim();
+      if (!pSize) {
+        toast.show({ message: `Row #${i + 1}: Size / Variant is required.`, type: 'danger' });
+        return;
+      }
+      item.productName = pName;
+      item.category = pCat;
+      item.size = pSize;
+      item.brand = (item.brand || '').trim();
+
       const q = parseInt(item.qty, 10);
       if (isNaN(q) || q <= 0) {
         toast.show({ message: `Row #${i + 1}: Quantity must be a positive whole number greater than 0.`, type: 'danger' });
