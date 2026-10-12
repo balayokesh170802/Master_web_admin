@@ -2341,13 +2341,20 @@ class StoreManager {
     (salePayload.items || []).forEach(item => {
       const prod = this.data.products.find(p => p.id === item.productId);
       if (prod) {
-        const variant = (prod.variants || []).find(v => v.size === item.size) || (prod.variants || [])[0];
+        const variant = (prod.variants || []).find(v => v.size === item.size) || (prod.variants && prod.variants.length > 0 ? prod.variants[0] : null);
         if (variant && shouldDeductStock) {
           variant.stock = Math.max(0, (variant.stock || 0) - item.qty);
+        } else if (!variant && shouldDeductStock) {
+          prod.totalStock = Math.max(0, (prod.totalStock || 0) - item.qty);
         }
-        prod.totalStock = (prod.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+        if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+          prod.totalStock = prod.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+        }
 
-        const lineTotal = (item.sellingPrice || prod.sellingPrice || 0) * item.qty;
+        const priceToUse = (item.sellingPrice !== undefined && item.sellingPrice !== null && Number(item.sellingPrice) > 0)
+          ? Number(item.sellingPrice)
+          : (variant && variant.sellingPrice > 0 ? variant.sellingPrice : (prod.sellingPrice || 0));
+        const lineTotal = priceToUse * item.qty;
         totalAmt += lineTotal;
         totalItemCount += item.qty;
 
@@ -2356,7 +2363,7 @@ class StoreManager {
           productId: prod.id,
           size: item.size || 'Standard',
           qty: item.qty,
-          price: item.sellingPrice || prod.sellingPrice || 0,
+          price: priceToUse,
           amount: lineTotal
         });
       }
@@ -8814,14 +8821,38 @@ function renderAddSalePage(onNavigate = null) {
     </div>
 
     <!-- SECTION B: SALE ITEMS -->
-    <div style="display: flex; flex-direction: column; gap: 1rem;">
-      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
-        Sale Items
-      </h3>
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary);">
+          Sale Items
+        </h3>
+        <span style="font-size: 0.8rem; color: var(--text-secondary);">Directly linked to authoritative Inventory product data</span>
+      </div>
 
-      <div id="sale-items-container" style="display: flex; flex-direction: column; gap: 1rem;"></div>
+      <!-- Responsive Horizontal Scroll Container for 8 Columns -->
+      <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-card); box-shadow: var(--shadow-sm);">
+        <div style="min-width: 980px; padding: 0.85rem; display: flex; flex-direction: column; gap: 0.65rem;">
+          
+          <!-- Column Headers -->
+          <div style="display: grid; grid-template-columns: 2.2fr 1.3fr 1.3fr 1.2fr 1fr 1.1fr 0.9fr 1.1fr 34px; gap: 0.65rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border-color); font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); align-items: center;">
+            <div>Product Name</div>
+            <div>Brand</div>
+            <div>Category</div>
+            <div>Size / Variant</div>
+            <div style="text-align: center;">Available Stock</div>
+            <div style="text-align: right;">Selling Price (₹)</div>
+            <div style="text-align: center;">Quantity</div>
+            <div style="text-align: right;">Total (₹)</div>
+            <div></div>
+          </div>
 
-      <button type="button" id="btn-add-sale-row" class="btn btn-secondary btn-sm" style="align-self: start; display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem;">
+          <!-- Items Rows Container -->
+          <div id="sale-items-container" style="display: flex; flex-direction: column; gap: 0.65rem;"></div>
+
+        </div>
+      </div>
+
+      <button type="button" id="btn-add-sale-row" class="btn btn-secondary btn-sm" style="align-self: start; display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.25rem;">
         <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
         <span>Add Another Item</span>
       </button>
@@ -8880,14 +8911,62 @@ function renderAddSalePage(onNavigate = null) {
 
   const itemsContainer = mainCard.querySelector('#sale-items-container');
 
+  function getVariantDetails(prod, size) {
+    if (!prod) {
+      return { variant: null, availStock: 0, sellingPrice: 0, hasSizes: false };
+    }
+    const variants = Array.isArray(prod.variants) ? prod.variants : [];
+    const hasSizes = variants.length > 0 && variants.some(v => v.size && v.size !== 'Standard');
+    
+    let variant = null;
+    if (hasSizes) {
+      variant = variants.find(v => v.size === size) || variants[0] || null;
+    } else if (variants.length > 0) {
+      variant = variants[0];
+    }
+
+    let availStock = 0;
+    if (variant) {
+      availStock = typeof variant.stock === 'number' ? variant.stock : 0;
+    } else {
+      availStock = typeof prod.totalStock === 'number' ? prod.totalStock : 0;
+    }
+
+    let sellingPrice = 0;
+    if (variant && typeof variant.sellingPrice === 'number' && variant.sellingPrice > 0) {
+      sellingPrice = variant.sellingPrice;
+    } else if (typeof prod.sellingPrice === 'number' && prod.sellingPrice > 0) {
+      sellingPrice = prod.sellingPrice;
+    }
+
+    return { variant, availStock, sellingPrice, hasSizes };
+  }
+
+  function initDefaultItem() {
+    const productsList = store.data.products || [];
+    const defaultP = productsList[0];
+    const defaultBrand = defaultP ? (defaultP.brand || '').trim() : '';
+    let defaultSize = 'Standard';
+    if (defaultP && defaultP.variants && defaultP.variants.length > 0) {
+      defaultSize = defaultP.variants[0].size || 'Standard';
+    }
+    return {
+      productId: defaultP ? defaultP.id : '',
+      brand: defaultBrand,
+      size: defaultSize,
+      qty: 1,
+      searchQuery: ''
+    };
+  }
+
   function updateSaleSummary() {
     let subtotal = 0;
     const productsList = store.data.products || [];
 
     saleItemsData.forEach(item => {
       const prod = productsList.find(p => p.id === item.productId);
-      const price = (prod && prod.sellingPrice) ? prod.sellingPrice : 0;
-      subtotal += (item.qty || 0) * price;
+      const details = getVariantDetails(prod, item.size);
+      subtotal += (item.qty || 0) * (details.sellingPrice || 0);
     });
 
     const discountVal = parseFloat(mainCard.querySelector('#sale-discount-input').value) || 0;
@@ -8900,107 +8979,305 @@ function renderAddSalePage(onNavigate = null) {
   function renderSaleRows() {
     itemsContainer.innerHTML = '';
     const productsList = store.data.products || [];
+    const inventoryBrands = Array.from(
+      new Set(productsList.map(p => (p.brand || '').trim()).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
 
     if (saleItemsData.length === 0) {
-      const defaultP = productsList[0];
-      saleItemsData.push({
-        productId: defaultP ? defaultP.id : '',
-        size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
-        qty: 1
-      });
+      saleItemsData.push(initDefaultItem());
     }
 
     saleItemsData.forEach((item, index) => {
-      const row = document.createElement('div');
-      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
-      if (window.innerWidth < 768) row.style.gridTemplateColumns = '1fr 1fr';
+      // 1. Candidate products based on selected brand
+      let candidateProducts = productsList;
+      if (item.brand && item.brand.trim() !== '') {
+        candidateProducts = productsList.filter(p => (p.brand || '').trim().toLowerCase() === item.brand.trim().toLowerCase());
+      }
 
-      const selectedProd = productsList.find(p => p.id === item.productId) || productsList[0];
-      const hasSizes = selectedProd && selectedProd.variants && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size !== 'Standard');
-
-      let sizeOptionsHtml = '';
-      let availStock = 0;
-
-      if (hasSizes) {
-        sizeOptionsHtml = (selectedProd.variants || []).map(v => `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}</option>`).join('');
-        const selectedVariant = (selectedProd.variants || []).find(v => v.size === item.size) || (selectedProd.variants || [])[0];
-        if (selectedVariant) {
-          availStock = selectedVariant.stock || 0;
-          item.size = selectedVariant.size;
+      // If item.productId does not match candidateProducts, switch to first candidate product or empty
+      if (item.productId && !candidateProducts.some(p => p.id === item.productId)) {
+        if (candidateProducts.length > 0) {
+          item.productId = candidateProducts[0].id;
+          const newP = candidateProducts[0];
+          item.size = (newP.variants && newP.variants.length > 0) ? newP.variants[0].size : 'Standard';
+        } else {
+          item.productId = '';
         }
-      } else if (selectedProd) {
-        sizeOptionsHtml = `<option value="Standard">Standard (No sizes)</option>`;
-        availStock = (selectedProd.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+      } else if (!item.productId && candidateProducts.length > 0) {
+        item.productId = candidateProducts[0].id;
+      }
+
+      const selectedProd = productsList.find(p => p.id === item.productId) || null;
+
+      // Synchronize brand from selected product if brand was not explicitly filtering or if product changed
+      if (selectedProd && selectedProd.brand && selectedProd.brand.trim() !== '') {
+        if (!item.brand) {
+          item.brand = selectedProd.brand.trim();
+        }
+      } else if (selectedProd && (!selectedProd.brand || selectedProd.brand.trim() === '')) {
+        if (!item.brand) {
+          item.brand = '';
+        }
+      }
+
+      // Variant details
+      const details = getVariantDetails(selectedProd, item.size);
+      const hasSizes = details.hasSizes;
+      if (details.variant) {
+        item.size = details.variant.size;
+      } else if (!hasSizes) {
         item.size = 'Standard';
       }
 
-      const price = (selectedProd && selectedProd.sellingPrice !== null && selectedProd.sellingPrice !== undefined) ? selectedProd.sellingPrice : 0;
-      const priceDisplay = price > 0 ? `₹${price.toLocaleString()}` : 'Price Not Set';
-      const lineTotal = (item.qty || 0) * price;
+      const availStock = details.availStock;
+      const unitPrice = details.sellingPrice;
+      const lineTotal = (item.qty || 0) * unitPrice;
+      const isOverStock = (item.qty > availStock) || (availStock === 0 && item.qty > 0);
+      const categoryText = selectedProd ? (selectedProd.category || 'General') : '—';
+      const priceDisplay = unitPrice > 0 ? `₹${unitPrice.toLocaleString('en-IN')}` : '₹0';
+
+      const row = document.createElement('div');
+      row.className = 'sale-item-row';
+      row.dataset.index = index;
+      row.style.cssText = 'display: grid; grid-template-columns: 2.2fr 1.3fr 1.3fr 1.2fr 1fr 1.1fr 0.9fr 1.1fr 34px; gap: 0.65rem; align-items: start; padding: 0.6rem 0.75rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-secondary);';
+
+      // Build options for product select based on candidateProducts and searchQuery
+      const query = (item.searchQuery || '').toLowerCase().trim();
+      const searchFilteredProds = candidateProducts.filter(p => !query || p.name.toLowerCase().includes(query) || (p.brand && p.brand.toLowerCase().includes(query)));
+
+      let prodOptionsHtml = '';
+      if (searchFilteredProds.length === 0) {
+        prodOptionsHtml = '<option value="" disabled>No products match</option>';
+      } else {
+        prodOptionsHtml = searchFilteredProds.map(p => {
+          const brandLabel = p.brand ? ` [${p.brand}]` : '';
+          return `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}${brandLabel}</option>`;
+        }).join('');
+      }
+
+      // Build options for brand select
+      let brandOptionsHtml = `<option value="" ${!item.brand ? 'selected' : ''}>All Brands</option>`;
+      inventoryBrands.forEach(b => {
+        brandOptionsHtml += `<option value="${b}" ${b.toLowerCase() === (item.brand || '').toLowerCase() ? 'selected' : ''}>${b}</option>`;
+      });
+
+      // Build options for sizes
+      let sizeOptionsHtml = '';
+      if (hasSizes) {
+        sizeOptionsHtml = (selectedProd.variants || []).map(v => {
+          const vPrice = v.sellingPrice > 0 ? ` (₹${v.sellingPrice})` : '';
+          return `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}${vPrice}</option>`;
+        }).join('');
+      } else {
+        sizeOptionsHtml = `<option value="Standard">Standard (No sizes)</option>`;
+      }
 
       row.innerHTML = `
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Product</label>
-          <select class="form-select sale-prod-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
-            ${productsList.map(p => `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}</option>`).join('')}
+        <!-- 1. PRODUCT NAME (Searchable dropdown) -->
+        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+          <input type="text" class="form-input sale-prod-search" placeholder="🔍 Search product..." value="${item.searchQuery || ''}" style="padding: 0.25rem 0.45rem; font-size: 0.78rem; height: 26px; box-sizing: border-box;" title="Type to filter product list">
+          <select class="form-select sale-prod-select" style="padding: 0.35rem 0.5rem; font-size: 0.85rem; height: 32px; box-sizing: border-box;">
+            ${prodOptionsHtml}
           </select>
         </div>
 
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Size</label>
-          <select class="form-select sale-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;" ${!hasSizes ? 'disabled' : ''}>
+        <!-- 2. BRAND (Dropdown) -->
+        <div style="display: flex; flex-direction: column;">
+          <select class="form-select sale-brand-select" style="padding: 0.35rem 0.5rem; font-size: 0.85rem; height: 32px; box-sizing: border-box;">
+            ${brandOptionsHtml}
+          </select>
+        </div>
+
+        <!-- 3. CATEGORY (Read-Only) -->
+        <div style="display: flex; flex-direction: column;">
+          <div class="sale-cat-display" style="padding: 0.45rem 0.55rem; font-size: 0.85rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-secondary); height: 32px; display: flex; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box;" title="${categoryText}">
+            ${categoryText}
+          </div>
+        </div>
+
+        <!-- 4. SIZE / VARIANT (Dropdown) -->
+        <div style="display: flex; flex-direction: column;">
+          <select class="form-select sale-size-select" style="padding: 0.35rem 0.5rem; font-size: 0.85rem; height: 32px; box-sizing: border-box;" ${!hasSizes ? 'disabled' : ''}>
             ${sizeOptionsHtml}
           </select>
         </div>
 
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Avail. Stock</label>
-          <div class="sale-avail-stock" style="font-weight: 600; font-size: 0.875rem; padding: 0.45rem 0; color: ${availStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${availStock} units</div>
+        <!-- 5. AVAILABLE STOCK (Read-Only) -->
+        <div style="display: flex; flex-direction: column;">
+          <div class="sale-stock-display" style="font-weight: 600; font-size: 0.85rem; padding: 0.45rem 0.5rem; color: ${availStock === 0 ? '#ef4444' : 'var(--text-primary)'}; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 32px; display: flex; align-items: center; justify-content: center; white-space: nowrap; box-sizing: border-box;" title="${availStock} units in stock">
+            ${availStock} units
+          </div>
         </div>
 
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Selling Price</label>
-          <div class="sale-selling-price" style="font-weight: 600; font-size: 0.875rem; padding: 0.45rem 0; color: var(--text-primary);">${priceDisplay}</div>
+        <!-- 6. SELLING PRICE (₹) (Read-Only) -->
+        <div style="display: flex; flex-direction: column;">
+          <div class="sale-price-display" style="font-weight: 600; font-size: 0.85rem; padding: 0.45rem 0.5rem; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 32px; display: flex; align-items: center; justify-content: flex-end; white-space: nowrap; box-sizing: border-box;" title="Inventory selling price">
+            ${priceDisplay}
+          </div>
         </div>
 
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 500;">Quantity</label>
-          <input type="number" class="form-input sale-qty-input" min="1" value="${item.qty || 1}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
+        <!-- 7. QUANTITY (Editable Number Input) -->
+        <div style="display: flex; flex-direction: column;">
+          <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${item.qty || 1}" style="padding: 0.35rem 0.4rem; font-size: 0.85rem; text-align: center; height: 32px; box-sizing: border-box; ${isOverStock ? 'border-color: #ef4444; background: rgba(239,68,68,0.08); color: #ef4444;' : ''}">
+          <div class="sale-qty-error" style="color: #ef4444; font-size: 0.72rem; margin-top: 2px; text-align: center; display: ${isOverStock ? 'block' : 'none'}; white-space: nowrap;">
+            ${availStock === 0 ? 'Out of stock' : `Max: ${availStock}`}
+          </div>
         </div>
 
-        <button type="button" class="btn btn-ghost sale-remove-btn" style="padding: 0.45rem; color: var(--text-secondary);" title="Remove item">
-          <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
-        </button>
+        <!-- 8. TOTAL (₹) (Read-Only Calculated) -->
+        <div style="display: flex; flex-direction: column;">
+          <div class="sale-line-total" style="font-weight: 700; font-size: 0.875rem; padding: 0.45rem 0.5rem; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 32px; display: flex; align-items: center; justify-content: flex-end; white-space: nowrap; box-sizing: border-box;">
+            ₹${lineTotal.toLocaleString('en-IN')}
+          </div>
+        </div>
+
+        <!-- ACTION: REMOVE ITEM -->
+        <div style="display: flex; align-items: center; justify-content: center; height: 32px;">
+          <button type="button" class="btn btn-ghost sale-remove-btn" style="padding: 0.35rem; color: var(--text-secondary); height: 32px; width: 32px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" title="Remove Item">
+            <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+          </button>
+        </div>
       `;
 
+      // Event Listeners for Row
+      const searchInp = row.querySelector('.sale-prod-search');
       const prodSel = row.querySelector('.sale-prod-select');
+      const brandSel = row.querySelector('.sale-brand-select');
       const sizeSel = row.querySelector('.sale-size-select');
       const qtyInp = row.querySelector('.sale-qty-input');
       const removeBtn = row.querySelector('.sale-remove-btn');
 
+      // Live search input: filters dropdown options without losing input focus
+      searchInp.addEventListener('input', (e) => {
+        item.searchQuery = e.target.value;
+        const q = item.searchQuery.toLowerCase().trim();
+        const filtered = candidateProducts.filter(p => !q || p.name.toLowerCase().includes(q) || (p.brand && p.brand.toLowerCase().includes(q)));
+        if (filtered.length === 0) {
+          prodSel.innerHTML = '<option value="" disabled>No products match</option>';
+        } else {
+          prodSel.innerHTML = filtered.map(p => {
+            const bLabel = p.brand ? ` [${p.brand}]` : '';
+            return `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}${bLabel}</option>`;
+          }).join('');
+        }
+      });
+
+      // Product dropdown change
       prodSel.addEventListener('change', (e) => {
         item.productId = e.target.value;
+        item.searchQuery = '';
         const newP = productsList.find(p => p.id === item.productId);
-        if (newP && newP.variants && newP.variants.length > 0) {
-          item.size = newP.variants[0].size;
-        } else {
-          item.size = 'Standard';
+        if (newP) {
+          item.brand = (newP.brand || '').trim();
+          if (newP.variants && newP.variants.length > 0) {
+            item.size = newP.variants[0].size || 'Standard';
+          } else {
+            item.size = 'Standard';
+          }
         }
         renderSaleRows();
         updateSaleSummary();
       });
 
-      sizeSel.addEventListener('change', (e) => {
-        item.size = e.target.value;
+      // Brand dropdown change
+      brandSel.addEventListener('change', (e) => {
+        item.brand = e.target.value.trim();
+        item.searchQuery = '';
+        // If brand is chosen, check if current product matches
+        let prodsForBrand = productsList;
+        if (item.brand) {
+          prodsForBrand = productsList.filter(p => (p.brand || '').trim().toLowerCase() === item.brand.toLowerCase());
+        }
+        if (!prodsForBrand.some(p => p.id === item.productId)) {
+          if (prodsForBrand.length > 0) {
+            item.productId = prodsForBrand[0].id;
+            const newP = prodsForBrand[0];
+            item.size = (newP.variants && newP.variants.length > 0) ? newP.variants[0].size : 'Standard';
+          } else {
+            item.productId = '';
+          }
+        }
         renderSaleRows();
         updateSaleSummary();
       });
 
-      qtyInp.addEventListener('input', (e) => {
-        item.qty = parseInt(e.target.value, 10) || 0;
+      // Size dropdown change
+      sizeSel.addEventListener('change', (e) => {
+        item.size = e.target.value;
+        const currentDetails = getVariantDetails(productsList.find(p => p.id === item.productId), item.size);
+        const availStock = currentDetails.availStock;
+        const unitPrice = currentDetails.sellingPrice;
+        const currLineTotal = (item.qty || 0) * unitPrice;
+
+        const stockEl = row.querySelector('.sale-stock-display');
+        if (stockEl) {
+          stockEl.textContent = `${availStock} units`;
+          stockEl.style.color = availStock === 0 ? '#ef4444' : 'var(--text-primary)';
+          stockEl.title = `${availStock} units in stock`;
+        }
+
+        const priceEl = row.querySelector('.sale-price-display');
+        if (priceEl) {
+          priceEl.textContent = unitPrice > 0 ? `₹${unitPrice.toLocaleString('en-IN')}` : '₹0';
+        }
+
+        const totalEl = row.querySelector('.sale-line-total');
+        if (totalEl) {
+          totalEl.textContent = `₹${currLineTotal.toLocaleString('en-IN')}`;
+        }
+
+        const errEl = row.querySelector('.sale-qty-error');
+        const isNowOver = (item.qty > availStock) || (availStock === 0 && item.qty > 0);
+        if (isNowOver) {
+          qtyInp.style.borderColor = '#ef4444';
+          qtyInp.style.background = 'rgba(239,68,68,0.08)';
+          qtyInp.style.color = '#ef4444';
+          if (errEl) {
+            errEl.textContent = availStock === 0 ? 'Out of stock' : `Max: ${availStock}`;
+            errEl.style.display = 'block';
+          }
+        } else {
+          qtyInp.style.borderColor = '';
+          qtyInp.style.background = '';
+          qtyInp.style.color = '';
+          if (errEl) errEl.style.display = 'none';
+        }
+
         updateSaleSummary();
       });
 
+      // Quantity input change
+      qtyInp.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        item.qty = isNaN(val) ? 0 : val;
+        
+        // Update line total and validation display dynamically without re-rendering row
+        const currentDetails = getVariantDetails(productsList.find(p => p.id === item.productId), item.size);
+        const currLineTotal = (item.qty || 0) * (currentDetails.sellingPrice || 0);
+        const totalEl = row.querySelector('.sale-line-total');
+        if (totalEl) totalEl.textContent = `₹${currLineTotal.toLocaleString('en-IN')}`;
+
+        const errEl = row.querySelector('.sale-qty-error');
+        const isNowOver = (item.qty > currentDetails.availStock) || (currentDetails.availStock === 0 && item.qty > 0);
+        if (isNowOver) {
+          qtyInp.style.borderColor = '#ef4444';
+          qtyInp.style.background = 'rgba(239,68,68,0.08)';
+          qtyInp.style.color = '#ef4444';
+          if (errEl) {
+            errEl.textContent = currentDetails.availStock === 0 ? 'Out of stock' : `Max: ${currentDetails.availStock}`;
+            errEl.style.display = 'block';
+          }
+        } else {
+          qtyInp.style.borderColor = '';
+          qtyInp.style.background = '';
+          qtyInp.style.color = '';
+          if (errEl) errEl.style.display = 'none';
+        }
+
+        updateSaleSummary();
+      });
+
+      // Remove button
       removeBtn.addEventListener('click', () => {
         if (saleItemsData.length <= 1) {
           toast.show({ message: 'At least one item is required for a sale.', type: 'warning' });
@@ -9021,13 +9298,7 @@ function renderAddSalePage(onNavigate = null) {
   updateSaleSummary();
 
   mainCard.querySelector('#btn-add-sale-row').addEventListener('click', () => {
-    const productsList = store.data.products || [];
-    const defaultP = productsList[0];
-    saleItemsData.push({
-      productId: defaultP ? defaultP.id : '',
-      size: defaultP && defaultP.variants && defaultP.variants.length > 0 ? defaultP.variants[0].size : 'Standard',
-      qty: 1
-    });
+    saleItemsData.push(initDefaultItem());
     renderSaleRows();
     updateSaleSummary();
   });
@@ -9057,10 +9328,16 @@ function renderAddSalePage(onNavigate = null) {
 
     const productsList = store.data.products || [];
 
+    // Check individual items & aggregate required stock per variant
+    const requiredStockMap = {};
     for (let item of saleItemsData) {
+      if (!item.productId) {
+        toast.show({ message: 'Please select a valid product for all items.', type: 'danger' });
+        return;
+      }
       const prod = productsList.find(p => p.id === item.productId);
       if (!prod) {
-        toast.show({ message: 'Please select a valid product.', type: 'danger' });
+        toast.show({ message: 'Product not found in Inventory records.', type: 'danger' });
         return;
       }
 
@@ -9069,27 +9346,51 @@ function renderAddSalePage(onNavigate = null) {
         return;
       }
 
-      const variant = (prod.variants || []).find(v => v.size === item.size) || (prod.variants || [])[0];
-      const availStock = variant ? (variant.stock || 0) : 0;
+      const key = `${item.productId}:::${item.size || 'Standard'}`;
+      requiredStockMap[key] = (requiredStockMap[key] || 0) + item.qty;
+    }
 
-      if (item.qty > availStock) {
-        const sizeLabel = item.size && item.size !== 'Standard' ? ` (${item.size})` : '';
-        toast.show({ message: `Only ${availStock} units are available for ${prod.name}${sizeLabel}.`, type: 'danger' });
+    // Cumulative stock verification against authoritative latest inventory
+    for (const [key, reqQty] of Object.entries(requiredStockMap)) {
+      const [prodId, size] = key.split(':::');
+      const prod = productsList.find(p => p.id === prodId);
+      const details = getVariantDetails(prod, size);
+      if (reqQty > details.availStock) {
+        const sizeLabel = size && size !== 'Standard' ? ` (${size})` : '';
+        toast.show({
+          message: `Only ${details.availStock} units available for "${prod.name}"${sizeLabel}. Requested: ${reqQty}.`,
+          type: 'danger'
+        });
         return;
       }
     }
 
-    store.addSale({
-      customerName: custName,
-      customerPhone: custPhone,
-      paymentMethod: payMethod,
-      paymentStatus: payStatus,
-      discount: discount,
-      items: saleItemsData
+    const itemsPayload = saleItemsData.map(item => {
+      const prod = productsList.find(p => p.id === item.productId);
+      const details = getVariantDetails(prod, item.size);
+      return {
+        productId: item.productId,
+        size: item.size || 'Standard',
+        qty: item.qty,
+        sellingPrice: details.sellingPrice
+      };
     });
 
-    toast.show({ message: 'Sale completed successfully.', type: 'success' });
-    if (onNavigate) onNavigate('sales');
+    try {
+      store.addSale({
+        customerName: custName,
+        customerPhone: custPhone,
+        paymentMethod: payMethod,
+        paymentStatus: payStatus,
+        discount: discount,
+        items: itemsPayload
+      });
+
+      toast.show({ message: 'Sale completed successfully.', type: 'success' });
+      if (onNavigate) onNavigate('sales');
+    } catch (err) {
+      toast.show({ message: err.message || 'Failed to complete sale.', type: 'danger' });
+    }
   });
 
   if (window.lucide) window.lucide.createIcons();
