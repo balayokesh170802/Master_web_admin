@@ -27,6 +27,7 @@ const initialData = {
   products: [
   {
     "id": "PROD-101",
+    "createdAt": "2026-10-01T08:00:00.000Z",
     "name": "Classic Oxford Shirt",
     "category": "Shirts",
     "brand": "ClassicFit",
@@ -82,6 +83,7 @@ const initialData = {
   },
   {
     "id": "PROD-102",
+    "createdAt": "2026-10-01T08:05:00.000Z",
     "name": "Premium Cotton T-Shirt",
     "category": "T-Shirts",
     "brand": "UrbanWear",
@@ -129,6 +131,7 @@ const initialData = {
   },
   {
     "id": "PROD-103",
+    "createdAt": "2026-10-01T08:10:00.000Z",
     "name": "Slim Fit Denim Jeans",
     "category": "Jeans",
     "brand": "DenimCo",
@@ -168,6 +171,7 @@ const initialData = {
   },
   {
     "id": "PROD-104",
+    "createdAt": "2026-10-01T08:15:00.000Z",
     "name": "Regular Fit Chino Trousers",
     "category": "Trousers",
     "brand": "ClassicFit",
@@ -207,6 +211,7 @@ const initialData = {
   },
   {
     "id": "PROD-105",
+    "createdAt": "2026-10-01T08:20:00.000Z",
     "name": "Essential Fleece Hoodie",
     "category": "Hoodies",
     "brand": "EssentialStudio",
@@ -1420,10 +1425,44 @@ class StoreManager {
     if (!Array.isArray(this.data.sales)) this.data.sales = initialData.sales || [];
     if (!Array.isArray(this.data.customers)) this.data.customers = initialData.customers || [];
 
-    // Guarantee totalStock consistency for every product across size variants
+    // Guarantee totalStock consistency and authoritative createdAt for every product (Safe migration)
     if (Array.isArray(this.data.products)) {
-      this.data.products.forEach(p => {
+      const baseSeedTime = new Date('2026-10-01T08:00:00.000Z').getTime();
+      this.data.products.forEach((p, idx) => {
         p.totalStock = (p.variants || []).reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+
+        if (!p.createdAt) {
+          let earliestDate = null;
+          if (Array.isArray(this.data.purchases)) {
+            this.data.purchases.forEach(pur => {
+              const matchedItem = (pur.items || []).some(it =>
+                (it.productId && it.productId === p.id) ||
+                (it.product && p.name && it.product.trim().toLowerCase() === p.name.trim().toLowerCase())
+              );
+              if (matchedItem && pur.date) {
+                const pt = new Date(pur.date).getTime();
+                if (!isNaN(pt) && (earliestDate === null || pt < earliestDate)) {
+                  earliestDate = pt;
+                }
+              }
+            });
+          }
+          if (earliestDate === null && Array.isArray(this.data.stockMovements)) {
+            this.data.stockMovements.forEach(m => {
+              if ((m.productId === p.id || m.product === p.name) && m.date) {
+                const mt = new Date(m.date).getTime();
+                if (!isNaN(mt) && (earliestDate === null || mt < earliestDate)) {
+                  earliestDate = mt;
+                }
+              }
+            });
+          }
+          if (earliestDate !== null) {
+            p.createdAt = new Date(earliestDate).toISOString();
+          } else {
+            p.createdAt = new Date(baseSeedTime + (idx * 60000)).toISOString();
+          }
+        }
       });
     }
 
@@ -1594,7 +1633,8 @@ class StoreManager {
           purchasePrice: buyPrice,
           sellingPrice: sellPrice
         })),
-        totalStock: 0
+        totalStock: 0,
+        createdAt: new Date().toISOString()
       };
       this.data.products.unshift(product);
     } else {
@@ -1660,7 +1700,8 @@ class StoreManager {
         status: 'Active',
         minStock: 5,
         variants: [],
-        totalStock: 0
+        totalStock: 0,
+        createdAt: new Date().toISOString()
       };
       this.data.products.unshift(product);
     } else {
@@ -1760,36 +1801,27 @@ class StoreManager {
       const candidates = list.filter(p => p.name && p.name.trim().toLowerCase() === cleanName);
       if (candidates.length === 0) return null;
 
-      if (cleanBrand) {
-        const brandMatches = candidates.filter(p => (p.brand || '').trim().toLowerCase() === cleanBrand);
-        if (brandMatches.length === 1) return brandMatches[0];
-        if (brandMatches.length > 1) {
-          if (cleanCat) {
-            const catMatch = brandMatches.find(p => (p.category || '').trim().toLowerCase() === cleanCat);
-            if (catMatch) return catMatch;
-          }
-          return brandMatches[0];
-        }
-        // Distinct brand entered -> preserve distinct product!
-        return null;
-      }
-
-      // Brand not provided
       if (candidates.length === 1) {
         const cand = candidates[0];
         const candBrand = (cand.brand || '').trim().toLowerCase();
-        if (!candBrand || (cleanCat && (cand.category || '').trim().toLowerCase() === cleanCat)) {
+        // Confident match if user provided same brand, or one/both have no brand/generic/unbranded
+        if (!cleanBrand || !candBrand || candBrand === 'generic' || candBrand === 'unbranded' || candBrand === cleanBrand) {
           return cand;
         }
         return null;
       }
 
-      if (cleanCat) {
-        const catMatches = candidates.filter(p => (p.category || '').trim().toLowerCase() === cleanCat);
-        if (catMatches.length === 1) return catMatches[0];
+      if (cleanBrand) {
+        const brandMatch = candidates.find(p => (p.brand || '').trim().toLowerCase() === cleanBrand);
+        if (brandMatch) return brandMatch;
       }
 
-      return null;
+      if (cleanCat) {
+        const catMatch = candidates.find(p => (p.category || '').trim().toLowerCase() === cleanCat);
+        if (catMatch) return catMatch;
+      }
+
+      return candidates[0];
     };
 
     (payload.items || []).forEach(item => {
@@ -1845,32 +1877,73 @@ class StoreManager {
           minStock: 5,
           status: 'Active',
           variants: [],
-          totalStock: 0
+          totalStock: 0,
+          createdAt: new Date(Date.now() + (newlyCreatedThisRun.length * 20)).toISOString()
         };
         if (!Array.isArray(this.data.products)) this.data.products = [];
         this.data.products.unshift(foundProd);
         newlyCreatedThisRun.push(foundProd);
-      } else if (foundProd) {
+      }
+
+      let prodVariantId = item.variantId || '';
+      let prodSku = item.sku || '';
+
+      if (foundProd) {
         if (enteredCat && (!foundProd.category || foundProd.category === 'General')) {
           foundProd.category = enteredCat;
         }
         if (enteredBrand && (!foundProd.brand || foundProd.brand === 'Generic')) {
           foundProd.brand = enteredBrand;
         }
+        if (buyPrice > 0 && (!foundProd.purchasePrice || foundProd.purchasePrice === 0)) {
+          foundProd.purchasePrice = buyPrice;
+        }
+        if (sellPrice > 0 && (!foundProd.sellingPrice || foundProd.sellingPrice === 0)) {
+          foundProd.sellingPrice = sellPrice;
+        }
+
+        // Register size variant on the product definition with initial stock 0
+        if (!Array.isArray(foundProd.variants)) foundProd.variants = [];
+        const targetSize = (item.size || 'Standard').trim();
+        let matchingVar = foundProd.variants.find(v => (v.size || 'Standard').trim().toUpperCase() === targetSize.toUpperCase());
+        if (!matchingVar) {
+          const varId = `VAR-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 9000 + 1000)}`;
+          const genSku = item.sku || `${(foundProd.name || 'PRD').slice(0, 3).toUpperCase()}-${targetSize.replace(/\s+/g, '')}`;
+          matchingVar = {
+            id: varId,
+            size: targetSize,
+            sku: genSku,
+            stock: 0, // DRAFT DOES NOT INCREASE STOCK
+            damaged: 0,
+            purchasePrice: buyPrice || 0,
+            sellingPrice: sellPrice || 0
+          };
+          foundProd.variants.push(matchingVar);
+        } else {
+          // If variant already existed, update prices if missing/zero
+          if (buyPrice > 0 && (!matchingVar.purchasePrice || matchingVar.purchasePrice === 0)) {
+            matchingVar.purchasePrice = buyPrice;
+          }
+          if (sellPrice > 0 && (!matchingVar.sellingPrice || matchingVar.sellingPrice === 0)) {
+            matchingVar.sellingPrice = sellPrice;
+          }
+        }
+
+        // Clean up any dummy Standard variant with 0 stock if specific sizes are entered
+        if (targetSize.toUpperCase() !== 'STANDARD' && foundProd.variants.length > 1) {
+          foundProd.variants = foundProd.variants.filter(v => (v.size || '').toUpperCase() !== 'STANDARD' || (Number(v.stock) || 0) > 0);
+        }
+
+        // Recalculate parent product total stock from variant stocks
+        foundProd.totalStock = foundProd.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+        foundProd.stock = foundProd.totalStock;
+
+        // Link item records
+        prodVariantId = matchingVar.id || prodVariantId;
+        prodSku = matchingVar.sku || prodSku;
       }
 
       const prodId = foundProd ? foundProd.id : (item.productId || '');
-      let prodSku = item.sku || '';
-      let prodVariantId = item.variantId || '';
-
-      const targetSize = (item.size || 'Standard').trim();
-      if (foundProd && (!prodSku || !prodVariantId) && Array.isArray(foundProd.variants)) {
-        const matchingVar = foundProd.variants.find(v => (v.size || 'Standard').trim().toUpperCase() === targetSize.toUpperCase());
-        if (matchingVar) {
-          if (!prodSku && matchingVar.sku) prodSku = matchingVar.sku;
-          if (!prodVariantId && matchingVar.id) prodVariantId = matchingVar.id;
-        }
-      }
 
       itemRecords.push({
         productId: prodId,
@@ -1879,7 +1952,7 @@ class StoreManager {
         product: prodName || (foundProd ? foundProd.name : 'Standard Item'),
         category: enteredCat || (foundProd ? foundProd.category : 'General'),
         brand: enteredBrand || (foundProd ? foundProd.brand : 'Generic'),
-        size: targetSize,
+        size: (item.size || 'Standard').trim(),
         qty: q,
         buyingPrice: buyPrice,
         sellingPrice: sellPrice,
@@ -5882,7 +5955,7 @@ function renderInventory(params = {}, onNavigate = null) {
     else if (params.status === 'IN_STOCK' || params.status === 'Active') selectedStatus = 'IN_STOCK';
     else selectedStatus = params.status;
   }
-  let selectedSort = 'name-asc';
+  let selectedSort = 'latest';
   let invCurrentPage = 1;
   let invPageSize = 5;
   const expandedProductIds = new Set();
@@ -5956,7 +6029,8 @@ function renderInventory(params = {}, onNavigate = null) {
           <option value="Inactive" ${selectedStatus === 'Inactive' ? 'selected' : ''}>Inactive</option>
         </select>
 
-        <select class="form-select sort-filter" style="width: auto; min-width: 155px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+        <select class="form-select sort-filter" style="width: auto; min-width: 175px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+          <option value="latest" ${selectedSort === 'latest' ? 'selected' : ''}>Sort: Latest First (Newest)</option>
           <option value="name-asc" ${selectedSort === 'name-asc' ? 'selected' : ''}>Sort: Name (A–Z)</option>
           <option value="name-desc" ${selectedSort === 'name-desc' ? 'selected' : ''}>Sort: Name (Z–A)</option>
           <option value="stock-desc" ${selectedSort === 'stock-desc' ? 'selected' : ''}>Sort: Stock (High to Low)</option>
@@ -5964,6 +6038,11 @@ function renderInventory(params = {}, onNavigate = null) {
           <option value="price-desc" ${selectedSort === 'price-desc' ? 'selected' : ''}>Sort: Price (High to Low)</option>
           <option value="price-asc" ${selectedSort === 'price-asc' ? 'selected' : ''}>Sort: Price (Low to High)</option>
         </select>
+
+        <button type="button" class="btn btn-ghost btn-sm reset-inv-filters-btn" title="Reset all filters and sorting to defaults" style="font-size: 0.8rem; height: 32px; padding: 0 0.65rem; display: inline-flex; align-items: center; gap: 0.35rem; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); cursor: pointer;">
+          <i data-lucide="rotate-ccw" style="width: 13px; height: 13px;"></i>
+          <span>Reset</span>
+        </button>
       </div>
 
       <div class="search-input-wrapper" style="max-width: 280px; width: 100%;">
@@ -6007,6 +6086,24 @@ function renderInventory(params = {}, onNavigate = null) {
   brandFilter.addEventListener('change', (e) => { selectedBrand = e.target.value; invCurrentPage = 1; renderInventoryTable(); });
   statusFilter.addEventListener('change', (e) => { selectedStatus = e.target.value; invCurrentPage = 1; renderInventoryTable(); });
   sortFilter.addEventListener('change', (e) => { selectedSort = e.target.value; invCurrentPage = 1; renderInventoryTable(); });
+
+  const resetBtn = mainCard.querySelector('.reset-inv-filters-btn');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      searchQuery = '';
+      searchInp.value = '';
+      selectedCategory = 'ALL';
+      catFilter.value = 'ALL';
+      selectedBrand = 'ALL';
+      brandFilter.value = 'ALL';
+      selectedStatus = 'ALL';
+      statusFilter.value = 'ALL';
+      selectedSort = 'latest';
+      sortFilter.value = 'latest';
+      invCurrentPage = 1;
+      renderInventoryTable();
+    });
+  }
 
   function getProductPriceInfo(product) {
     if (!product) {
@@ -6115,6 +6212,12 @@ function renderInventory(params = {}, onNavigate = null) {
       const priceA = getProductPriceInfo(a);
       const priceB = getProductPriceInfo(b);
 
+      if (selectedSort === 'latest') {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        if (timeB !== timeA) return timeB - timeA;
+        return (b.id || '').localeCompare(a.id || '');
+      }
       if (selectedSort === 'name-asc') return a.name.localeCompare(b.name);
       if (selectedSort === 'name-desc') return b.name.localeCompare(a.name);
       if (selectedSort === 'stock-desc') return stockB - stockA;
