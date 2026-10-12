@@ -1972,11 +1972,18 @@ class StoreManager {
         // Add actual received quantity
         variant.stock = Math.max(0, Number(variant.stock) || 0) + requested;
 
-        // Update purchase / cost price if positive; NEVER modify selling prices
+        // Update purchase / cost price if positive; NEVER modify existing selling prices
         const bPrice = Number(item.buyingPrice || item.price || 0);
         if (bPrice > 0) {
           variant.purchasePrice = bPrice;
           product.purchasePrice = bPrice;
+        }
+
+        // Initialize selling price if product/variant has no selling price yet
+        const sPrice = Number(item.sellingPrice || 0);
+        if (sPrice > 0) {
+          if (!variant.sellingPrice) variant.sellingPrice = sPrice;
+          if (!product.sellingPrice) product.sellingPrice = sPrice;
         }
 
         // Recalculate parent product total available stock directly from size-wise quantities
@@ -6568,10 +6575,7 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
 // PURCHASES PAGE
 // PURCHASES PAGE (Draft -> Approved -> Received Workflow)
 function renderPurchases(params = {}, onNavigate = null) {
-  if (params && (params.action === 'add-product' || params.view === 'add-product')) {
-    return renderAddProductPage(params, onNavigate);
-  }
-  if (params && (params.action === 'add' || params.view === 'add' || params.action === 'edit')) {
+  if (params && (params.action === 'add' || params.view === 'add' || params.action === 'edit' || params.action === 'add-product' || params.view === 'add-product')) {
     return renderAddPurchasePage(params, onNavigate);
   }
 
@@ -7327,35 +7331,24 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   mainCard.className = 'card';
   mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
 
-  // Restore draft state if returning from Create New Product
-  let savedDraft = null;
-  try {
-    const rawDraft = sessionStorage.getItem('add_purchase_draft');
-    if (rawDraft) savedDraft = JSON.parse(rawDraft);
-  } catch (e) {
-    savedDraft = null;
-  }
-
   const supplierVal = editingPurchase
     ? editingPurchase.supplier
-    : (savedDraft && savedDraft.supplier ? savedDraft.supplier : 'Apex Apparel Ltd');
+    : 'Apex Apparel Ltd';
 
   const dateVal = editingPurchase
     ? editingPurchase.date
-    : (savedDraft && savedDraft.date ? savedDraft.date : new Date().toISOString().split('T')[0]);
+    : new Date().toISOString().split('T')[0];
 
   const notesVal = editingPurchase
     ? (editingPurchase.notes || '')
-    : (savedDraft && savedDraft.notes ? savedDraft.notes : '');
+    : '';
 
   let purchaseItemsData = [];
   if (editingPurchase && Array.isArray(editingPurchase.items)) {
     purchaseItemsData = JSON.parse(JSON.stringify(editingPurchase.items));
-  } else if (savedDraft && Array.isArray(savedDraft.items) && savedDraft.items.length > 0) {
-    purchaseItemsData = savedDraft.items;
   }
 
-  // If returning with newly created product
+  // If returning with newly created product (if any)
   if (params && params.selectedProductId) {
     const selectedProd = (store.data.products || []).find(p => p.id === params.selectedProductId);
     if (selectedProd) {
@@ -7375,8 +7368,6 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       });
     }
   }
-
-  sessionStorage.removeItem('add_purchase_draft');
 
   mainCard.innerHTML = `
     <!-- SECTION A: PURCHASE INFORMATION -->
@@ -7404,13 +7395,18 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS -->
     <div style="display: flex; flex-direction: column; gap: 1.25rem;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="boxes" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
-          Product & Size-wise Items
-        </h3>
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="boxes" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+            Product & Size-wise Items
+          </h3>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">
+            Select existing products or enter a new product inline. Add multiple size rows with independent quantities and prices.
+          </p>
+        </div>
         <button type="button" id="btn-open-create-prod-modal" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
           <i data-lucide="plus-circle" style="width: 15px; height: 15px; color: var(--brand-primary);"></i>
-          <span>+ Create New Product</span>
+          <span>+ Add New Product</span>
         </button>
       </div>
 
@@ -7450,6 +7446,43 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   const itemsContainer = mainCard.querySelector('#pur-items-container');
 
+  function updateSummaries() {
+    let overallUnits = 0;
+    let overallCost = 0;
+    let overallSellingValue = 0;
+
+    purchaseItemsData.forEach((it, idx) => {
+      const q = parseInt(it.qty, 10) || 0;
+      const b = parseFloat(it.buyingPrice) || 0;
+      const s = parseFloat(it.sellingPrice) || 0;
+      const c = q * b;
+      const v = q * s;
+
+      overallUnits += q;
+      overallCost += c;
+      overallSellingValue += v;
+
+      const rowEl = itemsContainer.children[idx];
+      if (rowEl) {
+        const costEl = rowEl.querySelector('.pur-cost-display');
+        const valEl = rowEl.querySelector('.pur-value-display');
+        if (costEl) costEl.value = `₹${c.toLocaleString()}`;
+        if (valEl) valEl.value = `₹${v.toLocaleString()}`;
+      }
+    });
+
+    const overallProfit = overallSellingValue - overallCost;
+    const sumQtyEl = mainCard.querySelector('#pur-summary-qty');
+    const sumCostEl = mainCard.querySelector('#pur-summary-cost');
+    const sumSellEl = mainCard.querySelector('#pur-summary-sell');
+    const sumProfitEl = mainCard.querySelector('#pur-summary-profit');
+
+    if (sumQtyEl) sumQtyEl.textContent = `${overallUnits} units`;
+    if (sumCostEl) sumCostEl.textContent = `₹${overallCost.toLocaleString()}`;
+    if (sumSellEl) sumSellEl.textContent = `₹${overallSellingValue.toLocaleString()}`;
+    if (sumProfitEl) sumProfitEl.textContent = `₹${overallProfit.toLocaleString()}`;
+  }
+
   function renderPurchaseItems() {
     itemsContainer.innerHTML = '';
     const productsList = store.data.products || [];
@@ -7469,24 +7502,19 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       });
     }
 
-    let overallUnits = 0;
-    let overallCost = 0;
-    let overallSellingValue = 0;
+    const standardSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size', 'Standard'];
 
     purchaseItemsData.forEach((item, index) => {
       const row = document.createElement('div');
-      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1.1fr 1fr 1.1fr 1.1fr 1.1fr 1.1fr auto; gap: 0.75rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
+      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1.15fr 1fr 1.1fr 1.1fr 1.1fr 1.1fr auto; gap: 0.75rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
       if (window.innerWidth < 1000) row.style.gridTemplateColumns = '1fr 1fr';
 
       const selectedProd = productsList.find(p => p.id === item.productId) || productsList[0];
-      const hasSizes = selectedProd && selectedProd.variants && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size !== 'Standard');
+      if (selectedProd && !item.productId) item.productId = selectedProd.id;
 
-      let sizeOptionsHtml = '';
-      if (hasSizes) {
-        sizeOptionsHtml = (selectedProd.variants || []).map(v => `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}</option>`).join('');
-      } else {
-        sizeOptionsHtml = `<option value="Standard">Standard (No sizes)</option>`;
-      }
+      const existingVarSizes = (selectedProd && Array.isArray(selectedProd.variants))
+        ? selectedProd.variants.map(v => v.size).filter(Boolean)
+        : [];
 
       const q = parseInt(item.qty, 10) || 0;
       const bPrice = parseFloat(item.buyingPrice) !== undefined ? parseFloat(item.buyingPrice) : (selectedProd ? (selectedProd.purchasePrice || 200) : 200);
@@ -7497,22 +7525,33 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       item.sellingPrice = sPrice;
       const lineValue = q * sPrice;
 
-      overallUnits += q;
-      overallCost += lineCost;
-      overallSellingValue += lineValue;
+      // Count occurrences of this product to see if price copying is helpful
+      const sameProdCount = purchaseItemsData.filter(i => i.productId === item.productId).length;
 
       row.innerHTML = `
         <div class="form-group" style="margin: 0;">
           <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product</label>
           <select class="form-select pur-prod-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
-            ${productsList.map(p => `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}</option>`).join('')}
+            <option value="__NEW__" style="color: var(--brand-primary); font-weight: 700;">➕ + Add New Product...</option>
+            <optgroup label="Select Existing Product">
+              ${productsList.map(p => `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}</option>`).join('')}
+            </optgroup>
           </select>
         </div>
 
         <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size</label>
-          <select class="form-select pur-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;" ${!hasSizes ? 'disabled' : ''}>
-            ${sizeOptionsHtml}
+          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size / Variant</label>
+          <select class="form-select pur-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
+            ${existingVarSizes.length > 0 ? `
+              <optgroup label="Product Sizes">
+                ${existingVarSizes.map(s => `<option value="${s}" ${s === item.size ? 'selected' : ''}>Size ${s}</option>`).join('')}
+              </optgroup>
+            ` : ''}
+            <optgroup label="Standard Sizes">
+              ${standardSizes.filter(s => !existingVarSizes.includes(s)).map(s => `<option value="${s}" ${s === item.size ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
+            </optgroup>
+            ${(item.size && !standardSizes.includes(item.size) && !existingVarSizes.includes(item.size)) ? `<option value="${item.size}" selected>${item.size}</option>` : ''}
+            <option value="__CUSTOM__">+ Custom Size...</option>
           </select>
         </div>
 
@@ -7522,23 +7561,30 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         </div>
 
         <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Buying Price (₹)</label>
-          <input type="number" class="form-input pur-buying-input" min="0" value="${bPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; margin: 0;">Buying Price (₹)</label>
+            ${sameProdCount > 1 ? `
+              <button type="button" class="btn btn-ghost pur-apply-price-btn" title="Apply price to all sizes of this product" style="font-size: 0.68rem; padding: 0 0.25rem; color: var(--brand-primary); line-height: 1; height: 18px;">
+                Apply to all
+              </button>
+            ` : ''}
+          </div>
+          <input type="number" class="form-input pur-buying-input" min="0" step="any" value="${bPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
         </div>
 
         <div class="form-group" style="margin: 0;">
           <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Cost (₹)</label>
-          <input type="text" class="form-input" value="₹${lineCost.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--brand-primary);">
+          <input type="text" class="form-input pur-cost-display" value="₹${lineCost.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--brand-primary);">
         </div>
 
         <div class="form-group" style="margin: 0;">
           <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Selling Price (₹)</label>
-          <input type="number" class="form-input pur-selling-input" min="0" value="${sPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
+          <input type="number" class="form-input pur-selling-input" min="0" step="any" value="${sPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
         </div>
 
         <div class="form-group" style="margin: 0;">
           <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Est. Value (₹)</label>
-          <input type="text" class="form-input" value="₹${lineValue.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--status-success);">
+          <input type="text" class="form-input pur-value-display" value="₹${lineValue.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--status-success);">
         </div>
 
         <button type="button" class="btn btn-ghost pur-remove-btn" style="padding: 0.45rem; color: var(--status-danger);" title="Remove item">
@@ -7552,11 +7598,29 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       const buyInp = row.querySelector('.pur-buying-input');
       const sellInp = row.querySelector('.pur-selling-input');
       const removeBtn = row.querySelector('.pur-remove-btn');
+      const applyPriceBtn = row.querySelector('.pur-apply-price-btn');
 
       prodSel.addEventListener('change', (e) => {
+        if (e.target.value === '__NEW__') {
+          openCreateProductModalInline((newProd) => {
+            if (!newProd) {
+              prodSel.value = item.productId || (productsList[0] ? productsList[0].id : '');
+              return;
+            }
+            item.productId = newProd.id;
+            item.size = 'Standard';
+            item.sku = '';
+            item.variantId = '';
+            if (!item.buyingPrice) item.buyingPrice = 200;
+            if (!item.sellingPrice) item.sellingPrice = 350;
+            renderPurchaseItems();
+          });
+          return;
+        }
+
         item.productId = e.target.value;
         const newP = productsList.find(p => p.id === item.productId);
-        if (newP && newP.variants && newP.variants.length > 0) {
+        if (newP && newP.variants && newP.variants.length > 0 && newP.variants.some(v => v.size !== 'Standard')) {
           item.size = newP.variants[0].size;
           item.sku = newP.variants[0].sku || '';
           item.variantId = newP.variants[0].id || '';
@@ -7573,10 +7637,21 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       });
 
       sizeSel.addEventListener('change', (e) => {
+        if (e.target.value === '__CUSTOM__') {
+          const custom = prompt('Enter custom size / variant (e.g. 32, 34, UK 8):');
+          if (custom && custom.trim()) {
+            item.size = custom.trim().toUpperCase();
+            renderPurchaseItems();
+          } else {
+            sizeSel.value = item.size || 'Standard';
+          }
+          return;
+        }
+
         item.size = e.target.value;
         const selectedP = productsList.find(p => p.id === item.productId);
         if (selectedP && selectedP.variants) {
-          const v = selectedP.variants.find(varItem => varItem.size === item.size);
+          const v = selectedP.variants.find(varItem => (varItem.size || '').toUpperCase() === (item.size || '').toUpperCase());
           if (v) {
             item.sku = v.sku || '';
             item.variantId = v.id || '';
@@ -7589,18 +7664,37 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
       qtyInp.addEventListener('input', (e) => {
         item.qty = parseInt(e.target.value, 10) || 0;
-        renderPurchaseItems();
+        updateSummaries();
       });
 
       buyInp.addEventListener('input', (e) => {
         item.buyingPrice = parseFloat(e.target.value) || 0;
-        renderPurchaseItems();
+        updateSummaries();
       });
 
       sellInp.addEventListener('input', (e) => {
         item.sellingPrice = parseFloat(e.target.value) || 0;
-        renderPurchaseItems();
+        updateSummaries();
       });
+
+      if (applyPriceBtn) {
+        applyPriceBtn.addEventListener('click', () => {
+          const targetPid = item.productId;
+          let affected = 0;
+          purchaseItemsData.forEach(other => {
+            if (other.productId === targetPid && other !== item) {
+              other.buyingPrice = item.buyingPrice;
+              other.sellingPrice = item.sellingPrice;
+              affected++;
+            }
+          });
+          renderPurchaseItems();
+          toast.show({
+            message: `Applied prices (₹${item.buyingPrice} / ₹${item.sellingPrice}) to ${affected} other size row(s).`,
+            type: 'info'
+          });
+        });
+      }
 
       removeBtn.addEventListener('click', () => {
         if (purchaseItemsData.length <= 1) {
@@ -7614,18 +7708,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       itemsContainer.appendChild(row);
     });
 
-    const overallProfit = overallSellingValue - overallCost;
-
-    const sumQtyEl = mainCard.querySelector('#pur-summary-qty');
-    const sumCostEl = mainCard.querySelector('#pur-summary-cost');
-    const sumSellEl = mainCard.querySelector('#pur-summary-sell');
-    const sumProfitEl = mainCard.querySelector('#pur-summary-profit');
-
-    if (sumQtyEl) sumQtyEl.textContent = `${overallUnits} units`;
-    if (sumCostEl) sumCostEl.textContent = `₹${overallCost.toLocaleString()}`;
-    if (sumSellEl) sumSellEl.textContent = `₹${overallSellingValue.toLocaleString()}`;
-    if (sumProfitEl) sumProfitEl.textContent = `₹${overallProfit.toLocaleString()}`;
-
+    updateSummaries();
     if (window.lucide) window.lucide.createIcons();
   }
 
@@ -7633,45 +7716,57 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   mainCard.querySelector('#btn-add-pur-item').addEventListener('click', () => {
     const productsList = store.data.products || [];
-    const defaultP = productsList[0];
-    const hasDefSizes = defaultP && defaultP.variants && defaultP.variants.length > 0;
-    const defVar = hasDefSizes ? defaultP.variants[0] : null;
+    const lastItem = purchaseItemsData[purchaseItemsData.length - 1];
+    const defaultPid = lastItem ? lastItem.productId : (productsList[0] ? productsList[0].id : '');
+    const selProd = productsList.find(p => p.id === defaultPid) || productsList[0];
+
+    // Determine next size to suggest for this product
+    const usedSizesForProd = new Set(purchaseItemsData.filter(i => i.productId === defaultPid).map(i => i.size));
+    const candidateSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Standard'];
+    if (selProd && Array.isArray(selProd.variants)) {
+      selProd.variants.forEach(v => {
+        if (v.size && !candidateSizes.includes(v.size)) candidateSizes.push(v.size);
+      });
+    }
+    const nextSize = candidateSizes.find(s => !usedSizesForProd.has(s)) || (candidateSizes[0] || 'Standard');
+
     purchaseItemsData.push({
-      productId: defaultP ? defaultP.id : '',
-      size: defVar ? defVar.size : 'Standard',
-      sku: defVar ? (defVar.sku || '') : '',
-      variantId: defVar ? (defVar.id || '') : '',
-      qty: 50,
-      buyingPrice: defVar ? (defVar.purchasePrice || defaultP.purchasePrice || 200) : 200,
-      sellingPrice: defVar ? (defVar.sellingPrice || defaultP.sellingPrice || 400) : 400
+      productId: defaultPid,
+      size: nextSize,
+      sku: '',
+      variantId: '',
+      qty: lastItem ? (lastItem.qty || 50) : 50,
+      buyingPrice: lastItem ? (lastItem.buyingPrice || 200) : (selProd ? (selProd.purchasePrice || 200) : 200),
+      sellingPrice: lastItem ? (lastItem.sellingPrice || 350) : (selProd ? (selProd.sellingPrice || 350) : 350)
     });
     renderPurchaseItems();
   });
 
-  // Preserve Draft State & Navigate to Create New Product
+  // Open Create New Product Modal Directly (No Page Navigation!)
   mainCard.querySelector('#btn-open-create-prod-modal').addEventListener('click', () => {
-    const supplier = mainCard.querySelector('#pur-supplier').value.trim();
-    const date = mainCard.querySelector('#pur-date').value;
-    const notes = mainCard.querySelector('#pur-notes').value.trim();
-
-    try {
-      sessionStorage.setItem('add_purchase_draft', JSON.stringify({
-        supplier,
-        date,
-        notes,
-        items: purchaseItemsData
-      }));
-    } catch (e) {
-      console.warn('Draft save error:', e);
-    }
-
-    if (onNavigate) {
-      onNavigate('purchases', { action: 'add-product', returnTo: 'add-purchase' });
-    }
+    openCreateProductModalInline((newProd) => {
+      if (!newProd) return;
+      const productsList = store.data.products || [];
+      if (purchaseItemsData.length === 1 && (!purchaseItemsData[0].productId || purchaseItemsData[0].productId === (productsList[1]?.id || ''))) {
+        purchaseItemsData[0].productId = newProd.id;
+        purchaseItemsData[0].size = 'Standard';
+        purchaseItemsData[0].qty = 50;
+        purchaseItemsData[0].buyingPrice = 200;
+        purchaseItemsData[0].sellingPrice = 350;
+      } else {
+        purchaseItemsData.push({
+          productId: newProd.id,
+          size: 'Standard',
+          qty: 50,
+          buyingPrice: 200,
+          sellingPrice: 350
+        });
+      }
+      renderPurchaseItems();
+    });
   });
 
   mainCard.querySelector('#btn-cancel-pur').addEventListener('click', () => {
-    sessionStorage.removeItem('add_purchase_draft');
     if (onNavigate) onNavigate('purchases');
   });
 
@@ -7685,14 +7780,34 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       toast.show({ message: 'Supplier name is required.', type: 'danger' });
       return;
     }
+    if (!date) {
+      toast.show({ message: 'Purchase date is required.', type: 'danger' });
+      return;
+    }
+    if (!purchaseItemsData || purchaseItemsData.length === 0) {
+      toast.show({ message: 'At least one purchase item is required.', type: 'danger' });
+      return;
+    }
 
-    for (let item of purchaseItemsData) {
-      if (!item.productId) {
-        toast.show({ message: 'Please select a product for all purchase items.', type: 'danger' });
+    for (let i = 0; i < purchaseItemsData.length; i++) {
+      const item = purchaseItemsData[i];
+      if (!item.productId || item.productId === '__NEW__') {
+        toast.show({ message: `Please select a product for row #${i + 1}.`, type: 'danger' });
         return;
       }
-      if (!item.qty || item.qty <= 0) {
-        toast.show({ message: 'Purchase quantity must be greater than 0.', type: 'danger' });
+      const q = parseInt(item.qty, 10);
+      if (isNaN(q) || q <= 0) {
+        toast.show({ message: `Row #${i + 1}: Quantity must be a positive whole number greater than 0.`, type: 'danger' });
+        return;
+      }
+      const bp = parseFloat(item.buyingPrice);
+      if (isNaN(bp) || bp < 0) {
+        toast.show({ message: `Row #${i + 1}: Buying Price must be a valid non-negative number.`, type: 'danger' });
+        return;
+      }
+      const sp = parseFloat(item.sellingPrice);
+      if (isNaN(sp) || sp < 0) {
+        toast.show({ message: `Row #${i + 1}: Selling Price must be a valid non-negative number.`, type: 'danger' });
         return;
       }
     }
@@ -7704,7 +7819,6 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       items: purchaseItemsData
     }, editingPurchase ? editingPurchase.id : null);
 
-    sessionStorage.removeItem('add_purchase_draft');
     toast.show({ message: `Purchase order saved as Draft! Inventory stock is unchanged.`, type: 'success' });
     if (onNavigate) onNavigate('purchases');
   });
@@ -7719,14 +7833,34 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       toast.show({ message: 'Supplier name is required.', type: 'danger' });
       return;
     }
+    if (!date) {
+      toast.show({ message: 'Purchase date is required.', type: 'danger' });
+      return;
+    }
+    if (!purchaseItemsData || purchaseItemsData.length === 0) {
+      toast.show({ message: 'At least one purchase item is required.', type: 'danger' });
+      return;
+    }
 
-    for (let item of purchaseItemsData) {
-      if (!item.productId) {
-        toast.show({ message: 'Please select a product for all purchase items.', type: 'danger' });
+    for (let i = 0; i < purchaseItemsData.length; i++) {
+      const item = purchaseItemsData[i];
+      if (!item.productId || item.productId === '__NEW__') {
+        toast.show({ message: `Please select a product for row #${i + 1}.`, type: 'danger' });
         return;
       }
-      if (!item.qty || item.qty <= 0) {
-        toast.show({ message: 'Purchase quantity must be greater than 0.', type: 'danger' });
+      const q = parseInt(item.qty, 10);
+      if (isNaN(q) || q <= 0) {
+        toast.show({ message: `Row #${i + 1}: Quantity must be a positive whole number greater than 0.`, type: 'danger' });
+        return;
+      }
+      const bp = parseFloat(item.buyingPrice);
+      if (isNaN(bp) || bp < 0) {
+        toast.show({ message: `Row #${i + 1}: Buying Price must be a valid non-negative number.`, type: 'danger' });
+        return;
+      }
+      const sp = parseFloat(item.sellingPrice);
+      if (isNaN(sp) || sp < 0) {
+        toast.show({ message: `Row #${i + 1}: Selling Price must be a valid non-negative number.`, type: 'danger' });
         return;
       }
     }
@@ -7747,7 +7881,6 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     });
     store.receivePurchaseStock(draft.id, receiveMap, date, notes);
 
-    sessionStorage.removeItem('add_purchase_draft');
     toast.show({ message: `Purchase confirmed and stock received into inventory!`, type: 'success' });
     if (onNavigate) onNavigate('purchases');
   });
@@ -7760,51 +7893,63 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 function openCreateProductModalInline(onCreated) {
   const modalDiv = document.createElement('div');
   modalDiv.className = 'modal-overlay';
+  modalDiv.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem;';
 
   const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
   const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
 
   modalDiv.innerHTML = `
-    <div class="modal-content" style="max-width: 500px; width: 95%;">
-      <div class="modal-header">
-        <h3 class="card-title" style="font-weight: 600; font-size: 1.1rem; color: var(--text-primary);">Create New Product</h3>
+    <div class="modal-content card" style="max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem;">
+      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        <div>
+          <h3 class="card-title" style="font-weight: 700; font-size: 1.15rem; color: var(--text-primary); margin: 0;">Add New Product</h3>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">Create a new catalog item directly within this purchase.</p>
+        </div>
         <button type="button" class="btn btn-ghost btn-sm close-modal-btn" style="padding: 0.25rem;">
           <i data-lucide="x" style="width: 18px; height: 18px;"></i>
         </button>
       </div>
       <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Product Name <span style="color: #ef4444;">*</span></label>
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-weight: 600; font-size: 0.85rem;">Product Name <span style="color: #ef4444;">*</span></label>
           <input type="text" id="inline-prod-name" class="form-input" placeholder="e.g. Classic Linen Shirt">
+          <div id="inline-prod-name-err" style="color: #ef4444; font-size: 0.75rem; display: none; margin-top: 4px;">Product Name is required.</div>
         </div>
+
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem;">
-          <div class="form-group">
-            <label class="form-label" style="font-weight: 500;">Category</label>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-weight: 600; font-size: 0.85rem;">Category <span style="color: #ef4444;">*</span></label>
             <select id="inline-prod-cat" class="form-select">
               ${catOptions.map(c => `<option value="${c}">${c}</option>`).join('')}
+              <option value="__NEW_CAT__">+ New Category...</option>
             </select>
+            <input type="text" id="inline-prod-cat-new" class="form-input" placeholder="Enter category name" style="display: none; margin-top: 0.5rem; font-size: 0.85rem;">
           </div>
-          <div class="form-group">
-            <label class="form-label" style="font-weight: 500;">Brand</label>
-            <select id="inline-prod-brand" class="form-select">
-              ${brandOptions.map(b => `<option value="${b}">${b}</option>`).join('')}
-            </select>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-weight: 600; font-size: 0.85rem;">Brand</label>
+            <input type="text" id="inline-prod-brand" class="form-input" placeholder="e.g. UrbanWear" list="inline-brand-suggestions">
+            <datalist id="inline-brand-suggestions">
+              ${brandOptions.map(b => `<option value="${b}">`).join('')}
+            </datalist>
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Selling Price (₹)</label>
-          <input type="number" id="inline-prod-price" class="form-input" placeholder="Optional e.g. 1499">
-          <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">Leave blank if price will be set later during product edit.</span>
+
+        <div class="form-group" style="margin: 0;">
+          <label class="form-label" style="font-weight: 600; font-size: 0.85rem;">Product Description (Optional)</label>
+          <textarea id="inline-prod-desc" class="form-input" rows="2" placeholder="e.g. Premium breathable fabric with comfortable regular fit..."></textarea>
         </div>
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Sizes</label>
-          <input type="text" id="inline-prod-sizes" class="form-input" placeholder="S, M, L, XL" value="S, M, L, XL">
-          <span style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px;">Comma separated sizes (e.g. S, M, L, XL) or leave blank if no sizes.</span>
+
+        <div style="background: var(--bg-secondary); padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.785rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="info" style="width: 15px; height: 15px; color: var(--brand-primary); flex-shrink: 0;"></i>
+          <span>Purchase quantities, sizes, buying prices, and selling prices are specified per row on the Add Purchase page.</span>
         </div>
       </div>
-      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem; margin-top: 0.5rem;">
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
         <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
-        <button type="button" class="btn btn-primary save-modal-btn">Save Product</button>
+        <button type="button" class="btn btn-primary save-modal-btn">
+          <i data-lucide="plus-circle" style="width: 16px; height: 16px;"></i>
+          <span>Save Product</span>
+        </button>
       </div>
     </div>
   `;
@@ -7813,45 +7958,75 @@ function openCreateProductModalInline(onCreated) {
   if (window.lucide) window.lucide.createIcons();
 
   const closeModal = () => modalDiv.remove();
-  modalDiv.querySelector('.close-modal-btn').addEventListener('click', closeModal);
-  modalDiv.querySelector('.cancel-modal-btn').addEventListener('click', closeModal);
+  modalDiv.querySelector('.close-modal-btn').addEventListener('click', () => {
+    closeModal();
+    if (onCreated) onCreated(null);
+  });
+  modalDiv.querySelector('.cancel-modal-btn').addEventListener('click', () => {
+    closeModal();
+    if (onCreated) onCreated(null);
+  });
+
+  const catSel = modalDiv.querySelector('#inline-prod-cat');
+  const catNewInp = modalDiv.querySelector('#inline-prod-cat-new');
+  catSel.addEventListener('change', () => {
+    if (catSel.value === '__NEW_CAT__') {
+      catNewInp.style.display = 'block';
+      catNewInp.focus();
+    } else {
+      catNewInp.style.display = 'none';
+    }
+  });
 
   modalDiv.querySelector('.save-modal-btn').addEventListener('click', () => {
     const name = modalDiv.querySelector('#inline-prod-name').value.trim();
-    const category = modalDiv.querySelector('#inline-prod-cat').value;
-    const brand = modalDiv.querySelector('#inline-prod-brand').value;
-    const priceVal = modalDiv.querySelector('#inline-prod-price').value.trim();
-    const sellingPrice = priceVal ? parseFloat(priceVal) : null;
-    const sizesStr = modalDiv.querySelector('#inline-prod-sizes').value.trim();
+    let category = catSel.value;
+    if (category === '__NEW_CAT__') {
+      category = catNewInp.value.trim();
+    }
+    const brand = modalDiv.querySelector('#inline-prod-brand').value.trim();
+    const description = modalDiv.querySelector('#inline-prod-desc').value.trim();
+    const nameErr = modalDiv.querySelector('#inline-prod-name-err');
 
     if (!name) {
+      if (nameErr) nameErr.style.display = 'block';
       toast.show({ message: 'Product Name is required.', type: 'danger' });
+      return;
+    }
+    if (nameErr) nameErr.style.display = 'none';
+
+    if (!category) {
+      toast.show({ message: 'Category is required.', type: 'danger' });
       return;
     }
 
     const newProdId = `PROD-${Date.now().toString().slice(-4)}`;
-    const sizeArr = sizesStr ? sizesStr.split(',').map(s => s.trim().toUpperCase()).filter(Boolean) : [];
-    const variants = sizeArr.length > 0
-      ? sizeArr.map(s => ({ size: s, stock: 0, damaged: 0 }))
-      : [{ size: 'Standard', stock: 0, damaged: 0 }];
-
     const newProd = {
       id: newProdId,
       name,
       category,
-      brand,
-      sellingPrice,
-      purchasePrice: sellingPrice ? Math.round(sellingPrice * 0.6) : 0,
+      brand: brand || 'Generic',
+      description: description || '',
+      purchasePrice: 0,
+      sellingPrice: 0,
       minStock: 5,
       status: 'Active',
-      variants,
+      variants: [],
       totalStock: 0
     };
 
+    if (!Array.isArray(store.data.products)) store.data.products = [];
     store.data.products.unshift(newProd);
-    store.save();
 
-    toast.show({ message: `Product "${name}" created.`, type: 'success' });
+    if (category && Array.isArray(store.data.categories) && !store.data.categories.includes(category)) {
+      store.data.categories.push(category);
+    }
+    if (brand && Array.isArray(store.data.brands) && !store.data.brands.includes(brand)) {
+      store.data.brands.push(brand);
+    }
+
+    store.save();
+    toast.show({ message: `Product "${name}" added to catalog!`, type: 'success' });
     closeModal();
     if (onCreated) onCreated(newProd);
   });
