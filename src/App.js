@@ -8800,7 +8800,72 @@ function renderAddSalePage(onNavigate = null) {
   mainCard.className = 'card';
   mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
 
-  const saleItemsData = [];
+  function getVariantDetails(prod, size) {
+    if (!prod) {
+      return { variant: null, availStock: 0, sellingPrice: 0, hasSizes: false };
+    }
+    const variants = Array.isArray(prod.variants) ? prod.variants : [];
+    const hasSizes = variants.length > 0 && variants.some(v => v.size && v.size !== 'Standard');
+    
+    let variant = null;
+    if (hasSizes) {
+      variant = variants.find(v => v.size === size) || variants[0] || null;
+    } else if (variants.length > 0) {
+      variant = variants[0];
+    }
+
+    let availStock = 0;
+    if (variant) {
+      availStock = typeof variant.stock === 'number' ? variant.stock : 0;
+    } else {
+      availStock = typeof prod.totalStock === 'number' ? prod.totalStock : 0;
+    }
+
+    let sellingPrice = 0;
+    if (variant && typeof variant.sellingPrice === 'number' && variant.sellingPrice > 0) {
+      sellingPrice = variant.sellingPrice;
+    } else if (typeof prod.sellingPrice === 'number' && prod.sellingPrice > 0) {
+      sellingPrice = prod.sellingPrice;
+    }
+
+    return { variant, availStock, sellingPrice, hasSizes };
+  }
+
+  function createProductGroup(defaultProductId = null) {
+    const prods = store.data.products || [];
+    let p = null;
+    if (defaultProductId) {
+      p = prods.find(x => x.id === defaultProductId);
+    }
+    if (!p) {
+      const usedIds = new Set(productsData.map(pd => pd.productId));
+      p = prods.find(x => !usedIds.has(x.id)) || prods[0];
+    }
+
+    const pBrand = p ? (p.brand || '').trim() : '';
+    const pCat = p ? (p.category || 'General') : 'General';
+    const hasVariants = p && Array.isArray(p.variants) && p.variants.length > 0;
+    const defaultSize = hasVariants ? p.variants[0].size : 'Standard';
+
+    return {
+      id: 'sprod_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+      productId: p ? p.id : '',
+      productName: p ? p.name : '',
+      brand: pBrand,
+      category: pCat,
+      searchQuery: '',
+      sizes: [
+        {
+          id: 'ssize_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+          size: defaultSize,
+          qty: 1
+        }
+      ]
+    };
+  }
+
+  let productsData = [];
+  productsData.push(createProductGroup());
 
   mainCard.innerHTML = `
     <!-- SECTION A: CUSTOMER -->
@@ -8820,42 +8885,29 @@ function renderAddSalePage(onNavigate = null) {
       </div>
     </div>
 
-    <!-- SECTION B: SALE ITEMS -->
+    <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS (Grouped by Product) -->
     <div style="display: flex; flex-direction: column; gap: 0.85rem;">
-      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary);">
-          Sale Items
-        </h3>
-        <span style="font-size: 0.8rem; color: var(--text-secondary);">Directly linked to authoritative Inventory product data</span>
-      </div>
-
-      <!-- Responsive Horizontal Scroll Container for 8 Columns -->
-      <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-card); box-shadow: var(--shadow-sm);">
-        <div style="min-width: 980px; padding: 0.85rem; display: flex; flex-direction: column; gap: 0.65rem;">
-          
-          <!-- Column Headers -->
-          <div style="display: grid; grid-template-columns: 2.2fr 1.3fr 1.3fr 1.2fr 1fr 1.1fr 0.9fr 1.1fr 34px; gap: 0.65rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border-color); font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); align-items: center;">
-            <div>Product Name</div>
-            <div>Brand</div>
-            <div>Category</div>
-            <div>Size / Variant</div>
-            <div style="text-align: center;">Available Stock</div>
-            <div style="text-align: right;">Selling Price (₹)</div>
-            <div style="text-align: center;">Quantity</div>
-            <div style="text-align: right;">Total (₹)</div>
-            <div></div>
-          </div>
-
-          <!-- Items Rows Container -->
-          <div id="sale-items-container" style="display: flex; flex-direction: column; gap: 0.65rem;"></div>
-
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="boxes" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+            Product & Size-wise Items
+          </h3>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
+            Group sales items by product. Select product details once and add multiple size/variant sales entries.
+          </p>
         </div>
       </div>
 
-      <button type="button" id="btn-add-sale-row" class="btn btn-secondary btn-sm" style="align-self: start; display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.25rem;">
-        <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
-        <span>Add Another Item</span>
-      </button>
+      <!-- Items List Container -->
+      <div id="sale-items-container" style="display: flex; flex-direction: column; gap: 0.75rem;"></div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding-top: 0.5rem;">
+        <button type="button" id="btn-add-sale-product" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
+          <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+          <span>Add Another Product</span>
+        </button>
+      </div>
     </div>
 
     <!-- SECTION C: PAYMENT & SUMMARY -->
@@ -8911,139 +8963,143 @@ function renderAddSalePage(onNavigate = null) {
 
   const itemsContainer = mainCard.querySelector('#sale-items-container');
 
-  function getVariantDetails(prod, size) {
-    if (!prod) {
-      return { variant: null, availStock: 0, sellingPrice: 0, hasSizes: false };
-    }
-    const variants = Array.isArray(prod.variants) ? prod.variants : [];
-    const hasSizes = variants.length > 0 && variants.some(v => v.size && v.size !== 'Standard');
-    
-    let variant = null;
-    if (hasSizes) {
-      variant = variants.find(v => v.size === size) || variants[0] || null;
-    } else if (variants.length > 0) {
-      variant = variants[0];
-    }
-
-    let availStock = 0;
-    if (variant) {
-      availStock = typeof variant.stock === 'number' ? variant.stock : 0;
-    } else {
-      availStock = typeof prod.totalStock === 'number' ? prod.totalStock : 0;
-    }
-
-    let sellingPrice = 0;
-    if (variant && typeof variant.sellingPrice === 'number' && variant.sellingPrice > 0) {
-      sellingPrice = variant.sellingPrice;
-    } else if (typeof prod.sellingPrice === 'number' && prod.sellingPrice > 0) {
-      sellingPrice = prod.sellingPrice;
-    }
-
-    return { variant, availStock, sellingPrice, hasSizes };
-  }
-
-  function initDefaultItem() {
-    const productsList = store.data.products || [];
-    const defaultP = productsList[0];
-    const defaultBrand = defaultP ? (defaultP.brand || '').trim() : '';
-    let defaultSize = 'Standard';
-    if (defaultP && defaultP.variants && defaultP.variants.length > 0) {
-      defaultSize = defaultP.variants[0].size || 'Standard';
-    }
-    return {
-      productId: defaultP ? defaultP.id : '',
-      brand: defaultBrand,
-      size: defaultSize,
-      qty: 1,
-      searchQuery: ''
-    };
-  }
-
   function updateSaleSummary() {
     let subtotal = 0;
-    const productsList = store.data.products || [];
+    const prods = store.data.products || [];
 
-    saleItemsData.forEach(item => {
-      const prod = productsList.find(p => p.id === item.productId);
-      const details = getVariantDetails(prod, item.size);
-      subtotal += (item.qty || 0) * (details.sellingPrice || 0);
+    productsData.forEach(prod => {
+      const realProd = prods.find(p => p.id === prod.productId);
+      let prodUnits = 0;
+      let prodTotal = 0;
+
+      (prod.sizes || []).forEach(sz => {
+        const q = parseInt(sz.qty, 10) || 0;
+        const details = getVariantDetails(realProd, sz.size);
+        const lineTotal = q * (details.sellingPrice || 0);
+        prodUnits += q;
+        prodTotal += lineTotal;
+        subtotal += lineTotal;
+
+        const sizeRowEl = mainCard.querySelector(`[data-size-id="${sz.id}"]`);
+        if (sizeRowEl) {
+          const totalEl = sizeRowEl.querySelector('.sale-total-display');
+          if (totalEl) totalEl.value = `₹${lineTotal.toLocaleString('en-IN')}`;
+          
+          const stockEl = sizeRowEl.querySelector('.sale-stock-display');
+          if (stockEl) {
+            stockEl.value = `${details.availStock} units`;
+            stockEl.style.color = details.availStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)';
+          }
+
+          const priceEl = sizeRowEl.querySelector('.sale-price-display');
+          if (priceEl) priceEl.value = `₹${details.sellingPrice.toLocaleString('en-IN')}`;
+
+          const errEl = sizeRowEl.querySelector('.sale-qty-error');
+          const isOver = (q > details.availStock) || (details.availStock === 0 && q > 0);
+          const qtyInp = sizeRowEl.querySelector('.sale-qty-input');
+          if (qtyInp) {
+            if (isOver) {
+              qtyInp.style.borderColor = '#ef4444';
+              qtyInp.style.background = 'rgba(239,68,68,0.08)';
+              qtyInp.style.color = '#ef4444';
+            } else {
+              qtyInp.style.borderColor = '';
+              qtyInp.style.background = '';
+              qtyInp.style.color = '';
+            }
+          }
+          if (errEl) {
+            errEl.textContent = details.availStock === 0 ? 'Out of stock' : `Max: ${details.availStock}`;
+            errEl.style.display = isOver ? 'block' : 'none';
+          }
+        }
+      });
+
+      const sectionEl = mainCard.querySelector(`[data-product-id="${prod.id}"]`);
+      if (sectionEl) {
+        const subtotalEl = sectionEl.querySelector('.sale-prod-subtotal');
+        if (subtotalEl) {
+          subtotalEl.innerHTML = `Subtotal: <strong>${prodUnits} units</strong> · <strong style="color: var(--brand-primary);">₹${prodTotal.toLocaleString('en-IN')}</strong>`;
+        }
+        const titlePreviewEl = sectionEl.querySelector('.sale-prod-title-preview');
+        if (titlePreviewEl) {
+          titlePreviewEl.textContent = (prod.productName && prod.productName.trim()) ? prod.productName.trim() : 'Select Product';
+        }
+      }
     });
 
     const discountVal = parseFloat(mainCard.querySelector('#sale-discount-input').value) || 0;
     const finalTotal = Math.max(0, subtotal - discountVal);
 
-    mainCard.querySelector('#summary-subtotal').textContent = `₹${subtotal.toLocaleString('en-IN')}`;
-    mainCard.querySelector('#summary-final-total').textContent = `₹${finalTotal.toLocaleString('en-IN')}`;
+    const sumSubtotalEl = mainCard.querySelector('#summary-subtotal');
+    const sumFinalEl = mainCard.querySelector('#summary-final-total');
+    if (sumSubtotalEl) sumSubtotalEl.textContent = `₹${subtotal.toLocaleString('en-IN')}`;
+    if (sumFinalEl) sumFinalEl.textContent = `₹${finalTotal.toLocaleString('en-IN')}`;
   }
 
-  function renderSaleRows() {
+  function renderSaleItems() {
     itemsContainer.innerHTML = '';
-    const productsList = store.data.products || [];
-    const inventoryBrands = Array.from(
-      new Set(productsList.map(p => (p.brand || '').trim()).filter(Boolean))
+    const prods = store.data.products || [];
+    const brands = Array.from(
+      new Set(prods.map(p => (p.brand || '').trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
 
-    if (saleItemsData.length === 0) {
-      saleItemsData.push(initDefaultItem());
+    if (productsData.length === 0) {
+      productsData.push(createProductGroup());
     }
 
-    saleItemsData.forEach((item, index) => {
-      // 1. Candidate products based on selected brand
-      let candidateProducts = productsList;
-      if (item.brand && item.brand.trim() !== '') {
-        candidateProducts = productsList.filter(p => (p.brand || '').trim().toLowerCase() === item.brand.trim().toLowerCase());
+    productsData.forEach((prod, pIdx) => {
+      let candidateProducts = prods;
+      if (prod.brand && prod.brand.trim() !== '') {
+        candidateProducts = prods.filter(p => (p.brand || '').trim().toLowerCase() === prod.brand.trim().toLowerCase());
       }
 
-      // If item.productId does not match candidateProducts, switch to first candidate product or empty
-      if (item.productId && !candidateProducts.some(p => p.id === item.productId)) {
+      if (prod.productId && !candidateProducts.some(p => p.id === prod.productId)) {
         if (candidateProducts.length > 0) {
-          item.productId = candidateProducts[0].id;
-          const newP = candidateProducts[0];
-          item.size = (newP.variants && newP.variants.length > 0) ? newP.variants[0].size : 'Standard';
+          prod.productId = candidateProducts[0].id;
+          prod.productName = candidateProducts[0].name;
+          prod.category = candidateProducts[0].category || 'General';
+          const newV = candidateProducts[0].variants;
+          prod.sizes = [{
+            id: 'ssize_' + Date.now() + '_1',
+            size: (newV && newV.length > 0) ? newV[0].size : 'Standard',
+            qty: 1
+          }];
         } else {
-          item.productId = '';
+          prod.productId = '';
+          prod.productName = '';
+          prod.category = '—';
         }
-      } else if (!item.productId && candidateProducts.length > 0) {
-        item.productId = candidateProducts[0].id;
+      } else if (!prod.productId && candidateProducts.length > 0) {
+        prod.productId = candidateProducts[0].id;
+        prod.productName = candidateProducts[0].name;
+        prod.category = candidateProducts[0].category || 'General';
       }
 
-      const selectedProd = productsList.find(p => p.id === item.productId) || null;
-
-      // Synchronize brand from selected product if brand was not explicitly filtering or if product changed
-      if (selectedProd && selectedProd.brand && selectedProd.brand.trim() !== '') {
-        if (!item.brand) {
-          item.brand = selectedProd.brand.trim();
-        }
-      } else if (selectedProd && (!selectedProd.brand || selectedProd.brand.trim() === '')) {
-        if (!item.brand) {
-          item.brand = '';
+      const selectedProd = prods.find(p => p.id === prod.productId) || null;
+      if (selectedProd) {
+        prod.productName = selectedProd.name;
+        prod.category = selectedProd.category || 'General';
+        if (!prod.brand && selectedProd.brand) {
+          prod.brand = selectedProd.brand.trim();
         }
       }
 
-      // Variant details
-      const details = getVariantDetails(selectedProd, item.size);
-      const hasSizes = details.hasSizes;
-      if (details.variant) {
-        item.size = details.variant.size;
-      } else if (!hasSizes) {
-        item.size = 'Standard';
-      }
+      const hasSizes = selectedProd && Array.isArray(selectedProd.variants) && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size && v.size !== 'Standard');
 
-      const availStock = details.availStock;
-      const unitPrice = details.sellingPrice;
-      const lineTotal = (item.qty || 0) * unitPrice;
-      const isOverStock = (item.qty > availStock) || (availStock === 0 && item.qty > 0);
-      const categoryText = selectedProd ? (selectedProd.category || 'General') : '—';
-      const priceDisplay = unitPrice > 0 ? `₹${unitPrice.toLocaleString('en-IN')}` : '₹0';
+      let initialProdUnits = 0;
+      let initialProdTotal = 0;
+      (prod.sizes || []).forEach(sz => {
+        const q = parseInt(sz.qty, 10) || 0;
+        const details = getVariantDetails(selectedProd, sz.size);
+        initialProdUnits += q;
+        initialProdTotal += (q * (details.sellingPrice || 0));
+      });
 
-      const row = document.createElement('div');
-      row.className = 'sale-item-row';
-      row.dataset.index = index;
-      row.style.cssText = 'display: grid; grid-template-columns: 2.2fr 1.3fr 1.3fr 1.2fr 1fr 1.1fr 0.9fr 1.1fr 34px; gap: 0.65rem; align-items: start; padding: 0.6rem 0.75rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-secondary);';
-
-      // Build options for product select based on candidateProducts and searchQuery
-      const query = (item.searchQuery || '').toLowerCase().trim();
-      const searchFilteredProds = candidateProducts.filter(p => !query || p.name.toLowerCase().includes(query) || (p.brand && p.brand.toLowerCase().includes(query)));
+      const q = (prod.searchQuery || '').toLowerCase().trim();
+      const searchFilteredProds = candidateProducts.filter(p => 
+        !q || p.name.toLowerCase().includes(q) || (p.brand && p.brand.toLowerCase().includes(q))
+      );
 
       let prodOptionsHtml = '';
       if (searchFilteredProds.length === 0) {
@@ -9051,255 +9107,306 @@ function renderAddSalePage(onNavigate = null) {
       } else {
         prodOptionsHtml = searchFilteredProds.map(p => {
           const brandLabel = p.brand ? ` [${p.brand}]` : '';
-          return `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}${brandLabel}</option>`;
+          return `<option value="${p.id}" ${p.id === prod.productId ? 'selected' : ''}>${p.name}${brandLabel}</option>`;
         }).join('');
       }
 
-      // Build options for brand select
-      let brandOptionsHtml = `<option value="" ${!item.brand ? 'selected' : ''}>All Brands</option>`;
-      inventoryBrands.forEach(b => {
-        brandOptionsHtml += `<option value="${b}" ${b.toLowerCase() === (item.brand || '').toLowerCase() ? 'selected' : ''}>${b}</option>`;
+      let brandOptionsHtml = `<option value="" ${!prod.brand ? 'selected' : ''}>All Brands</option>`;
+      brands.forEach(b => {
+        brandOptionsHtml += `<option value="${b}" ${b.toLowerCase() === (prod.brand || '').toLowerCase() ? 'selected' : ''}>${b}</option>`;
       });
 
-      // Build options for sizes
-      let sizeOptionsHtml = '';
-      if (hasSizes) {
-        sizeOptionsHtml = (selectedProd.variants || []).map(v => {
-          const vPrice = v.sellingPrice > 0 ? ` (₹${v.sellingPrice})` : '';
-          return `<option value="${v.size}" ${v.size === item.size ? 'selected' : ''}>Size ${v.size}${vPrice}</option>`;
-        }).join('');
-      } else {
-        sizeOptionsHtml = `<option value="Standard">Standard (No sizes)</option>`;
-      }
+      const sizeRowsHtml = (prod.sizes || []).map(sz => {
+        const details = getVariantDetails(selectedProd, sz.size);
+        const availStock = details.availStock;
+        const unitPrice = details.sellingPrice;
+        const lineTotal = (sz.qty || 0) * unitPrice;
+        const isOverStock = (sz.qty > availStock) || (availStock === 0 && sz.qty > 0);
 
-      row.innerHTML = `
-        <!-- 1. PRODUCT NAME (Searchable dropdown) -->
-        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
-          <input type="text" class="form-input sale-prod-search" placeholder="🔍 Search product..." value="${item.searchQuery || ''}" style="padding: 0.25rem 0.45rem; font-size: 0.78rem; height: 26px; box-sizing: border-box;" title="Type to filter product list">
-          <select class="form-select sale-prod-select" style="padding: 0.35rem 0.5rem; font-size: 0.85rem; height: 32px; box-sizing: border-box;">
-            ${prodOptionsHtml}
-          </select>
-        </div>
+        const alreadyChosenInOtherRows = (prod.sizes || []).filter(s => s.id !== sz.id).map(s => s.size);
+        let sizeOptionsHtml = '';
+        if (hasSizes) {
+          sizeOptionsHtml = (selectedProd.variants || []).map(v => {
+            const isTaken = alreadyChosenInOtherRows.includes(v.size) && v.size !== sz.size;
+            const priceTag = v.sellingPrice > 0 ? ` (₹${v.sellingPrice})` : '';
+            return `<option value="${v.size}" ${v.size === sz.size ? 'selected' : ''} ${isTaken ? 'disabled' : ''}>${v.size === 'Standard' ? 'Standard' : 'Size ' + v.size}${priceTag}${isTaken ? ' (Added)' : ''}</option>`;
+          }).join('');
+        } else {
+          sizeOptionsHtml = '<option value="Standard">Standard (No sizes)</option>';
+        }
 
-        <!-- 2. BRAND (Dropdown) -->
-        <div style="display: flex; flex-direction: column;">
-          <select class="form-select sale-brand-select" style="padding: 0.35rem 0.5rem; font-size: 0.85rem; height: 32px; box-sizing: border-box;">
-            ${brandOptionsHtml}
-          </select>
-        </div>
+        return `
+          <div class="sale-size-row" data-size-id="${sz.id}" style="display: grid; grid-template-columns: 1.4fr 1.1fr 1.2fr 1fr 1.2fr 30px; gap: 0.55rem; align-items: center;">
+            <div class="form-group" style="margin: 0;">
+              <select class="form-select sale-size-select" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;" ${!hasSizes ? 'disabled' : ''}>
+                ${sizeOptionsHtml}
+              </select>
+            </div>
 
-        <!-- 3. CATEGORY (Read-Only) -->
-        <div style="display: flex; flex-direction: column;">
-          <div class="sale-cat-display" style="padding: 0.45rem 0.55rem; font-size: 0.85rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-secondary); height: 32px; display: flex; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box;" title="${categoryText}">
-            ${categoryText}
+            <div class="form-group" style="margin: 0;">
+              <input type="text" class="form-input sale-stock-display" value="${availStock} units" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; text-align: center; background: var(--bg-secondary); color: ${availStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'}; box-sizing: border-box;" title="${availStock} units in stock">
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+              <input type="text" class="form-input sale-price-display" value="₹${unitPrice.toLocaleString('en-IN')}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; text-align: right; background: var(--bg-secondary); color: var(--text-primary); box-sizing: border-box;" title="Selling price per unit">
+            </div>
+
+            <div class="form-group" style="margin: 0; position: relative;">
+              <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${sz.qty}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; text-align: center; box-sizing: border-box; ${isOverStock ? 'border-color: #ef4444; background: rgba(239,68,68,0.08); color: #ef4444;' : ''}">
+              <div class="sale-qty-error" style="color: #ef4444; font-size: 0.7rem; position: absolute; left: 0; right: 0; top: 32px; text-align: center; display: ${isOverStock ? 'block' : 'none'}; white-space: nowrap; pointer-events: none; z-index: 1;">
+                ${availStock === 0 ? 'Out of stock' : `Max: ${availStock}`}
+              </div>
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+              <input type="text" class="form-input sale-total-display" value="₹${lineTotal.toLocaleString('en-IN')}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; text-align: right; background: var(--bg-secondary); color: var(--brand-primary); box-sizing: border-box;">
+            </div>
+
+            <div style="display: flex; justify-content: center; align-items: center;">
+              <button type="button" class="btn btn-ghost sale-remove-size-btn" title="Remove size" style="height: 28px; width: 28px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer;">
+                <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const sectionEl = document.createElement('div');
+      sectionEl.className = 'sale-product-section';
+      sectionEl.setAttribute('data-product-id', prod.id);
+      sectionEl.style.cssText = 'display: flex; flex-direction: column; gap: 0.5rem; padding: 0.65rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);';
+
+      sectionEl.innerHTML = `
+        <!-- Product Section Header: Product #, Title Preview, Subtotal, Remove Product -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 0.775rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase; letter-spacing: 0.04em;">Product #${pIdx + 1}</span>
+            <span class="sale-prod-title-preview" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${prod.productName || 'Select Product'}</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <span class="sale-prod-subtotal" style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); background: var(--bg-secondary); padding: 0.2rem 0.55rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              Subtotal: <strong>${initialProdUnits} units</strong> · <strong style="color: var(--brand-primary);">₹${initialProdTotal.toLocaleString('en-IN')}</strong>
+            </span>
+            <button type="button" class="btn btn-ghost sale-remove-product-btn" title="Remove Product" style="height: 26px; width: 26px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer;">
+              <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+            </button>
           </div>
         </div>
 
-        <!-- 4. SIZE / VARIANT (Dropdown) -->
-        <div style="display: flex; flex-direction: column;">
-          <select class="form-select sale-size-select" style="padding: 0.35rem 0.5rem; font-size: 0.85rem; height: 32px; box-sizing: border-box;" ${!hasSizes ? 'disabled' : ''}>
-            ${sizeOptionsHtml}
-          </select>
-        </div>
+        <!-- Scrollable wrapper for compact product inputs & size grid -->
+        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
+          <div style="min-width: 680px; display: flex; flex-direction: column; gap: 0.45rem;">
+            <!-- Horizontal Product Details Row: Product Name, Brand, Category -->
+            <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.55rem; align-items: end;">
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
+                <div style="display: flex; gap: 0.35rem; align-items: center;">
+                  <input type="text" class="form-input sale-prod-search" placeholder="🔍 Search..." value="${prod.searchQuery || ''}" style="width: 38%; height: 32px; padding: 0.25rem 0.45rem; font-size: 0.8rem; box-sizing: border-box;" title="Type to filter products">
+                  <select class="form-select sale-prod-select" style="flex: 1; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+                    ${prodOptionsHtml}
+                  </select>
+                </div>
+              </div>
 
-        <!-- 5. AVAILABLE STOCK (Read-Only) -->
-        <div style="display: flex; flex-direction: column;">
-          <div class="sale-stock-display" style="font-weight: 600; font-size: 0.85rem; padding: 0.45rem 0.5rem; color: ${availStock === 0 ? '#ef4444' : 'var(--text-primary)'}; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 32px; display: flex; align-items: center; justify-content: center; white-space: nowrap; box-sizing: border-box;" title="${availStock} units in stock">
-            ${availStock} units
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Brand</label>
+                <select class="form-select sale-brand-select" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
+                  ${brandOptionsHtml}
+                </select>
+              </div>
+
+              <div class="form-group" style="margin: 0;">
+                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Category</label>
+                <input type="text" class="form-input sale-cat-display" value="${prod.category || '—'}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; background: var(--bg-secondary); color: var(--text-secondary); box-sizing: border-box;" title="${prod.category || ''}">
+              </div>
+            </div>
+
+            <!-- Size-wise Entries Subheader & Actions -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.4rem; border-top: 1px dashed var(--border-color);">
+              <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); display: flex; align-items: center; gap: 0.35rem;">
+                <i data-lucide="layers" style="width: 12px; height: 12px; color: var(--brand-primary);"></i>
+                <span>Size-wise Sales Entries</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.4rem;">
+                <button type="button" class="btn btn-secondary btn-sm sale-add-size-btn" style="height: 24px; padding: 0 0.55rem; font-size: 0.72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; border-color: var(--brand-primary); color: var(--brand-primary); background: transparent; cursor: pointer;">
+                  <i data-lucide="plus" style="width: 12px; height: 12px;"></i> Add Size
+                </button>
+              </div>
+            </div>
+
+            <!-- Size Column Headers -->
+            <div style="display: grid; grid-template-columns: 1.4fr 1.1fr 1.2fr 1fr 1.2fr 30px; gap: 0.55rem; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); padding: 0.1rem 0;">
+              <div>Size / Variant <span style="color: #ef4444;">*</span></div>
+              <div style="text-align: center;">Available Stock</div>
+              <div style="text-align: right;">Selling Price (₹)</div>
+              <div style="text-align: center;">Quantity <span style="color: #ef4444;">*</span></div>
+              <div style="text-align: right;">Total (₹)</div>
+              <div></div>
+            </div>
+
+            <!-- Size Rows Container -->
+            <div class="sale-sizes-container" style="display: flex; flex-direction: column; gap: 0.35rem;">
+              ${sizeRowsHtml}
+            </div>
+
           </div>
-        </div>
-
-        <!-- 6. SELLING PRICE (₹) (Read-Only) -->
-        <div style="display: flex; flex-direction: column;">
-          <div class="sale-price-display" style="font-weight: 600; font-size: 0.85rem; padding: 0.45rem 0.5rem; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 32px; display: flex; align-items: center; justify-content: flex-end; white-space: nowrap; box-sizing: border-box;" title="Inventory selling price">
-            ${priceDisplay}
-          </div>
-        </div>
-
-        <!-- 7. QUANTITY (Editable Number Input) -->
-        <div style="display: flex; flex-direction: column;">
-          <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${item.qty || 1}" style="padding: 0.35rem 0.4rem; font-size: 0.85rem; text-align: center; height: 32px; box-sizing: border-box; ${isOverStock ? 'border-color: #ef4444; background: rgba(239,68,68,0.08); color: #ef4444;' : ''}">
-          <div class="sale-qty-error" style="color: #ef4444; font-size: 0.72rem; margin-top: 2px; text-align: center; display: ${isOverStock ? 'block' : 'none'}; white-space: nowrap;">
-            ${availStock === 0 ? 'Out of stock' : `Max: ${availStock}`}
-          </div>
-        </div>
-
-        <!-- 8. TOTAL (₹) (Read-Only Calculated) -->
-        <div style="display: flex; flex-direction: column;">
-          <div class="sale-line-total" style="font-weight: 700; font-size: 0.875rem; padding: 0.45rem 0.5rem; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); height: 32px; display: flex; align-items: center; justify-content: flex-end; white-space: nowrap; box-sizing: border-box;">
-            ₹${lineTotal.toLocaleString('en-IN')}
-          </div>
-        </div>
-
-        <!-- ACTION: REMOVE ITEM -->
-        <div style="display: flex; align-items: center; justify-content: center; height: 32px;">
-          <button type="button" class="btn btn-ghost sale-remove-btn" style="padding: 0.35rem; color: var(--text-secondary); height: 32px; width: 32px; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;" title="Remove Item">
-            <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
-          </button>
         </div>
       `;
 
-      // Event Listeners for Row
-      const searchInp = row.querySelector('.sale-prod-search');
-      const prodSel = row.querySelector('.sale-prod-select');
-      const brandSel = row.querySelector('.sale-brand-select');
-      const sizeSel = row.querySelector('.sale-size-select');
-      const qtyInp = row.querySelector('.sale-qty-input');
-      const removeBtn = row.querySelector('.sale-remove-btn');
+      const prodSearchInp = sectionEl.querySelector('.sale-prod-search');
+      const prodSelect = sectionEl.querySelector('.sale-prod-select');
+      const brandSelect = sectionEl.querySelector('.sale-brand-select');
+      const removeProdBtn = sectionEl.querySelector('.sale-remove-product-btn');
+      const addSizeBtn = sectionEl.querySelector('.sale-add-size-btn');
 
-      // Live search input: filters dropdown options without losing input focus
-      searchInp.addEventListener('input', (e) => {
-        item.searchQuery = e.target.value;
-        const q = item.searchQuery.toLowerCase().trim();
-        const filtered = candidateProducts.filter(p => !q || p.name.toLowerCase().includes(q) || (p.brand && p.brand.toLowerCase().includes(q)));
+      // 1. Live search input
+      prodSearchInp.addEventListener('input', (e) => {
+        prod.searchQuery = e.target.value;
+        const searchQ = (prod.searchQuery || '').toLowerCase().trim();
+        const filtered = candidateProducts.filter(p => !searchQ || p.name.toLowerCase().includes(searchQ) || (p.brand && p.brand.toLowerCase().includes(searchQ)));
         if (filtered.length === 0) {
-          prodSel.innerHTML = '<option value="" disabled>No products match</option>';
+          prodSelect.innerHTML = '<option value="" disabled>No products match</option>';
         } else {
-          prodSel.innerHTML = filtered.map(p => {
+          prodSelect.innerHTML = filtered.map(p => {
             const bLabel = p.brand ? ` [${p.brand}]` : '';
-            return `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}${bLabel}</option>`;
+            return `<option value="${p.id}" ${p.id === prod.productId ? 'selected' : ''}>${p.name}${bLabel}</option>`;
           }).join('');
         }
       });
 
-      // Product dropdown change
-      prodSel.addEventListener('change', (e) => {
-        item.productId = e.target.value;
-        item.searchQuery = '';
-        const newP = productsList.find(p => p.id === item.productId);
+      // 2. Product select change
+      prodSelect.addEventListener('change', (e) => {
+        prod.productId = e.target.value;
+        prod.searchQuery = '';
+        const newP = prods.find(p => p.id === prod.productId);
         if (newP) {
-          item.brand = (newP.brand || '').trim();
-          if (newP.variants && newP.variants.length > 0) {
-            item.size = newP.variants[0].size || 'Standard';
-          } else {
-            item.size = 'Standard';
-          }
+          prod.productName = newP.name;
+          prod.category = newP.category || 'General';
+          prod.brand = (newP.brand || '').trim();
+          const newV = newP.variants;
+          prod.sizes = [{
+            id: 'ssize_' + Date.now() + '_1',
+            size: (newV && newV.length > 0) ? newV[0].size : 'Standard',
+            qty: 1
+          }];
         }
-        renderSaleRows();
+        renderSaleItems();
         updateSaleSummary();
       });
 
-      // Brand dropdown change
-      brandSel.addEventListener('change', (e) => {
-        item.brand = e.target.value.trim();
-        item.searchQuery = '';
-        // If brand is chosen, check if current product matches
-        let prodsForBrand = productsList;
-        if (item.brand) {
-          prodsForBrand = productsList.filter(p => (p.brand || '').trim().toLowerCase() === item.brand.toLowerCase());
+      // 3. Brand select change
+      brandSelect.addEventListener('change', (e) => {
+        prod.brand = e.target.value.trim();
+        prod.searchQuery = '';
+        let prodsForBrand = prods;
+        if (prod.brand) {
+          prodsForBrand = prods.filter(p => (p.brand || '').trim().toLowerCase() === prod.brand.toLowerCase());
         }
-        if (!prodsForBrand.some(p => p.id === item.productId)) {
+        if (!prodsForBrand.some(p => p.id === prod.productId)) {
           if (prodsForBrand.length > 0) {
-            item.productId = prodsForBrand[0].id;
-            const newP = prodsForBrand[0];
-            item.size = (newP.variants && newP.variants.length > 0) ? newP.variants[0].size : 'Standard';
+            prod.productId = prodsForBrand[0].id;
+            prod.productName = prodsForBrand[0].name;
+            prod.category = prodsForBrand[0].category || 'General';
+            const newV = prodsForBrand[0].variants;
+            prod.sizes = [{
+              id: 'ssize_' + Date.now() + '_1',
+              size: (newV && newV.length > 0) ? newV[0].size : 'Standard',
+              qty: 1
+            }];
           } else {
-            item.productId = '';
+            prod.productId = '';
+            prod.productName = '';
+            prod.category = '—';
           }
         }
-        renderSaleRows();
+        renderSaleItems();
         updateSaleSummary();
       });
 
-      // Size dropdown change
-      sizeSel.addEventListener('change', (e) => {
-        item.size = e.target.value;
-        const currentDetails = getVariantDetails(productsList.find(p => p.id === item.productId), item.size);
-        const availStock = currentDetails.availStock;
-        const unitPrice = currentDetails.sellingPrice;
-        const currLineTotal = (item.qty || 0) * unitPrice;
-
-        const stockEl = row.querySelector('.sale-stock-display');
-        if (stockEl) {
-          stockEl.textContent = `${availStock} units`;
-          stockEl.style.color = availStock === 0 ? '#ef4444' : 'var(--text-primary)';
-          stockEl.title = `${availStock} units in stock`;
-        }
-
-        const priceEl = row.querySelector('.sale-price-display');
-        if (priceEl) {
-          priceEl.textContent = unitPrice > 0 ? `₹${unitPrice.toLocaleString('en-IN')}` : '₹0';
-        }
-
-        const totalEl = row.querySelector('.sale-line-total');
-        if (totalEl) {
-          totalEl.textContent = `₹${currLineTotal.toLocaleString('en-IN')}`;
-        }
-
-        const errEl = row.querySelector('.sale-qty-error');
-        const isNowOver = (item.qty > availStock) || (availStock === 0 && item.qty > 0);
-        if (isNowOver) {
-          qtyInp.style.borderColor = '#ef4444';
-          qtyInp.style.background = 'rgba(239,68,68,0.08)';
-          qtyInp.style.color = '#ef4444';
-          if (errEl) {
-            errEl.textContent = availStock === 0 ? 'Out of stock' : `Max: ${availStock}`;
-            errEl.style.display = 'block';
-          }
-        } else {
-          qtyInp.style.borderColor = '';
-          qtyInp.style.background = '';
-          qtyInp.style.color = '';
-          if (errEl) errEl.style.display = 'none';
-        }
-
-        updateSaleSummary();
-      });
-
-      // Quantity input change
-      qtyInp.addEventListener('input', (e) => {
-        const val = parseInt(e.target.value, 10);
-        item.qty = isNaN(val) ? 0 : val;
-        
-        // Update line total and validation display dynamically without re-rendering row
-        const currentDetails = getVariantDetails(productsList.find(p => p.id === item.productId), item.size);
-        const currLineTotal = (item.qty || 0) * (currentDetails.sellingPrice || 0);
-        const totalEl = row.querySelector('.sale-line-total');
-        if (totalEl) totalEl.textContent = `₹${currLineTotal.toLocaleString('en-IN')}`;
-
-        const errEl = row.querySelector('.sale-qty-error');
-        const isNowOver = (item.qty > currentDetails.availStock) || (currentDetails.availStock === 0 && item.qty > 0);
-        if (isNowOver) {
-          qtyInp.style.borderColor = '#ef4444';
-          qtyInp.style.background = 'rgba(239,68,68,0.08)';
-          qtyInp.style.color = '#ef4444';
-          if (errEl) {
-            errEl.textContent = currentDetails.availStock === 0 ? 'Out of stock' : `Max: ${currentDetails.availStock}`;
-            errEl.style.display = 'block';
-          }
-        } else {
-          qtyInp.style.borderColor = '';
-          qtyInp.style.background = '';
-          qtyInp.style.color = '';
-          if (errEl) errEl.style.display = 'none';
-        }
-
-        updateSaleSummary();
-      });
-
-      // Remove button
-      removeBtn.addEventListener('click', () => {
-        if (saleItemsData.length <= 1) {
-          toast.show({ message: 'At least one item is required for a sale.', type: 'warning' });
+      // 4. Remove Product button
+      removeProdBtn.addEventListener('click', () => {
+        if (productsData.length <= 1) {
+          toast.show({ message: 'At least one product is required for a sale.', type: 'warning' });
           return;
         }
-        saleItemsData.splice(index, 1);
-        renderSaleRows();
+        productsData.splice(pIdx, 1);
+        renderSaleItems();
         updateSaleSummary();
       });
 
-      itemsContainer.appendChild(row);
+      // 5. Add Size button
+      addSizeBtn.addEventListener('click', () => {
+        if (!selectedProd) return;
+        const variants = selectedProd.variants || [];
+        if (!hasSizes || variants.length === 0) {
+          toast.show({ message: `"${selectedProd.name}" does not have size variants.`, type: 'warning' });
+          return;
+        }
+
+        const usedSizes = new Set((prod.sizes || []).map(s => s.size));
+        const availableVar = variants.find(v => !usedSizes.has(v.size));
+        if (!availableVar) {
+          toast.show({ message: `All available sizes for "${selectedProd.name}" have already been added.`, type: 'warning' });
+          return;
+        }
+
+        prod.sizes.push({
+          id: 'ssize_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+          size: availableVar.size,
+          qty: 1
+        });
+
+        renderSaleItems();
+        updateSaleSummary();
+      });
+
+      // 6. Size rows listeners
+      (prod.sizes || []).forEach(sz => {
+        const sizeRowEl = sectionEl.querySelector(`[data-size-id="${sz.id}"]`);
+        if (!sizeRowEl) return;
+
+        const sizeSel = sizeRowEl.querySelector('.sale-size-select');
+        const qtyInp = sizeRowEl.querySelector('.sale-qty-input');
+        const removeSizeBtn = sizeRowEl.querySelector('.sale-remove-size-btn');
+
+        sizeSel.addEventListener('change', (e) => {
+          sz.size = e.target.value;
+          renderSaleItems();
+          updateSaleSummary();
+        });
+
+        qtyInp.addEventListener('input', (e) => {
+          const val = parseInt(e.target.value, 10);
+          sz.qty = isNaN(val) ? 0 : val;
+          updateSaleSummary();
+        });
+
+        removeSizeBtn.addEventListener('click', () => {
+          if (prod.sizes.length <= 1) {
+            toast.show({ message: 'At least one size entry is required per product.', type: 'warning' });
+            return;
+          }
+          const sIdx = prod.sizes.findIndex(s => s.id === sz.id);
+          if (sIdx !== -1) {
+            prod.sizes.splice(sIdx, 1);
+            renderSaleItems();
+            updateSaleSummary();
+          }
+        });
+      });
+
+      itemsContainer.appendChild(sectionEl);
     });
 
     if (window.lucide) window.lucide.createIcons();
   }
 
-  renderSaleRows();
+  renderSaleItems();
   updateSaleSummary();
 
-  mainCard.querySelector('#btn-add-sale-row').addEventListener('click', () => {
-    saleItemsData.push(initDefaultItem());
-    renderSaleRows();
+  mainCard.querySelector('#btn-add-sale-product').addEventListener('click', () => {
+    productsData.push(createProductGroup());
+    renderSaleItems();
     updateSaleSummary();
   });
 
@@ -9321,39 +9428,57 @@ function renderAddSalePage(onNavigate = null) {
       return;
     }
 
-    if (saleItemsData.length === 0) {
+    if (productsData.length === 0) {
+      toast.show({ message: 'Please add at least one product to the sale.', type: 'danger' });
+      return;
+    }
+
+    const prods = store.data.products || [];
+    const allSaleItems = [];
+    const requiredStockMap = {};
+
+    for (let prod of productsData) {
+      if (!prod.productId) {
+        toast.show({ message: 'Please select a valid product for all product groups.', type: 'danger' });
+        return;
+      }
+      const realProd = prods.find(p => p.id === prod.productId);
+      if (!realProd) {
+        toast.show({ message: `Product "${prod.productName || 'Unknown'}" not found in Inventory records.`, type: 'danger' });
+        return;
+      }
+
+      if (!prod.sizes || prod.sizes.length === 0) {
+        toast.show({ message: `Please add at least one size for "${realProd.name}".`, type: 'danger' });
+        return;
+      }
+
+      for (let sz of prod.sizes) {
+        const q = parseInt(sz.qty, 10);
+        if (isNaN(q) || q <= 0) {
+          toast.show({ message: `Quantity must be greater than 0 for "${realProd.name}" (${sz.size}).`, type: 'danger' });
+          return;
+        }
+        const key = `${prod.productId}:::${sz.size || 'Standard'}`;
+        requiredStockMap[key] = (requiredStockMap[key] || 0) + q;
+        allSaleItems.push({
+          productId: prod.productId,
+          productName: realProd.name,
+          size: sz.size || 'Standard',
+          qty: q
+        });
+      }
+    }
+
+    if (allSaleItems.length === 0) {
       toast.show({ message: 'Please add at least one item to the sale.', type: 'danger' });
       return;
     }
 
-    const productsList = store.data.products || [];
-
-    // Check individual items & aggregate required stock per variant
-    const requiredStockMap = {};
-    for (let item of saleItemsData) {
-      if (!item.productId) {
-        toast.show({ message: 'Please select a valid product for all items.', type: 'danger' });
-        return;
-      }
-      const prod = productsList.find(p => p.id === item.productId);
-      if (!prod) {
-        toast.show({ message: 'Product not found in Inventory records.', type: 'danger' });
-        return;
-      }
-
-      if (!item.qty || item.qty <= 0) {
-        toast.show({ message: `Quantity must be greater than 0 for "${prod.name}".`, type: 'danger' });
-        return;
-      }
-
-      const key = `${item.productId}:::${item.size || 'Standard'}`;
-      requiredStockMap[key] = (requiredStockMap[key] || 0) + item.qty;
-    }
-
-    // Cumulative stock verification against authoritative latest inventory
+    // Cumulative stock verification against latest store inventory
     for (const [key, reqQty] of Object.entries(requiredStockMap)) {
       const [prodId, size] = key.split(':::');
-      const prod = productsList.find(p => p.id === prodId);
+      const prod = prods.find(p => p.id === prodId);
       const details = getVariantDetails(prod, size);
       if (reqQty > details.availStock) {
         const sizeLabel = size && size !== 'Standard' ? ` (${size})` : '';
@@ -9365,8 +9490,8 @@ function renderAddSalePage(onNavigate = null) {
       }
     }
 
-    const itemsPayload = saleItemsData.map(item => {
-      const prod = productsList.find(p => p.id === item.productId);
+    const itemsPayload = allSaleItems.map(item => {
+      const prod = prods.find(p => p.id === item.productId);
       const details = getVariantDetails(prod, item.size);
       return {
         productId: item.productId,
