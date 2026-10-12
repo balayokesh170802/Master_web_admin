@@ -1745,6 +1745,52 @@ class StoreManager {
     let totalQty = 0;
     let totalAmount = 0;
     const itemRecords = [];
+    const newlyCreatedThisRun = [];
+
+    const findMatch = (list, name, brand, cat, reqId) => {
+      if (reqId) {
+        const byId = list.find(p => p.id === reqId);
+        if (byId) return byId;
+      }
+      if (!name) return null;
+      const cleanName = name.trim().toLowerCase();
+      const cleanBrand = (brand || '').trim().toLowerCase();
+      const cleanCat = (cat || '').trim().toLowerCase();
+
+      const candidates = list.filter(p => p.name && p.name.trim().toLowerCase() === cleanName);
+      if (candidates.length === 0) return null;
+
+      if (cleanBrand) {
+        const brandMatches = candidates.filter(p => (p.brand || '').trim().toLowerCase() === cleanBrand);
+        if (brandMatches.length === 1) return brandMatches[0];
+        if (brandMatches.length > 1) {
+          if (cleanCat) {
+            const catMatch = brandMatches.find(p => (p.category || '').trim().toLowerCase() === cleanCat);
+            if (catMatch) return catMatch;
+          }
+          return brandMatches[0];
+        }
+        // Distinct brand entered -> preserve distinct product!
+        return null;
+      }
+
+      // Brand not provided
+      if (candidates.length === 1) {
+        const cand = candidates[0];
+        const candBrand = (cand.brand || '').trim().toLowerCase();
+        if (!candBrand || (cleanCat && (cand.category || '').trim().toLowerCase() === cleanCat)) {
+          return cand;
+        }
+        return null;
+      }
+
+      if (cleanCat) {
+        const catMatches = candidates.filter(p => (p.category || '').trim().toLowerCase() === cleanCat);
+        if (catMatches.length === 1) return catMatches[0];
+      }
+
+      return null;
+    };
 
     (payload.items || []).forEach(item => {
       const q = parseInt(item.qty, 10) || 0;
@@ -1755,23 +1801,49 @@ class StoreManager {
       totalQty += q;
       totalAmount += lineCost;
 
-      let prodId = item.productId || '';
-      let prodSku = item.sku || '';
-      let prodVariantId = item.variantId || '';
-      let prodName = item.productName || item.product || '';
+      const prodName = (item.productName || item.product || '').trim();
+      const enteredCat = (item.category || '').trim();
+      const enteredBrand = (item.brand || '').trim();
 
-      let foundProd = null;
-      if (prodId) {
-        foundProd = (this.data.products || []).find(p => p.id === prodId);
-      } else if (prodSku) {
-        foundProd = (this.data.products || []).find(p => (p.variants || []).some(v => v.sku && v.sku.toLowerCase() === prodSku.toLowerCase()));
-        if (foundProd) prodId = foundProd.id;
-      } else if (prodName) {
-        foundProd = (this.data.products || []).find(p => p.name && p.name.trim().toLowerCase() === prodName.trim().toLowerCase());
-        if (foundProd) prodId = foundProd.id;
+      // 1. Check if a product with this name + brand was created during this save
+      let foundProd = findMatch(newlyCreatedThisRun, prodName, enteredBrand, enteredCat, item.productId);
+
+      // 2. Check existing catalog products
+      if (!foundProd) {
+        foundProd = findMatch(this.data.products || [], prodName, enteredBrand, enteredCat, item.productId);
       }
 
-      if (foundProd && !prodName) prodName = foundProd.name;
+      // 3. If no confident match, create ONE authoritative product record
+      if (!foundProd && prodName) {
+        const newProdId = `PROD-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 900 + 100)}`;
+        foundProd = {
+          id: newProdId,
+          name: prodName,
+          category: enteredCat || 'General',
+          brand: enteredBrand || 'Generic',
+          description: item.description || '',
+          purchasePrice: buyPrice || 0,
+          sellingPrice: sellPrice || 0,
+          minStock: 5,
+          status: 'Active',
+          variants: [],
+          totalStock: 0
+        };
+        if (!Array.isArray(this.data.products)) this.data.products = [];
+        this.data.products.unshift(foundProd);
+        newlyCreatedThisRun.push(foundProd);
+
+        if (enteredCat && Array.isArray(this.data.categories) && !this.data.categories.includes(enteredCat)) {
+          this.data.categories.push(enteredCat);
+        }
+        if (enteredBrand && Array.isArray(this.data.brands) && !this.data.brands.includes(enteredBrand)) {
+          this.data.brands.push(enteredBrand);
+        }
+      }
+
+      const prodId = foundProd ? foundProd.id : (item.productId || '');
+      let prodSku = item.sku || '';
+      let prodVariantId = item.variantId || '';
 
       const targetSize = (item.size || 'Standard').trim();
       if (foundProd && (!prodSku || !prodVariantId) && Array.isArray(foundProd.variants)) {
@@ -1786,7 +1858,9 @@ class StoreManager {
         productId: prodId,
         variantId: prodVariantId,
         sku: prodSku,
-        product: prodName || 'Standard Item',
+        product: prodName || (foundProd ? foundProd.name : 'Standard Item'),
+        category: enteredCat || (foundProd ? foundProd.category : 'General'),
+        brand: enteredBrand || (foundProd ? foundProd.brand : 'Generic'),
         size: targetSize,
         qty: q,
         buyingPrice: buyPrice,
@@ -1972,18 +2046,28 @@ class StoreManager {
         // Add actual received quantity
         variant.stock = Math.max(0, Number(variant.stock) || 0) + requested;
 
-        // Update purchase / cost price if positive; NEVER modify existing selling prices
+        // Update product category and brand if provided
+        if (item.category && item.category.trim() && (!product.category || product.category === 'General')) {
+          product.category = item.category.trim();
+        }
+        if (item.brand && item.brand.trim() && (!product.brand || product.brand === 'Generic')) {
+          product.brand = item.brand.trim();
+        }
+
+        // Update purchase / cost price if positive
         const bPrice = Number(item.buyingPrice || item.price || 0);
         if (bPrice > 0) {
           variant.purchasePrice = bPrice;
           product.purchasePrice = bPrice;
         }
 
-        // Initialize selling price if product/variant has no selling price yet
+        // Update selling price if positive
         const sPrice = Number(item.sellingPrice || 0);
         if (sPrice > 0) {
-          if (!variant.sellingPrice) variant.sellingPrice = sPrice;
-          if (!product.sellingPrice) product.sellingPrice = sPrice;
+          variant.sellingPrice = sPrice;
+          if (!product.sellingPrice || product.sellingPrice === 0) {
+            product.sellingPrice = sPrice;
+          }
         }
 
         // Recalculate parent product total available stock directly from size-wise quantities
@@ -7303,7 +7387,7 @@ Stock will remain unchanged until goods are received.`);
   if (window.lucide) window.lucide.createIcons();
 }
 
-// ADD PURCHASE PAGE (Save as Draft or Save & Receive Stock)
+// ADD PURCHASE PAGE (Manual Product Entry, Save as Draft or Save & Receive Stock)
 function renderAddPurchasePage(params = {}, onNavigate = null) {
   if (typeof params === 'function') {
     onNavigate = params;
@@ -7345,31 +7429,37 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   let purchaseItemsData = [];
   if (editingPurchase && Array.isArray(editingPurchase.items)) {
-    purchaseItemsData = JSON.parse(JSON.stringify(editingPurchase.items));
+    purchaseItemsData = editingPurchase.items.map(it => ({
+      productName: it.product || it.productName || '',
+      category: it.category || 'Shirts',
+      brand: it.brand || '',
+      size: it.size || 'Standard',
+      qty: it.qty || 50,
+      buyingPrice: it.buyingPrice !== undefined ? it.buyingPrice : 200,
+      sellingPrice: it.sellingPrice !== undefined ? it.sellingPrice : 400,
+      productId: it.productId || ''
+    }));
   }
 
-  // If returning with newly created product (if any)
-  if (params && params.selectedProductId) {
-    const selectedProd = (store.data.products || []).find(p => p.id === params.selectedProductId);
-    if (selectedProd) {
-      const pQty = params.units ? parseInt(params.units, 10) : 50;
-      const pBuy = params.buyingPrice ? parseFloat(params.buyingPrice) : (selectedProd.purchasePrice || 400);
-      const pSell = params.sellingPrice ? parseFloat(params.sellingPrice) : (selectedProd.sellingPrice || 600);
+  const categoriesList = (store.data.categories && store.data.categories.length > 0)
+    ? store.data.categories
+    : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
 
-      const hasProdSizes = selectedProd.variants && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size !== 'Standard');
-      const initialSize = hasProdSizes ? selectedProd.variants[0].size : 'Standard';
+  const brandsList = (store.data.brands && store.data.brands.length > 0)
+    ? store.data.brands
+    : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
 
-      purchaseItemsData.push({
-        productId: selectedProd.id,
-        size: initialSize,
-        qty: pQty,
-        buyingPrice: pBuy,
-        sellingPrice: pSell
-      });
-    }
-  }
+  const productsList = store.data.products || [];
 
   mainCard.innerHTML = `
+    <!-- Product & Brand Auto-suggest Datalists -->
+    <datalist id="pur-products-list">
+      ${productsList.map(p => `<option value="${p.name}">`).join('')}
+    </datalist>
+    <datalist id="pur-brands-list">
+      ${brandsList.map(b => `<option value="${b}">`).join('')}
+    </datalist>
+
     <!-- SECTION A: PURCHASE INFORMATION -->
     <div style="display: flex; flex-direction: column; gap: 1rem;">
       <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
@@ -7392,7 +7482,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       </div>
     </div>
 
-    <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS -->
+    <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS (Manual Entry Rows) -->
     <div style="display: flex; flex-direction: column; gap: 1.25rem;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
         <div>
@@ -7401,13 +7491,9 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             Product & Size-wise Items
           </h3>
           <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">
-            Select existing products or enter a new product inline. Add multiple size rows with independent quantities and prices.
+            Enter product details manually (Name, Category, Brand) and add size-wise quantities and prices.
           </p>
         </div>
-        <button type="button" id="btn-open-create-prod-modal" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
-          <i data-lucide="plus-circle" style="width: 15px; height: 15px; color: var(--brand-primary);"></i>
-          <span>+ Add New Product</span>
-        </button>
       </div>
 
       <!-- Items List Container -->
@@ -7485,20 +7571,17 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   function renderPurchaseItems() {
     itemsContainer.innerHTML = '';
-    const productsList = store.data.products || [];
 
     if (purchaseItemsData.length === 0) {
-      const defaultP = productsList[0];
-      const hasDefSizes = defaultP && defaultP.variants && defaultP.variants.length > 0;
-      const defVar = hasDefSizes ? defaultP.variants[0] : null;
+      const defaultP = productsList[0] || null;
       purchaseItemsData.push({
-        productId: defaultP ? defaultP.id : '',
-        size: defVar ? defVar.size : 'Standard',
-        sku: defVar ? (defVar.sku || '') : '',
-        variantId: defVar ? (defVar.id || '') : '',
+        productName: defaultP ? defaultP.name : '',
+        category: defaultP ? (defaultP.category || 'Shirts') : 'Shirts',
+        brand: defaultP ? (defaultP.brand || 'ClassicFit') : '',
+        size: (defaultP && defaultP.variants && defaultP.variants[0]) ? defaultP.variants[0].size : 'M',
         qty: 50,
-        buyingPrice: defVar ? (defVar.purchasePrice || defaultP.purchasePrice || 200) : 200,
-        sellingPrice: defVar ? (defVar.sellingPrice || defaultP.sellingPrice || 400) : 400
+        buyingPrice: defaultP ? (defaultP.purchasePrice || 200) : 200,
+        sellingPrice: defaultP ? (defaultP.sellingPrice || 400) : 400
       });
     }
 
@@ -7506,93 +7589,95 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
     purchaseItemsData.forEach((item, index) => {
       const row = document.createElement('div');
-      row.style.cssText = 'display: grid; grid-template-columns: 2fr 1.15fr 1fr 1.1fr 1.1fr 1.1fr 1.1fr auto; gap: 0.75rem; align-items: end; padding: 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
-      if (window.innerWidth < 1000) row.style.gridTemplateColumns = '1fr 1fr';
-
-      const selectedProd = productsList.find(p => p.id === item.productId) || productsList[0];
-      if (selectedProd && !item.productId) item.productId = selectedProd.id;
-
-      const existingVarSizes = (selectedProd && Array.isArray(selectedProd.variants))
-        ? selectedProd.variants.map(v => v.size).filter(Boolean)
-        : [];
+      row.className = 'purchase-item-card';
+      row.style.cssText = 'display: flex; flex-direction: column; gap: 0.75rem; padding: 0.95rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-secondary);';
 
       const q = parseInt(item.qty, 10) || 0;
-      const bPrice = parseFloat(item.buyingPrice) !== undefined ? parseFloat(item.buyingPrice) : (selectedProd ? (selectedProd.purchasePrice || 200) : 200);
+      const bPrice = parseFloat(item.buyingPrice) !== undefined ? parseFloat(item.buyingPrice) : 200;
       item.buyingPrice = bPrice;
       const lineCost = q * bPrice;
 
-      const sPrice = parseFloat(item.sellingPrice) !== undefined ? parseFloat(item.sellingPrice) : (selectedProd ? (selectedProd.sellingPrice || Math.round(bPrice * 1.5)) : Math.round(bPrice * 1.5));
+      const sPrice = parseFloat(item.sellingPrice) !== undefined ? parseFloat(item.sellingPrice) : Math.round(bPrice * 1.5);
       item.sellingPrice = sPrice;
       const lineValue = q * sPrice;
 
-      // Count occurrences of this product to see if price copying is helpful
-      const sameProdCount = purchaseItemsData.filter(i => i.productId === item.productId).length;
+      const isCustomCat = item.category && !categoriesList.includes(item.category);
+      const sameProdCount = purchaseItemsData.filter(i => (i.productName || '').trim().toLowerCase() === (item.productName || '').trim().toLowerCase()).length;
 
       row.innerHTML = `
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product</label>
-          <select class="form-select pur-prod-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
-            <option value="__NEW__" style="color: var(--brand-primary); font-weight: 700;">➕ + Add New Product...</option>
-            <optgroup label="Select Existing Product">
-              ${productsList.map(p => `<option value="${p.id}" ${p.id === item.productId ? 'selected' : ''}>${p.name}</option>`).join('')}
-            </optgroup>
-          </select>
-        </div>
-
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size / Variant</label>
-          <select class="form-select pur-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
-            ${existingVarSizes.length > 0 ? `
-              <optgroup label="Product Sizes">
-                ${existingVarSizes.map(s => `<option value="${s}" ${s === item.size ? 'selected' : ''}>Size ${s}</option>`).join('')}
-              </optgroup>
-            ` : ''}
-            <optgroup label="Standard Sizes">
-              ${standardSizes.filter(s => !existingVarSizes.includes(s)).map(s => `<option value="${s}" ${s === item.size ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
-            </optgroup>
-            ${(item.size && !standardSizes.includes(item.size) && !existingVarSizes.includes(item.size)) ? `<option value="${item.size}" selected>${item.size}</option>` : ''}
-            <option value="__CUSTOM__">+ Custom Size...</option>
-          </select>
-        </div>
-
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Qty</label>
-          <input type="number" class="form-input pur-qty-input" min="1" value="${q}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
-        </div>
-
-        <div class="form-group" style="margin: 0;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; margin: 0;">Buying Price (₹)</label>
+        <!-- Tier 1: Product Definition (Name, Category, Brand, Actions) -->
+        <div style="display: grid; grid-template-columns: 2fr 1.3fr 1.3fr auto; gap: 0.75rem; align-items: end;">
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product Name <span style="color: #ef4444;">*</span></label>
+            <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${item.productName || ''}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Category <span style="color: #ef4444;">*</span></label>
+            <select class="form-select pur-cat-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
+              <option value="">Select Category *</option>
+              ${categoriesList.map(c => `<option value="${c}" ${c === item.category ? 'selected' : ''}>${c}</option>`).join('')}
+              <option value="__CUSTOM__" ${isCustomCat ? 'selected' : ''}>+ Custom Category...</option>
+            </select>
+            <input type="text" class="form-input pur-cat-custom-input" placeholder="Enter category" value="${isCustomCat ? item.category : ''}" style="display: ${isCustomCat ? 'block' : 'none'}; margin-top: 0.35rem; padding: 0.4rem 0.65rem; font-size: 0.85rem;">
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Brand</label>
+            <input type="text" class="form-input pur-brand-input" placeholder="e.g. ClassicFit" list="pur-brands-list" value="${item.brand || ''}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem;">
+          </div>
+          <div style="display: flex; gap: 0.4rem; align-items: center; padding-bottom: 2px;">
             ${sameProdCount > 1 ? `
-              <button type="button" class="btn btn-ghost pur-apply-price-btn" title="Apply price to all sizes of this product" style="font-size: 0.68rem; padding: 0 0.25rem; color: var(--brand-primary); line-height: 1; height: 18px;">
-                Apply to all
+              <button type="button" class="btn btn-secondary btn-sm pur-apply-price-btn" title="Copy product details & prices to all other sizes of this product" style="font-size: 0.72rem; padding: 0.35rem 0.6rem; color: var(--brand-primary); height: 34px;">
+                <i data-lucide="copy" style="width: 12px; height: 12px;"></i> Apply to all sizes
               </button>
             ` : ''}
+            <button type="button" class="btn btn-ghost pur-remove-btn" style="padding: 0.45rem; color: var(--status-danger); height: 34px;" title="Remove this row">
+              <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+            </button>
           </div>
-          <input type="number" class="form-input pur-buying-input" min="0" step="any" value="${bPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
         </div>
 
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Cost (₹)</label>
-          <input type="text" class="form-input pur-cost-display" value="₹${lineCost.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--brand-primary);">
-        </div>
+        <!-- Tier 2: Size & Financials (Size, Qty, Buying Price, Total Cost, Selling Price, Est Value) -->
+        <div style="display: grid; grid-template-columns: 1.2fr 1fr 1.2fr 1.2fr 1.2fr 1.2fr; gap: 0.75rem; align-items: end; border-top: 1px dashed var(--border-color); padding-top: 0.65rem;">
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size / Variant</label>
+            <select class="form-select pur-size-select" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 500;">
+              ${standardSizes.map(s => `<option value="${s}" ${s === item.size ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
+              ${(item.size && !standardSizes.includes(item.size)) ? `<option value="${item.size}" selected>${item.size}</option>` : ''}
+              <option value="__CUSTOM__">+ Custom Size...</option>
+            </select>
+          </div>
 
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Selling Price (₹)</label>
-          <input type="number" class="form-input pur-selling-input" min="0" step="any" value="${sPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
-        </div>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Qty <span style="color: #ef4444;">*</span></label>
+            <input type="number" class="form-input pur-qty-input" min="1" value="${q}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
+          </div>
 
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Est. Value (₹)</label>
-          <input type="text" class="form-input pur-value-display" value="₹${lineValue.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--status-success);">
-        </div>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Buying Price (₹) <span style="color: #ef4444;">*</span></label>
+            <input type="number" class="form-input pur-buying-input" min="0" step="any" value="${bPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
+          </div>
 
-        <button type="button" class="btn btn-ghost pur-remove-btn" style="padding: 0.45rem; color: var(--status-danger);" title="Remove item">
-          <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
-        </button>
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Total Cost (₹)</label>
+            <input type="text" class="form-input pur-cost-display" value="₹${lineCost.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--brand-primary);">
+          </div>
+
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Selling Price (₹)</label>
+            <input type="number" class="form-input pur-selling-input" min="0" step="any" value="${sPrice}" style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 600;">
+          </div>
+
+          <div class="form-group" style="margin: 0;">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Est. Value (₹)</label>
+            <input type="text" class="form-input pur-value-display" value="₹${lineValue.toLocaleString()}" readonly style="padding: 0.45rem 0.65rem; font-size: 0.85rem; font-weight: 700; background: var(--bg-surface); color: var(--status-success);">
+          </div>
+        </div>
       `;
 
-      const prodSel = row.querySelector('.pur-prod-select');
+      const nameInp = row.querySelector('.pur-name-input');
+      const catSel = row.querySelector('.pur-cat-select');
+      const catCustomInp = row.querySelector('.pur-cat-custom-input');
+      const brandInp = row.querySelector('.pur-brand-input');
       const sizeSel = row.querySelector('.pur-size-select');
       const qtyInp = row.querySelector('.pur-qty-input');
       const buyInp = row.querySelector('.pur-buying-input');
@@ -7600,40 +7685,55 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       const removeBtn = row.querySelector('.pur-remove-btn');
       const applyPriceBtn = row.querySelector('.pur-apply-price-btn');
 
-      prodSel.addEventListener('change', (e) => {
-        if (e.target.value === '__NEW__') {
-          openCreateProductModalInline((newProd) => {
-            if (!newProd) {
-              prodSel.value = item.productId || (productsList[0] ? productsList[0].id : '');
-              return;
-            }
-            item.productId = newProd.id;
-            item.size = 'Standard';
-            item.sku = '';
-            item.variantId = '';
-            if (!item.buyingPrice) item.buyingPrice = 200;
-            if (!item.sellingPrice) item.sellingPrice = 350;
-            renderPurchaseItems();
-          });
-          return;
-        }
+      nameInp.addEventListener('input', (e) => {
+        item.productName = e.target.value;
+      });
 
-        item.productId = e.target.value;
-        const newP = productsList.find(p => p.id === item.productId);
-        if (newP && newP.variants && newP.variants.length > 0 && newP.variants.some(v => v.size !== 'Standard')) {
-          item.size = newP.variants[0].size;
-          item.sku = newP.variants[0].sku || '';
-          item.variantId = newP.variants[0].id || '';
-          item.buyingPrice = newP.variants[0].purchasePrice || newP.purchasePrice || 200;
-          item.sellingPrice = newP.variants[0].sellingPrice || newP.sellingPrice || Math.round(item.buyingPrice * 1.5);
-        } else {
-          item.size = 'Standard';
-          item.sku = '';
-          item.variantId = '';
-          item.buyingPrice = newP ? (newP.purchasePrice || 200) : 200;
-          item.sellingPrice = newP ? (newP.sellingPrice || Math.round(item.buyingPrice * 1.5)) : 300;
+      nameInp.addEventListener('change', (e) => {
+        item.productName = e.target.value;
+        const matched = productsList.find(p => p.name && p.name.trim().toLowerCase() === e.target.value.trim().toLowerCase());
+        if (matched) {
+          if (!item.category || item.category === 'General') {
+            item.category = matched.category || '';
+            if (catSel) catSel.value = item.category;
+          }
+          if (!item.brand || item.brand === 'Generic') {
+            item.brand = matched.brand || '';
+            if (brandInp) brandInp.value = item.brand;
+          }
+          if (!item.buyingPrice || item.buyingPrice === 200) {
+            if (matched.purchasePrice) {
+              item.buyingPrice = matched.purchasePrice;
+              if (buyInp) buyInp.value = item.buyingPrice;
+            }
+          }
+          if (!item.sellingPrice || item.sellingPrice === 350) {
+            if (matched.sellingPrice) {
+              item.sellingPrice = matched.sellingPrice;
+              if (sellInp) sellInp.value = item.sellingPrice;
+            }
+          }
+          updateSummaries();
         }
-        renderPurchaseItems();
+      });
+
+      catSel.addEventListener('change', (e) => {
+        if (e.target.value === '__CUSTOM__') {
+          catCustomInp.style.display = 'block';
+          catCustomInp.focus();
+          item.category = catCustomInp.value.trim();
+        } else {
+          catCustomInp.style.display = 'none';
+          item.category = e.target.value;
+        }
+      });
+
+      catCustomInp.addEventListener('input', (e) => {
+        item.category = e.target.value.trim();
+      });
+
+      brandInp.addEventListener('input', (e) => {
+        item.brand = e.target.value;
       });
 
       sizeSel.addEventListener('change', (e) => {
@@ -7647,19 +7747,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           }
           return;
         }
-
         item.size = e.target.value;
-        const selectedP = productsList.find(p => p.id === item.productId);
-        if (selectedP && selectedP.variants) {
-          const v = selectedP.variants.find(varItem => (varItem.size || '').toUpperCase() === (item.size || '').toUpperCase());
-          if (v) {
-            item.sku = v.sku || '';
-            item.variantId = v.id || '';
-            if (v.purchasePrice) item.buyingPrice = v.purchasePrice;
-            if (v.sellingPrice) item.sellingPrice = v.sellingPrice;
-          }
-        }
-        renderPurchaseItems();
       });
 
       qtyInp.addEventListener('input', (e) => {
@@ -7679,18 +7767,20 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
       if (applyPriceBtn) {
         applyPriceBtn.addEventListener('click', () => {
-          const targetPid = item.productId;
+          const targetName = (item.productName || '').trim().toLowerCase();
           let affected = 0;
           purchaseItemsData.forEach(other => {
-            if (other.productId === targetPid && other !== item) {
+            if ((other.productName || '').trim().toLowerCase() === targetName && other !== item) {
               other.buyingPrice = item.buyingPrice;
               other.sellingPrice = item.sellingPrice;
+              if (item.category) other.category = item.category;
+              if (item.brand) other.brand = item.brand;
               affected++;
             }
           });
           renderPurchaseItems();
           toast.show({
-            message: `Applied prices (₹${item.buyingPrice} / ₹${item.sellingPrice}) to ${affected} other size row(s).`,
+            message: `Applied details & prices (₹${item.buyingPrice} / ₹${item.sellingPrice}) across ${affected} other size row(s).`,
             type: 'info'
           });
         });
@@ -7715,55 +7805,29 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   renderPurchaseItems();
 
   mainCard.querySelector('#btn-add-pur-item').addEventListener('click', () => {
-    const productsList = store.data.products || [];
     const lastItem = purchaseItemsData[purchaseItemsData.length - 1];
-    const defaultPid = lastItem ? lastItem.productId : (productsList[0] ? productsList[0].id : '');
-    const selProd = productsList.find(p => p.id === defaultPid) || productsList[0];
+    const prodName = lastItem ? (lastItem.productName || '') : '';
+    const category = lastItem ? (lastItem.category || (categoriesList[0] || 'Shirts')) : (categoriesList[0] || 'Shirts');
+    const brand = lastItem ? (lastItem.brand || '') : '';
+    const buyingPrice = lastItem ? (lastItem.buyingPrice || 200) : 200;
+    const sellingPrice = lastItem ? (lastItem.sellingPrice || 350) : 350;
+    const qty = lastItem ? (lastItem.qty || 50) : 50;
 
     // Determine next size to suggest for this product
-    const usedSizesForProd = new Set(purchaseItemsData.filter(i => i.productId === defaultPid).map(i => i.size));
+    const usedSizes = new Set(purchaseItemsData.filter(i => (i.productName || '').trim().toLowerCase() === prodName.trim().toLowerCase()).map(i => i.size));
     const candidateSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Standard'];
-    if (selProd && Array.isArray(selProd.variants)) {
-      selProd.variants.forEach(v => {
-        if (v.size && !candidateSizes.includes(v.size)) candidateSizes.push(v.size);
-      });
-    }
-    const nextSize = candidateSizes.find(s => !usedSizesForProd.has(s)) || (candidateSizes[0] || 'Standard');
+    const nextSize = candidateSizes.find(s => !usedSizes.has(s)) || 'Standard';
 
     purchaseItemsData.push({
-      productId: defaultPid,
+      productName: prodName,
+      category: category,
+      brand: brand,
       size: nextSize,
-      sku: '',
-      variantId: '',
-      qty: lastItem ? (lastItem.qty || 50) : 50,
-      buyingPrice: lastItem ? (lastItem.buyingPrice || 200) : (selProd ? (selProd.purchasePrice || 200) : 200),
-      sellingPrice: lastItem ? (lastItem.sellingPrice || 350) : (selProd ? (selProd.sellingPrice || 350) : 350)
+      qty: qty,
+      buyingPrice: buyingPrice,
+      sellingPrice: sellingPrice
     });
     renderPurchaseItems();
-  });
-
-  // Open Create New Product Modal Directly (No Page Navigation!)
-  mainCard.querySelector('#btn-open-create-prod-modal').addEventListener('click', () => {
-    openCreateProductModalInline((newProd) => {
-      if (!newProd) return;
-      const productsList = store.data.products || [];
-      if (purchaseItemsData.length === 1 && (!purchaseItemsData[0].productId || purchaseItemsData[0].productId === (productsList[1]?.id || ''))) {
-        purchaseItemsData[0].productId = newProd.id;
-        purchaseItemsData[0].size = 'Standard';
-        purchaseItemsData[0].qty = 50;
-        purchaseItemsData[0].buyingPrice = 200;
-        purchaseItemsData[0].sellingPrice = 350;
-      } else {
-        purchaseItemsData.push({
-          productId: newProd.id,
-          size: 'Standard',
-          qty: 50,
-          buyingPrice: 200,
-          sellingPrice: 350
-        });
-      }
-      renderPurchaseItems();
-    });
   });
 
   mainCard.querySelector('#btn-cancel-pur').addEventListener('click', () => {
@@ -7791,8 +7855,14 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
     for (let i = 0; i < purchaseItemsData.length; i++) {
       const item = purchaseItemsData[i];
-      if (!item.productId || item.productId === '__NEW__') {
-        toast.show({ message: `Please select a product for row #${i + 1}.`, type: 'danger' });
+      const pName = (item.productName || item.product || '').trim();
+      if (!pName) {
+        toast.show({ message: `Row #${i + 1}: Product Name is required.`, type: 'danger' });
+        return;
+      }
+      const pCat = (item.category || '').trim();
+      if (!pCat) {
+        toast.show({ message: `Row #${i + 1}: Category is required.`, type: 'danger' });
         return;
       }
       const q = parseInt(item.qty, 10);
@@ -7844,8 +7914,14 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
     for (let i = 0; i < purchaseItemsData.length; i++) {
       const item = purchaseItemsData[i];
-      if (!item.productId || item.productId === '__NEW__') {
-        toast.show({ message: `Please select a product for row #${i + 1}.`, type: 'danger' });
+      const pName = (item.productName || item.product || '').trim();
+      if (!pName) {
+        toast.show({ message: `Row #${i + 1}: Product Name is required.`, type: 'danger' });
+        return;
+      }
+      const pCat = (item.category || '').trim();
+      if (!pCat) {
+        toast.show({ message: `Row #${i + 1}: Category is required.`, type: 'danger' });
         return;
       }
       const q = parseInt(item.qty, 10);
@@ -7887,149 +7963,6 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   if (window.lucide) window.lucide.createIcons();
   return container;
-}
-
-// INLINE NEW PRODUCT CREATION MODAL (PURCHASES FLOW)
-function openCreateProductModalInline(onCreated) {
-  const modalDiv = document.createElement('div');
-  modalDiv.className = 'modal-overlay';
-  modalDiv.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem;';
-
-  const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
-  const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
-
-  modalDiv.innerHTML = `
-    <div class="modal-content card" style="max-width: 520px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem;">
-      <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
-        <div>
-          <h3 class="card-title" style="font-weight: 700; font-size: 1.15rem; color: var(--text-primary); margin: 0;">Add New Product</h3>
-          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.25rem 0 0 0;">Create a new catalog item directly within this purchase.</p>
-        </div>
-        <button type="button" class="btn btn-ghost btn-sm close-modal-btn" style="padding: 0.25rem;">
-          <i data-lucide="x" style="width: 18px; height: 18px;"></i>
-        </button>
-      </div>
-      <div class="modal-body" style="display: flex; flex-direction: column; gap: 1rem;">
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-weight: 600; font-size: 0.85rem;">Product Name <span style="color: #ef4444;">*</span></label>
-          <input type="text" id="inline-prod-name" class="form-input" placeholder="e.g. Classic Linen Shirt">
-          <div id="inline-prod-name-err" style="color: #ef4444; font-size: 0.75rem; display: none; margin-top: 4px;">Product Name is required.</div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem;">
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-weight: 600; font-size: 0.85rem;">Category <span style="color: #ef4444;">*</span></label>
-            <select id="inline-prod-cat" class="form-select">
-              ${catOptions.map(c => `<option value="${c}">${c}</option>`).join('')}
-              <option value="__NEW_CAT__">+ New Category...</option>
-            </select>
-            <input type="text" id="inline-prod-cat-new" class="form-input" placeholder="Enter category name" style="display: none; margin-top: 0.5rem; font-size: 0.85rem;">
-          </div>
-          <div class="form-group" style="margin: 0;">
-            <label class="form-label" style="font-weight: 600; font-size: 0.85rem;">Brand</label>
-            <input type="text" id="inline-prod-brand" class="form-input" placeholder="e.g. UrbanWear" list="inline-brand-suggestions">
-            <datalist id="inline-brand-suggestions">
-              ${brandOptions.map(b => `<option value="${b}">`).join('')}
-            </datalist>
-          </div>
-        </div>
-
-        <div class="form-group" style="margin: 0;">
-          <label class="form-label" style="font-weight: 600; font-size: 0.85rem;">Product Description (Optional)</label>
-          <textarea id="inline-prod-desc" class="form-input" rows="2" placeholder="e.g. Premium breathable fabric with comfortable regular fit..."></textarea>
-        </div>
-
-        <div style="background: var(--bg-secondary); padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.785rem; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="info" style="width: 15px; height: 15px; color: var(--brand-primary); flex-shrink: 0;"></i>
-          <span>Purchase quantities, sizes, buying prices, and selling prices are specified per row on the Add Purchase page.</span>
-        </div>
-      </div>
-      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-        <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
-        <button type="button" class="btn btn-primary save-modal-btn">
-          <i data-lucide="plus-circle" style="width: 16px; height: 16px;"></i>
-          <span>Save Product</span>
-        </button>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(modalDiv);
-  if (window.lucide) window.lucide.createIcons();
-
-  const closeModal = () => modalDiv.remove();
-  modalDiv.querySelector('.close-modal-btn').addEventListener('click', () => {
-    closeModal();
-    if (onCreated) onCreated(null);
-  });
-  modalDiv.querySelector('.cancel-modal-btn').addEventListener('click', () => {
-    closeModal();
-    if (onCreated) onCreated(null);
-  });
-
-  const catSel = modalDiv.querySelector('#inline-prod-cat');
-  const catNewInp = modalDiv.querySelector('#inline-prod-cat-new');
-  catSel.addEventListener('change', () => {
-    if (catSel.value === '__NEW_CAT__') {
-      catNewInp.style.display = 'block';
-      catNewInp.focus();
-    } else {
-      catNewInp.style.display = 'none';
-    }
-  });
-
-  modalDiv.querySelector('.save-modal-btn').addEventListener('click', () => {
-    const name = modalDiv.querySelector('#inline-prod-name').value.trim();
-    let category = catSel.value;
-    if (category === '__NEW_CAT__') {
-      category = catNewInp.value.trim();
-    }
-    const brand = modalDiv.querySelector('#inline-prod-brand').value.trim();
-    const description = modalDiv.querySelector('#inline-prod-desc').value.trim();
-    const nameErr = modalDiv.querySelector('#inline-prod-name-err');
-
-    if (!name) {
-      if (nameErr) nameErr.style.display = 'block';
-      toast.show({ message: 'Product Name is required.', type: 'danger' });
-      return;
-    }
-    if (nameErr) nameErr.style.display = 'none';
-
-    if (!category) {
-      toast.show({ message: 'Category is required.', type: 'danger' });
-      return;
-    }
-
-    const newProdId = `PROD-${Date.now().toString().slice(-4)}`;
-    const newProd = {
-      id: newProdId,
-      name,
-      category,
-      brand: brand || 'Generic',
-      description: description || '',
-      purchasePrice: 0,
-      sellingPrice: 0,
-      minStock: 5,
-      status: 'Active',
-      variants: [],
-      totalStock: 0
-    };
-
-    if (!Array.isArray(store.data.products)) store.data.products = [];
-    store.data.products.unshift(newProd);
-
-    if (category && Array.isArray(store.data.categories) && !store.data.categories.includes(category)) {
-      store.data.categories.push(category);
-    }
-    if (brand && Array.isArray(store.data.brands) && !store.data.brands.includes(brand)) {
-      store.data.brands.push(brand);
-    }
-
-    store.save();
-    toast.show({ message: `Product "${name}" added to catalog!`, type: 'success' });
-    closeModal();
-    if (onCreated) onCreated(newProd);
-  });
 }
 
 // SALES PAGE (Standardized with Purchases Table UI)
