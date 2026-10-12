@@ -7668,19 +7668,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     ? (editingPurchase.notes || '')
     : '';
 
-  let purchaseItemsData = [];
-  if (editingPurchase && Array.isArray(editingPurchase.items)) {
-    purchaseItemsData = editingPurchase.items.map(it => ({
-      productName: it.product || it.productName || '',
-      category: it.category || 'Shirts',
-      brand: it.brand || '',
-      size: it.size || 'Standard',
-      qty: it.qty || 50,
-      buyingPrice: it.buyingPrice !== undefined ? it.buyingPrice : 200,
-      sellingPrice: it.sellingPrice !== undefined ? it.sellingPrice : 400,
-      productId: it.productId || ''
-    }));
-  }
+  const standardSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size', 'Standard'];
 
   const categoriesList = (store.data.categories && store.data.categories.length > 0)
     ? store.data.categories
@@ -7691,6 +7679,60 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
 
   const productsList = store.data.products || [];
+
+  let productsData = [];
+  if (editingPurchase && Array.isArray(editingPurchase.items)) {
+    const prodMap = new Map();
+    editingPurchase.items.forEach(it => {
+      const pName = it.product || it.productName || '';
+      const pCat = it.category || 'Shirts';
+      const pBrand = it.brand || '';
+      const pId = it.productId || '';
+      const key = pId || `${pName.trim().toLowerCase()}:::${pBrand.trim().toLowerCase()}:::${pCat.trim().toLowerCase()}`;
+      if (!prodMap.has(key)) {
+        prodMap.set(key, {
+          id: 'prod_' + Math.random().toString(36).substr(2, 9),
+          productName: pName,
+          category: pCat,
+          brand: pBrand,
+          productId: pId,
+          isCustomCategory: (pCat && !categoriesList.includes(pCat)),
+          sizes: []
+        });
+      }
+      const isCustomSize = !standardSizes.includes(it.size || 'Standard');
+      prodMap.get(key).sizes.push({
+        id: 'size_' + Math.random().toString(36).substr(2, 9),
+        size: it.size || 'Standard',
+        qty: it.qty !== undefined ? it.qty : 50,
+        buyingPrice: it.buyingPrice !== undefined ? it.buyingPrice : 200,
+        sellingPrice: it.sellingPrice !== undefined ? it.sellingPrice : 400,
+        isCustomSize: isCustomSize
+      });
+    });
+    productsData = Array.from(prodMap.values());
+  }
+
+  if (productsData.length === 0) {
+    productsData.push({
+      id: 'prod_' + Date.now() + '_1',
+      productName: '',
+      category: '',
+      brand: '',
+      productId: '',
+      isCustomCategory: false,
+      sizes: [
+        {
+          id: 'size_' + Date.now() + '_1',
+          size: 'M',
+          qty: 50,
+          buyingPrice: 200,
+          sellingPrice: 400,
+          isCustomSize: false
+        }
+      ]
+    });
+  }
 
   mainCard.innerHTML = `
     <!-- Product & Brand Auto-suggest Datalists -->
@@ -7723,7 +7765,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       </div>
     </div>
 
-    <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS (Manual Entry Rows) -->
+    <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS (Grouped by Product) -->
     <div style="display: flex; flex-direction: column; gap: 0.85rem;">
       <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
         <div>
@@ -7732,22 +7774,22 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             Product & Size-wise Items
           </h3>
           <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
-            Enter product details manually (Name, Category, Brand) and add size-wise quantities and prices.
+            Group purchase items by product. Enter product details once and add multiple size/variant entries.
           </p>
         </div>
       </div>
 
       <!-- Items List Container -->
-      <div id="pur-items-container" style="display: flex; flex-direction: column; gap: 0.55rem;"></div>
+      <div id="pur-items-container" style="display: flex; flex-direction: column; gap: 0.75rem;"></div>
 
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding-top: 0.5rem;">
-        <button type="button" id="btn-add-pur-item" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
+        <button type="button" id="btn-add-pur-product" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
           <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
-          <span>Add Another Product / Size Row</span>
+          <span>Add Another Product</span>
         </button>
 
         <div style="display: flex; gap: 1.5rem; font-size: 0.875rem; font-weight: 600; background: var(--bg-secondary); padding: 0.75rem 1.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); flex-wrap: wrap;">
-          <div>Total Units: <span id="pur-summary-qty" style="color: var(--text-primary); font-weight: 700;">0</span></div>
+          <div>Total Units: <span id="pur-summary-qty" style="color: var(--text-primary); font-weight: 700;">0 units</span></div>
           <div>Total Purchase Cost: <span id="pur-summary-cost" style="color: var(--brand-primary); font-weight: 700;">₹0</span></div>
           <div>Est. Selling Value: <span id="pur-summary-sell" style="color: var(--status-success); font-weight: 700;">₹0</span></div>
           <div>Est. Gross Profit: <span id="pur-summary-profit" style="color: var(--status-success); font-weight: 700;">₹0</span></div>
@@ -7778,23 +7820,48 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     let overallCost = 0;
     let overallSellingValue = 0;
 
-    purchaseItemsData.forEach((it, idx) => {
-      const q = parseInt(it.qty, 10) || 0;
-      const b = parseFloat(it.buyingPrice) || 0;
-      const s = parseFloat(it.sellingPrice) || 0;
-      const c = q * b;
-      const v = q * s;
+    productsData.forEach((prod, pIdx) => {
+      let prodUnits = 0;
+      let prodCost = 0;
+      let prodSellingValue = 0;
 
-      overallUnits += q;
-      overallCost += c;
-      overallSellingValue += v;
+      const prodSectionEl = itemsContainer.querySelector(`[data-product-id="${prod.id}"]`);
 
-      const rowEl = itemsContainer.children[idx];
-      if (rowEl) {
-        const costEl = rowEl.querySelector('.pur-cost-display');
-        const valEl = rowEl.querySelector('.pur-value-display');
-        if (costEl) costEl.value = `₹${c.toLocaleString()}`;
-        if (valEl) valEl.value = `₹${v.toLocaleString()}`;
+      prod.sizes.forEach(sz => {
+        const q = parseInt(sz.qty, 10) || 0;
+        const b = parseFloat(sz.buyingPrice) || 0;
+        const s = parseFloat(sz.sellingPrice) || 0;
+        const lineCost = q * b;
+        const lineVal = q * s;
+
+        prodUnits += q;
+        prodCost += lineCost;
+        prodSellingValue += lineVal;
+
+        overallUnits += q;
+        overallCost += lineCost;
+        overallSellingValue += lineVal;
+
+        if (prodSectionEl) {
+          const sizeRowEl = prodSectionEl.querySelector(`[data-size-id="${sz.id}"]`);
+          if (sizeRowEl) {
+            const costEl = sizeRowEl.querySelector('.pur-cost-display');
+            const valEl = sizeRowEl.querySelector('.pur-value-display');
+            if (costEl) costEl.value = `₹${lineCost.toLocaleString()}`;
+            if (valEl) valEl.value = `₹${lineVal.toLocaleString()}`;
+          }
+        }
+      });
+
+      if (prodSectionEl) {
+        const subtotalEl = prodSectionEl.querySelector('.pur-prod-subtotal');
+        if (subtotalEl) {
+          subtotalEl.innerHTML = `Subtotal: <strong>${prodUnits} units</strong> · <strong style="color: var(--brand-primary);">₹${prodCost.toLocaleString()}</strong> · <span style="color: var(--status-success);">Est. ₹${prodSellingValue.toLocaleString()}</span>`;
+        }
+        const titlePreviewEl = prodSectionEl.querySelector('.pur-prod-title-preview');
+        if (titlePreviewEl) {
+          titlePreviewEl.textContent = (prod.productName && prod.productName.trim()) ? prod.productName.trim() : 'Untitled Product';
+        }
       }
     });
 
@@ -7813,64 +7880,63 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   function renderPurchaseItems() {
     itemsContainer.innerHTML = '';
 
-    if (purchaseItemsData.length === 0) {
-      const defaultP = productsList[0] || null;
-      purchaseItemsData.push({
-        productName: defaultP ? defaultP.name : '',
-        category: defaultP ? (defaultP.category || 'Shirts') : 'Shirts',
-        brand: defaultP ? (defaultP.brand || 'ClassicFit') : '',
-        size: (defaultP && defaultP.variants && defaultP.variants[0]) ? defaultP.variants[0].size : 'M',
-        qty: 50,
-        buyingPrice: defaultP ? (defaultP.purchasePrice || 200) : 200,
-        sellingPrice: defaultP ? (defaultP.sellingPrice || 400) : 400,
-        isCustomCategory: false,
-        isCustomSize: false
+    productsData.forEach((prod, pIdx) => {
+      const isCustomCat = !!prod.isCustomCategory || (prod.category && !categoriesList.includes(prod.category));
+      prod.isCustomCategory = isCustomCat;
+
+      let initialProdUnits = 0;
+      let initialProdCost = 0;
+      let initialProdVal = 0;
+      prod.sizes.forEach(sz => {
+        const q = parseInt(sz.qty, 10) || 0;
+        const b = parseFloat(sz.buyingPrice) !== undefined ? parseFloat(sz.buyingPrice) : 200;
+        const s = parseFloat(sz.sellingPrice) !== undefined ? parseFloat(sz.sellingPrice) : Math.round(b * 1.5);
+        initialProdUnits += q;
+        initialProdCost += (q * b);
+        initialProdVal += (q * s);
       });
-    }
 
-    const standardSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size', 'Standard'];
+      const sectionEl = document.createElement('div');
+      sectionEl.className = 'purchase-product-section';
+      sectionEl.setAttribute('data-product-id', prod.id);
+      sectionEl.style.cssText = 'display: flex; flex-direction: column; gap: 0.5rem; padding: 0.65rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);';
 
-    purchaseItemsData.forEach((item, index) => {
-      const row = document.createElement('div');
-      row.className = 'purchase-item-card';
-      row.style.cssText = 'display: flex; flex-direction: column; gap: 0.45rem; padding: 0.65rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);';
+      sectionEl.innerHTML = `
+        <!-- Product Section Header: Product #, Title Preview, Subtotal, Remove Product -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 0.775rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase; letter-spacing: 0.04em;">Product #${pIdx + 1}</span>
+            <span class="pur-prod-title-preview" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${prod.productName || 'Untitled Product'}</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <span class="pur-prod-subtotal" style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); background: var(--bg-secondary); padding: 0.2rem 0.55rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              Subtotal: <strong>${initialProdUnits} units</strong> · <strong style="color: var(--brand-primary);">₹${initialProdCost.toLocaleString()}</strong> · <span style="color: var(--status-success);">Est. ₹${initialProdVal.toLocaleString()}</span>
+            </span>
+            <button type="button" class="btn btn-ghost pur-remove-product-btn" title="Remove Product" style="height: 26px; width: 26px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer;">
+              <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+            </button>
+          </div>
+        </div>
 
-      const q = parseInt(item.qty, 10) || 0;
-      const bPrice = parseFloat(item.buyingPrice) !== undefined ? parseFloat(item.buyingPrice) : 200;
-      item.buyingPrice = bPrice;
-      const lineCost = q * bPrice;
-
-      const sPrice = parseFloat(item.sellingPrice) !== undefined ? parseFloat(item.sellingPrice) : Math.round(bPrice * 1.5);
-      item.sellingPrice = sPrice;
-      const lineValue = q * sPrice;
-
-      const isCustomCat = !!item.isCustomCategory || (item.category && !categoriesList.includes(item.category));
-      item.isCustomCategory = isCustomCat;
-
-      const isCustomSize = !!item.isCustomSize || (item.size && !standardSizes.includes(item.size));
-      item.isCustomSize = isCustomSize;
-
-      const sameProdCount = purchaseItemsData.filter(i => (i.productName || '').trim().toLowerCase() === (item.productName || '').trim().toLowerCase()).length;
-
-      row.innerHTML = `
+        <!-- Scrollable wrapper for compact product inputs & size grid -->
         <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
           <div style="min-width: 680px; display: flex; flex-direction: column; gap: 0.45rem;">
-            <!-- Row 1: Product Definition (Product Name, Category, Brand in one horizontal row, plus Remove) -->
-            <div style="display: grid; grid-template-columns: 2fr 1.25fr 1.25fr 34px; gap: 0.55rem; align-items: end;">
+            <!-- Horizontal Product Details Row: Product Name, Category, Brand -->
+            <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.55rem; align-items: end;">
               <div class="form-group" style="margin: 0;">
                 <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
-                <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${item.productName || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+                <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${prod.productName || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
               </div>
               <div class="form-group pur-cat-group" style="margin: 0;">
                 <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Category <span style="color: #ef4444;">*</span></label>
                 <div class="pur-cat-container" style="position: relative; width: 100%;">
                   <select class="form-select pur-cat-select" style="display: ${isCustomCat ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
                     <option value="">Select Category *</option>
-                    ${categoriesList.map(c => `<option value="${c}" ${(!isCustomCat && c === item.category) ? 'selected' : ''}>${c}</option>`).join('')}
+                    ${categoriesList.map(c => `<option value="${c}" ${(!isCustomCat && c === prod.category) ? 'selected' : ''}>${c}</option>`).join('')}
                     <option value="__CUSTOM__">+ Custom Category...</option>
                   </select>
                   <div class="pur-cat-custom-wrapper" style="display: ${isCustomCat ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
-                    <input type="text" class="form-input pur-cat-custom-input" placeholder="Enter category" value="${isCustomCat ? (item.category || '') : ''}" style="width: 100%; height: 32px; padding: 0.25rem 2rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; box-sizing: border-box;">
+                    <input type="text" class="form-input pur-cat-custom-input" placeholder="Enter category" value="${isCustomCat ? (prod.category || '') : ''}" style="width: 100%; height: 32px; padding: 0.25rem 2rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; box-sizing: border-box;">
                     <button type="button" class="btn btn-ghost pur-cat-back-btn" title="Switch back to Category dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.15rem; height: 24px; width: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
                       <i data-lucide="list" style="width: 13px; height: 13px;"></i>
                     </button>
@@ -7879,261 +7945,336 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
               </div>
               <div class="form-group" style="margin: 0;">
                 <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Brand</label>
-                <input type="text" class="form-input pur-brand-input" placeholder="e.g. ClassicFit" list="pur-brands-list" value="${item.brand || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; box-sizing: border-box;">
-              </div>
-              <div style="display: flex; justify-content: flex-end; align-items: flex-end;">
-                <button type="button" class="btn btn-ghost pur-remove-btn" style="height: 32px; width: 32px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);" title="Remove this row">
-                  <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
-                </button>
+                <input type="text" class="form-input pur-brand-input" placeholder="e.g. ClassicFit" list="pur-brands-list" value="${prod.brand || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; box-sizing: border-box;">
               </div>
             </div>
 
-            <!-- Size-wise section heading with Apply to All Sizes action beside it -->
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.35rem; border-top: 1px dashed var(--border-color);">
+            <!-- Size-wise Entries Subheader & Actions -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.4rem; border-top: 1px dashed var(--border-color);">
               <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); display: flex; align-items: center; gap: 0.35rem;">
                 <i data-lucide="layers" style="width: 12px; height: 12px; color: var(--brand-primary);"></i>
-                <span>Size-wise Quantities & Prices</span>
+                <span>Size-wise Entries</span>
               </div>
-              ${sameProdCount > 1 ? `
-                <button type="button" class="btn btn-ghost btn-sm pur-apply-price-btn" title="Copy product details & prices to all other sizes of this product" style="font-size: 0.72rem; padding: 0.15rem 0.5rem; color: var(--brand-primary); height: 24px; border: 1px solid var(--border-color); background: var(--bg-secondary); border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer;">
-                  <i data-lucide="copy" style="width: 11px; height: 11px;"></i> Apply to All Sizes
+              <div style="display: flex; align-items: center; gap: 0.4rem;">
+                ${prod.sizes.length > 1 ? `
+                  <button type="button" class="btn btn-ghost btn-sm pur-copy-price-btn" title="Copy prices from the first size to all other sizes of this product" style="font-size: 0.72rem; padding: 0.15rem 0.5rem; color: var(--brand-primary); height: 24px; border: 1px solid var(--border-color); background: var(--bg-secondary); border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                    <i data-lucide="copy" style="width: 11px; height: 11px;"></i> Copy Prices to All Sizes
+                  </button>
+                ` : ''}
+                <button type="button" class="btn btn-secondary btn-sm pur-add-size-btn" style="height: 24px; padding: 0 0.55rem; font-size: 0.72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; border-color: var(--brand-primary); color: var(--brand-primary); background: transparent; cursor: pointer;">
+                  <i data-lucide="plus" style="width: 12px; height: 12px;"></i> Add Size
                 </button>
-              ` : ''}
+              </div>
             </div>
 
-            <!-- Row 2: Size, Quantity, Buying Price, Total Cost, Selling Price, and Estimated Value in a compact aligned row -->
-            <div style="display: grid; grid-template-columns: 1.15fr 0.85fr 1.1fr 1.15fr 1.1fr 1.15fr; gap: 0.55rem; align-items: end;">
-              <div class="form-group pur-size-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Size / Variant <span style="color: #ef4444;">*</span></label>
-                <div class="pur-size-container" style="position: relative; width: 100%;">
-                  <select class="form-select pur-size-select" style="display: ${isCustomSize ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
-                    ${standardSizes.map(s => `<option value="${s}" ${(!isCustomSize && s === item.size) ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
-                    <option value="__CUSTOM__">+ Custom Size...</option>
-                  </select>
-                  <div class="pur-size-custom-wrapper" style="display: ${isCustomSize ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
-                    <input type="text" class="form-input pur-size-custom-input" placeholder="Enter size / variant" value="${isCustomSize ? (item.size || '') : ''}" style="width: 100%; height: 32px; padding: 0.25rem 2rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; box-sizing: border-box;">
-                    <button type="button" class="btn btn-ghost pur-size-back-btn" title="Switch back to Size dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.15rem; height: 24px; width: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
-                      <i data-lucide="list" style="width: 13px; height: 13px;"></i>
-                    </button>
+            <!-- Size Column Headers -->
+            <div style="display: grid; grid-template-columns: 1.15fr 0.85fr 1.1fr 1.15fr 1.1fr 1.15fr 30px; gap: 0.55rem; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); padding: 0.1rem 0;">
+              <div>Size / Variant <span style="color: #ef4444;">*</span></div>
+              <div>Quantity <span style="color: #ef4444;">*</span></div>
+              <div>Buying Price (₹) <span style="color: #ef4444;">*</span></div>
+              <div>Total Cost (₹)</div>
+              <div>Selling Price (₹)</div>
+              <div>Est. Value (₹)</div>
+              <div></div>
+            </div>
+
+            <!-- Size Rows Container -->
+            <div class="pur-sizes-container" style="display: flex; flex-direction: column; gap: 0.35rem;">
+              ${prod.sizes.map((sz) => {
+                const q = parseInt(sz.qty, 10) || 0;
+                const bPrice = parseFloat(sz.buyingPrice) !== undefined ? parseFloat(sz.buyingPrice) : 200;
+                sz.buyingPrice = bPrice;
+                const lineCost = q * bPrice;
+
+                const sPrice = parseFloat(sz.sellingPrice) !== undefined ? parseFloat(sz.sellingPrice) : Math.round(bPrice * 1.5);
+                sz.sellingPrice = sPrice;
+                const lineValue = q * sPrice;
+
+                const isCustomSize = !!sz.isCustomSize || (sz.size && !standardSizes.includes(sz.size));
+                sz.isCustomSize = isCustomSize;
+
+                return `
+                  <div class="pur-size-row" data-size-id="${sz.id}" style="display: grid; grid-template-columns: 1.15fr 0.85fr 1.1fr 1.15fr 1.1fr 1.15fr 30px; gap: 0.55rem; align-items: center;">
+                    <div class="form-group pur-size-group" style="margin: 0;">
+                      <div class="pur-size-container" style="position: relative; width: 100%;">
+                        <select class="form-select pur-size-select" style="display: ${isCustomSize ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
+                          ${standardSizes.map(s => `<option value="${s}" ${(!isCustomSize && s === sz.size) ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
+                          <option value="__CUSTOM__">+ Custom Size...</option>
+                        </select>
+                        <div class="pur-size-custom-wrapper" style="display: ${isCustomSize ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
+                          <input type="text" class="form-input pur-size-custom-input" placeholder="Enter size" value="${isCustomSize ? (sz.size || '') : ''}" style="width: 100%; height: 32px; padding: 0.25rem 2rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; box-sizing: border-box;">
+                          <button type="button" class="btn btn-ghost pur-size-back-btn" title="Switch back to Size dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.15rem; height: 24px; width: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
+                            <i data-lucide="list" style="width: 13px; height: 13px;"></i>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                      <input type="number" class="form-input pur-qty-input" min="1" value="${q}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                      <input type="number" class="form-input pur-buying-input" min="0" step="any" value="${bPrice}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                      <input type="text" class="form-input pur-cost-display" value="₹${lineCost.toLocaleString()}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; background: var(--bg-secondary); color: var(--brand-primary); box-sizing: border-box;">
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                      <input type="number" class="form-input pur-selling-input" min="0" step="any" value="${sPrice}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                      <input type="text" class="form-input pur-value-display" value="₹${lineValue.toLocaleString()}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; background: var(--bg-secondary); color: var(--status-success); box-sizing: border-box;">
+                    </div>
+
+                    <div style="display: flex; justify-content: center; align-items: center;">
+                      <button type="button" class="btn btn-ghost pur-remove-size-btn" title="Remove size" style="height: 28px; width: 28px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer;">
+                        <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </div>
-
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Quantity <span style="color: #ef4444;">*</span></label>
-                <input type="number" class="form-input pur-qty-input" min="1" value="${q}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
-              </div>
-
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Buying Price (₹) <span style="color: #ef4444;">*</span></label>
-                <input type="number" class="form-input pur-buying-input" min="0" step="any" value="${bPrice}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
-              </div>
-
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Total Cost (₹)</label>
-                <input type="text" class="form-input pur-cost-display" value="₹${lineCost.toLocaleString()}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; background: var(--bg-secondary); color: var(--brand-primary); box-sizing: border-box;">
-              </div>
-
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Selling Price (₹)</label>
-                <input type="number" class="form-input pur-selling-input" min="0" step="any" value="${sPrice}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
-              </div>
-
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Estimated Value (₹)</label>
-                <input type="text" class="form-input pur-value-display" value="₹${lineValue.toLocaleString()}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; background: var(--bg-secondary); color: var(--status-success); box-sizing: border-box;">
-              </div>
+                `;
+              }).join('')}
             </div>
           </div>
         </div>
       `;
 
-      const nameInp = row.querySelector('.pur-name-input');
-      const catSel = row.querySelector('.pur-cat-select');
-      const catCustomWrapper = row.querySelector('.pur-cat-custom-wrapper');
-      const catCustomInp = row.querySelector('.pur-cat-custom-input');
-      const catBackBtn = row.querySelector('.pur-cat-back-btn');
-
-      const brandInp = row.querySelector('.pur-brand-input');
-
-      const sizeSel = row.querySelector('.pur-size-select');
-      const sizeCustomWrapper = row.querySelector('.pur-size-custom-wrapper');
-      const sizeCustomInp = row.querySelector('.pur-size-custom-input');
-      const sizeBackBtn = row.querySelector('.pur-size-back-btn');
-
-      const qtyInp = row.querySelector('.pur-qty-input');
-      const buyInp = row.querySelector('.pur-buying-input');
-      const sellInp = row.querySelector('.pur-selling-input');
-      const removeBtn = row.querySelector('.pur-remove-btn');
-      const applyPriceBtn = row.querySelector('.pur-apply-price-btn');
+      // Product Level Controls
+      const nameInp = sectionEl.querySelector('.pur-name-input');
+      const catSel = sectionEl.querySelector('.pur-cat-select');
+      const catCustomWrapper = sectionEl.querySelector('.pur-cat-custom-wrapper');
+      const catCustomInp = sectionEl.querySelector('.pur-cat-custom-input');
+      const catBackBtn = sectionEl.querySelector('.pur-cat-back-btn');
+      const brandInp = sectionEl.querySelector('.pur-brand-input');
+      const removeProdBtn = sectionEl.querySelector('.pur-remove-product-btn');
+      const addSizeBtn = sectionEl.querySelector('.pur-add-size-btn');
+      const copyPriceBtn = sectionEl.querySelector('.pur-copy-price-btn');
 
       nameInp.addEventListener('input', (e) => {
-        item.productName = e.target.value;
+        prod.productName = e.target.value;
+        const matched = productsList.find(p => p.name && p.name.trim().toLowerCase() === e.target.value.trim().toLowerCase());
+        prod.productId = matched ? matched.id : '';
+        const titlePreview = sectionEl.querySelector('.pur-prod-title-preview');
+        if (titlePreview) {
+          titlePreview.textContent = e.target.value.trim() || 'Untitled Product';
+        }
       });
 
       nameInp.addEventListener('change', (e) => {
-        item.productName = e.target.value;
+        prod.productName = e.target.value;
         const matched = productsList.find(p => p.name && p.name.trim().toLowerCase() === e.target.value.trim().toLowerCase());
+        prod.productId = matched ? matched.id : '';
         if (matched) {
-          if (!item.category || item.category === 'General') {
-            item.category = matched.category || '';
-            if (categoriesList.includes(item.category)) {
-              item.isCustomCategory = false;
-              catSel.style.display = 'block';
-              catCustomWrapper.style.display = 'none';
-              catSel.value = item.category;
+          if (!prod.category || prod.category === 'General' || prod.category === 'Shirts') {
+            prod.category = matched.category || '';
+            if (categoriesList.includes(prod.category)) {
+              prod.isCustomCategory = false;
             } else {
-              item.isCustomCategory = true;
-              catSel.style.display = 'none';
-              catCustomWrapper.style.display = 'flex';
-              catCustomInp.value = item.category;
+              prod.isCustomCategory = true;
             }
           }
-          if (!item.brand || item.brand === 'Generic') {
-            item.brand = matched.brand || '';
-            if (brandInp) brandInp.value = item.brand;
+          if (!prod.brand || prod.brand === 'Generic' || prod.brand === 'ClassicFit') {
+            prod.brand = matched.brand || '';
           }
-          if (!item.buyingPrice || item.buyingPrice === 200) {
-            if (matched.purchasePrice) {
-              item.buyingPrice = matched.purchasePrice;
-              if (buyInp) buyInp.value = item.buyingPrice;
-            }
+          if (matched.purchasePrice) {
+            prod.sizes.forEach(s => {
+              if (!s.buyingPrice || s.buyingPrice === 200) {
+                s.buyingPrice = matched.purchasePrice;
+              }
+            });
           }
-          if (!item.sellingPrice || item.sellingPrice === 350) {
-            if (matched.sellingPrice) {
-              item.sellingPrice = matched.sellingPrice;
-              if (sellInp) sellInp.value = item.sellingPrice;
-            }
+          if (matched.sellingPrice) {
+            prod.sizes.forEach(s => {
+              if (!s.sellingPrice || s.sellingPrice === 400) {
+                s.sellingPrice = matched.sellingPrice;
+              }
+            });
           }
-          updateSummaries();
+          renderPurchaseItems();
         }
       });
 
       catSel.addEventListener('change', (e) => {
         if (e.target.value === '__CUSTOM__') {
-          item.isCustomCategory = true;
+          prod.isCustomCategory = true;
           catSel.style.display = 'none';
           catCustomWrapper.style.display = 'flex';
-          if (item.category && categoriesList.includes(item.category)) {
+          if (prod.category && categoriesList.includes(prod.category)) {
             catCustomInp.value = '';
-            item.category = '';
+            prod.category = '';
           } else {
-            catCustomInp.value = item.category || '';
+            catCustomInp.value = prod.category || '';
           }
           catCustomInp.focus();
           if (window.lucide) window.lucide.createIcons();
         } else {
-          item.isCustomCategory = false;
-          item.category = e.target.value;
+          prod.isCustomCategory = false;
+          prod.category = e.target.value;
         }
       });
 
       catCustomInp.addEventListener('input', (e) => {
-        item.category = e.target.value;
+        prod.category = e.target.value;
       });
 
       catBackBtn.addEventListener('click', () => {
-        item.isCustomCategory = false;
+        prod.isCustomCategory = false;
         catCustomWrapper.style.display = 'none';
         catSel.style.display = 'block';
-        if (item.category && categoriesList.includes(item.category.trim())) {
-          catSel.value = item.category.trim();
+        if (prod.category && categoriesList.includes(prod.category.trim())) {
+          catSel.value = prod.category.trim();
         } else {
           catSel.value = categoriesList[0] || '';
-          item.category = catSel.value;
+          prod.category = catSel.value;
         }
         catSel.focus();
       });
 
-      sizeSel.addEventListener('change', (e) => {
-        if (e.target.value === '__CUSTOM__') {
-          item.isCustomSize = true;
-          sizeSel.style.display = 'none';
-          sizeCustomWrapper.style.display = 'flex';
-          if (item.size && standardSizes.includes(item.size)) {
-            sizeCustomInp.value = '';
-            item.size = '';
-          } else {
-            sizeCustomInp.value = item.size || '';
-          }
-          sizeCustomInp.focus();
-          if (window.lucide) window.lucide.createIcons();
-        } else {
-          item.isCustomSize = false;
-          item.size = e.target.value;
-        }
-      });
-
-      sizeCustomInp.addEventListener('input', (e) => {
-        item.size = e.target.value;
-      });
-
-      sizeBackBtn.addEventListener('click', () => {
-        item.isCustomSize = false;
-        sizeCustomWrapper.style.display = 'none';
-        sizeSel.style.display = 'block';
-        if (item.size && standardSizes.includes(item.size.trim())) {
-          sizeSel.value = item.size.trim();
-        } else {
-          sizeSel.value = standardSizes[0] || 'M';
-          item.size = sizeSel.value;
-        }
-        sizeSel.focus();
-      });
-
       brandInp.addEventListener('input', (e) => {
-        item.brand = e.target.value;
+        prod.brand = e.target.value;
       });
 
-      qtyInp.addEventListener('input', (e) => {
-        item.qty = parseInt(e.target.value, 10) || 0;
-        updateSummaries();
+      removeProdBtn.addEventListener('click', () => {
+        if (productsData.length <= 1) {
+          toast.show({ message: 'At least one product is required for a purchase.', type: 'warning' });
+          return;
+        }
+
+        const hasEnteredData = Boolean(
+          (prod.productName && prod.productName.trim().length > 0) ||
+          (prod.brand && prod.brand.trim().length > 0) ||
+          (prod.category && prod.category.trim().length > 0 && prod.category !== 'Shirts') ||
+          (prod.sizes && prod.sizes.some(s => (s.size && s.size !== 'M' && s.size !== 'Standard') || (s.qty && s.qty !== 50) || (s.buyingPrice && s.buyingPrice !== 200)))
+        );
+
+        if (hasEnteredData) {
+          const pNameDisplay = (prod.productName && prod.productName.trim()) ? `"${prod.productName.trim()}"` : 'this product';
+          if (!window.confirm(`Are you sure you want to remove ${pNameDisplay} and all its size entries?`)) {
+            return;
+          }
+        }
+
+        productsData.splice(pIdx, 1);
+        renderPurchaseItems();
       });
 
-      buyInp.addEventListener('input', (e) => {
-        item.buyingPrice = parseFloat(e.target.value) || 0;
-        updateSummaries();
+      addSizeBtn.addEventListener('click', () => {
+        const usedSizes = new Set(prod.sizes.map(s => s.size));
+        const candidateSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size', 'Standard'];
+        const nextSize = candidateSizes.find(s => !usedSizes.has(s)) || 'Standard';
+
+        const lastSize = prod.sizes[prod.sizes.length - 1];
+        const defQty = lastSize ? lastSize.qty : 50;
+        const defBuy = lastSize ? lastSize.buyingPrice : 200;
+        const defSell = lastSize ? lastSize.sellingPrice : 400;
+
+        prod.sizes.push({
+          id: 'size_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+          size: nextSize,
+          qty: defQty,
+          buyingPrice: defBuy,
+          sellingPrice: defSell,
+          isCustomSize: false
+        });
+        renderPurchaseItems();
       });
 
-      sellInp.addEventListener('input', (e) => {
-        item.sellingPrice = parseFloat(e.target.value) || 0;
-        updateSummaries();
-      });
-
-      if (applyPriceBtn) {
-        applyPriceBtn.addEventListener('click', () => {
-          const targetName = (item.productName || '').trim().toLowerCase();
-          let affected = 0;
-          purchaseItemsData.forEach(other => {
-            if ((other.productName || '').trim().toLowerCase() === targetName && other !== item) {
-              other.buyingPrice = item.buyingPrice;
-              other.sellingPrice = item.sellingPrice;
-              if (item.category) {
-                other.category = item.category;
-                other.isCustomCategory = item.isCustomCategory;
-              }
-              if (item.brand) other.brand = item.brand;
-              affected++;
-            }
-          });
+      if (copyPriceBtn) {
+        copyPriceBtn.addEventListener('click', () => {
+          if (prod.sizes.length <= 1) return;
+          const first = prod.sizes[0];
+          for (let i = 1; i < prod.sizes.length; i++) {
+            prod.sizes[i].buyingPrice = first.buyingPrice;
+            prod.sizes[i].sellingPrice = first.sellingPrice;
+          }
           renderPurchaseItems();
           toast.show({
-            message: `Applied details & prices (₹${item.buyingPrice} / ₹${item.sellingPrice}) across ${affected} other size row(s).`,
+            message: `Copied prices (₹${first.buyingPrice} / ₹${first.sellingPrice}) to all sizes of ${prod.productName || 'this product'}.`,
             type: 'info'
           });
         });
       }
 
-      removeBtn.addEventListener('click', () => {
-        if (purchaseItemsData.length <= 1) {
-          toast.show({ message: 'At least one item is required for a purchase.', type: 'warning' });
-          return;
-        }
-        purchaseItemsData.splice(index, 1);
-        renderPurchaseItems();
+      // Wire up each size row inside this product
+      prod.sizes.forEach((sz, sIdx) => {
+        const sizeRowEl = sectionEl.querySelector(`[data-size-id="${sz.id}"]`);
+        if (!sizeRowEl) return;
+
+        const sizeSel = sizeRowEl.querySelector('.pur-size-select');
+        const sizeCustomWrapper = sizeRowEl.querySelector('.pur-size-custom-wrapper');
+        const sizeCustomInp = sizeRowEl.querySelector('.pur-size-custom-input');
+        const sizeBackBtn = sizeRowEl.querySelector('.pur-size-back-btn');
+        const qtyInp = sizeRowEl.querySelector('.pur-qty-input');
+        const buyInp = sizeRowEl.querySelector('.pur-buying-input');
+        const sellInp = sizeRowEl.querySelector('.pur-selling-input');
+        const removeSizeBtn = sizeRowEl.querySelector('.pur-remove-size-btn');
+
+        sizeSel.addEventListener('change', (e) => {
+          if (e.target.value === '__CUSTOM__') {
+            sz.isCustomSize = true;
+            sizeSel.style.display = 'none';
+            sizeCustomWrapper.style.display = 'flex';
+            if (sz.size && standardSizes.includes(sz.size)) {
+              sizeCustomInp.value = '';
+              sz.size = '';
+            } else {
+              sizeCustomInp.value = sz.size || '';
+            }
+            sizeCustomInp.focus();
+            if (window.lucide) window.lucide.createIcons();
+          } else {
+            sz.isCustomSize = false;
+            sz.size = e.target.value;
+          }
+        });
+
+        sizeCustomInp.addEventListener('input', (e) => {
+          sz.size = e.target.value;
+        });
+
+        sizeBackBtn.addEventListener('click', () => {
+          sz.isCustomSize = false;
+          sizeCustomWrapper.style.display = 'none';
+          sizeSel.style.display = 'block';
+          if (sz.size && standardSizes.includes(sz.size.trim())) {
+            sizeSel.value = sz.size.trim();
+          } else {
+            sizeSel.value = standardSizes[0] || 'M';
+            sz.size = sizeSel.value;
+          }
+          sizeSel.focus();
+        });
+
+        qtyInp.addEventListener('input', (e) => {
+          sz.qty = parseInt(e.target.value, 10) || 0;
+          updateSummaries();
+        });
+
+        buyInp.addEventListener('input', (e) => {
+          sz.buyingPrice = parseFloat(e.target.value) || 0;
+          updateSummaries();
+        });
+
+        sellInp.addEventListener('input', (e) => {
+          sz.sellingPrice = parseFloat(e.target.value) || 0;
+          updateSummaries();
+        });
+
+        removeSizeBtn.addEventListener('click', () => {
+          if (prod.sizes.length <= 1) {
+            toast.show({ message: 'Each product must have at least one size row.', type: 'warning' });
+            return;
+          }
+          prod.sizes.splice(sIdx, 1);
+          renderPurchaseItems();
+        });
       });
 
-      itemsContainer.appendChild(row);
+      itemsContainer.appendChild(sectionEl);
     });
 
     updateSummaries();
@@ -8142,31 +8283,24 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   renderPurchaseItems();
 
-  mainCard.querySelector('#btn-add-pur-item').addEventListener('click', () => {
-    const lastItem = purchaseItemsData[purchaseItemsData.length - 1];
-    const prodName = lastItem ? (lastItem.productName || '') : '';
-    const category = lastItem ? (lastItem.category || (categoriesList[0] || 'Shirts')) : (categoriesList[0] || 'Shirts');
-    const brand = lastItem ? (lastItem.brand || '') : '';
-    const buyingPrice = lastItem ? (lastItem.buyingPrice || 200) : 200;
-    const sellingPrice = lastItem ? (lastItem.sellingPrice || 350) : 350;
-    const qty = lastItem ? (lastItem.qty || 50) : 50;
-    const isCustomCat = lastItem ? !!lastItem.isCustomCategory : false;
-
-    // Determine next size to suggest for this product
-    const usedSizes = new Set(purchaseItemsData.filter(i => (i.productName || '').trim().toLowerCase() === prodName.trim().toLowerCase()).map(i => i.size));
-    const candidateSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Standard'];
-    const nextSize = candidateSizes.find(s => !usedSizes.has(s)) || 'Standard';
-
-    purchaseItemsData.push({
-      productName: prodName,
-      category: category,
-      brand: brand,
-      size: nextSize,
-      qty: qty,
-      buyingPrice: buyingPrice,
-      sellingPrice: sellingPrice,
-      isCustomCategory: isCustomCat,
-      isCustomSize: false
+  mainCard.querySelector('#btn-add-pur-product').addEventListener('click', () => {
+    productsData.push({
+      id: 'prod_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      productName: '',
+      category: '',
+      brand: '',
+      productId: '',
+      isCustomCategory: false,
+      sizes: [
+        {
+          id: 'size_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+          size: 'M',
+          qty: 50,
+          buyingPrice: 200,
+          sellingPrice: 400,
+          isCustomSize: false
+        }
+      ]
     });
     renderPurchaseItems();
   });
@@ -8174,6 +8308,77 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   mainCard.querySelector('#btn-cancel-pur').addEventListener('click', () => {
     if (onNavigate) onNavigate('purchases');
   });
+
+  function validateAndGetFlattenedItems() {
+    if (!productsData || productsData.length === 0) {
+      toast.show({ message: 'At least one product is required.', type: 'danger' });
+      return null;
+    }
+
+    const flattened = [];
+
+    for (let pIdx = 0; pIdx < productsData.length; pIdx++) {
+      const prod = productsData[pIdx];
+      const pNum = pIdx + 1;
+      const pName = (prod.productName || '').trim();
+      if (!pName) {
+        toast.show({ message: `Product #${pNum}: Product Name is required.`, type: 'danger' });
+        return null;
+      }
+      const pCat = (prod.category || '').trim();
+      if (!pCat) {
+        toast.show({ message: `Product #${pNum} (${pName}): Category is required.`, type: 'danger' });
+        return null;
+      }
+      const pBrand = (prod.brand || '').trim();
+      const pId = prod.productId || '';
+
+      if (!prod.sizes || prod.sizes.length === 0) {
+        toast.show({ message: `Product #${pNum} (${pName}): At least one size entry is required.`, type: 'danger' });
+        return null;
+      }
+
+      for (let sIdx = 0; sIdx < prod.sizes.length; sIdx++) {
+        const sz = prod.sizes[sIdx];
+        const sNum = sIdx + 1;
+        const sVal = (sz.size || '').trim();
+        if (!sVal) {
+          toast.show({ message: `Product #${pNum} (${pName}), Size #${sNum}: Size / Variant is required.`, type: 'danger' });
+          return null;
+        }
+        const q = parseInt(sz.qty, 10);
+        if (isNaN(q) || q <= 0) {
+          toast.show({ message: `Product #${pNum} (${pName}), Size "${sVal}": Quantity must be a positive number greater than 0.`, type: 'danger' });
+          return null;
+        }
+        const bp = parseFloat(sz.buyingPrice);
+        if (isNaN(bp) || bp < 0) {
+          toast.show({ message: `Product #${pNum} (${pName}), Size "${sVal}": Buying Price must be a valid non-negative number.`, type: 'danger' });
+          return null;
+        }
+        const sp = parseFloat(sz.sellingPrice);
+        if (isNaN(sp) || sp < 0) {
+          toast.show({ message: `Product #${pNum} (${pName}), Size "${sVal}": Selling Price must be a valid non-negative number.`, type: 'danger' });
+          return null;
+        }
+
+        flattened.push({
+          productId: pId,
+          product: pName,
+          productName: pName,
+          category: pCat,
+          brand: pBrand,
+          size: sVal,
+          qty: q,
+          buyingPrice: bp,
+          sellingPrice: sp,
+          totalCost: q * bp
+        });
+      }
+    }
+
+    return flattened;
+  }
 
   // 1. SAVE AS DRAFT (No Stock Change)
   mainCard.querySelector('#btn-save-draft-pur').addEventListener('click', () => {
@@ -8189,55 +8394,15 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       toast.show({ message: 'Purchase date is required.', type: 'danger' });
       return;
     }
-    if (!purchaseItemsData || purchaseItemsData.length === 0) {
-      toast.show({ message: 'At least one purchase item is required.', type: 'danger' });
-      return;
-    }
 
-    for (let i = 0; i < purchaseItemsData.length; i++) {
-      const item = purchaseItemsData[i];
-      const pName = (item.productName || item.product || '').trim();
-      if (!pName) {
-        toast.show({ message: `Row #${i + 1}: Product Name is required.`, type: 'danger' });
-        return;
-      }
-      const pCat = (item.category || '').trim();
-      if (!pCat) {
-        toast.show({ message: `Row #${i + 1}: Category is required.`, type: 'danger' });
-        return;
-      }
-      const pSize = (item.size || '').trim();
-      if (!pSize) {
-        toast.show({ message: `Row #${i + 1}: Size / Variant is required.`, type: 'danger' });
-        return;
-      }
-      item.productName = pName;
-      item.category = pCat;
-      item.size = pSize;
-      item.brand = (item.brand || '').trim();
-
-      const q = parseInt(item.qty, 10);
-      if (isNaN(q) || q <= 0) {
-        toast.show({ message: `Row #${i + 1}: Quantity must be a positive whole number greater than 0.`, type: 'danger' });
-        return;
-      }
-      const bp = parseFloat(item.buyingPrice);
-      if (isNaN(bp) || bp < 0) {
-        toast.show({ message: `Row #${i + 1}: Buying Price must be a valid non-negative number.`, type: 'danger' });
-        return;
-      }
-      const sp = parseFloat(item.sellingPrice);
-      if (isNaN(sp) || sp < 0) {
-        toast.show({ message: `Row #${i + 1}: Selling Price must be a valid non-negative number.`, type: 'danger' });
-        return;
-      }
-    }
+    const flattenedItems = validateAndGetFlattenedItems();
+    if (!flattenedItems) return;
 
     store.savePurchaseDraft({
       supplier,
       date,
       notes,
-      items: purchaseItemsData
+      items: flattenedItems
     }, editingPurchase ? editingPurchase.id : null);
 
     toast.show({ message: `Purchase order saved as Draft! Inventory stock is unchanged.`, type: 'success' });
@@ -8258,56 +8423,16 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       toast.show({ message: 'Purchase date is required.', type: 'danger' });
       return;
     }
-    if (!purchaseItemsData || purchaseItemsData.length === 0) {
-      toast.show({ message: 'At least one purchase item is required.', type: 'danger' });
-      return;
-    }
 
-    for (let i = 0; i < purchaseItemsData.length; i++) {
-      const item = purchaseItemsData[i];
-      const pName = (item.productName || item.product || '').trim();
-      if (!pName) {
-        toast.show({ message: `Row #${i + 1}: Product Name is required.`, type: 'danger' });
-        return;
-      }
-      const pCat = (item.category || '').trim();
-      if (!pCat) {
-        toast.show({ message: `Row #${i + 1}: Category is required.`, type: 'danger' });
-        return;
-      }
-      const pSize = (item.size || '').trim();
-      if (!pSize) {
-        toast.show({ message: `Row #${i + 1}: Size / Variant is required.`, type: 'danger' });
-        return;
-      }
-      item.productName = pName;
-      item.category = pCat;
-      item.size = pSize;
-      item.brand = (item.brand || '').trim();
-
-      const q = parseInt(item.qty, 10);
-      if (isNaN(q) || q <= 0) {
-        toast.show({ message: `Row #${i + 1}: Quantity must be a positive whole number greater than 0.`, type: 'danger' });
-        return;
-      }
-      const bp = parseFloat(item.buyingPrice);
-      if (isNaN(bp) || bp < 0) {
-        toast.show({ message: `Row #${i + 1}: Buying Price must be a valid non-negative number.`, type: 'danger' });
-        return;
-      }
-      const sp = parseFloat(item.sellingPrice);
-      if (isNaN(sp) || sp < 0) {
-        toast.show({ message: `Row #${i + 1}: Selling Price must be a valid non-negative number.`, type: 'danger' });
-        return;
-      }
-    }
+    const flattenedItems = validateAndGetFlattenedItems();
+    if (!flattenedItems) return;
 
     // Save as draft first if editing or new, then receive
     const draft = store.savePurchaseDraft({
       supplier,
       date,
       notes,
-      items: purchaseItemsData
+      items: flattenedItems
     }, editingPurchase ? editingPurchase.id : null);
 
     // Auto approve and receive all
