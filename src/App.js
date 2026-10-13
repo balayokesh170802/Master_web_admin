@@ -1,4 +1,4 @@
-const initialData = {
+const sampleDemoData = {
   storeInfo: {
     name: "Apex Fashion Store",
     branch: "Main Street Branch #01",
@@ -1405,68 +1405,293 @@ const initialData = {
   ]
 };
 
+const emptyInitialData = {
+  storeInfo: {
+    name: "Apex Fashion Store",
+    branch: "Main Street Branch #01",
+    currency: "₹",
+    currencyCode: "INR",
+    phone: "+91 98765 43210",
+    email: "manager@apexfashion.com",
+    address: "124 Commerce Avenue, Fashion District, City",
+    defaultMinStock: 10
+  },
+  inventorySettings: {
+    lowStockThreshold: 5
+  },
+  categories: ["Shirts", "T-Shirts", "Jeans", "Trousers", "Hoodies"],
+  brands: ["ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
+  sizes: ["S", "M", "L", "XL"],
+  suppliers: [
+    { id: "SUP-01", name: "Apex Apparel Ltd", contact: "Rajesh Kumar (+91 98111 22334)", city: "Tirupur" },
+    { id: "SUP-02", name: "SilkRoute Fabrics", contact: "Anita Sharma (+91 98222 33445)", city: "Surat" },
+    { id: "SUP-03", name: "Urban Thread Co", contact: "Vikram Singh (+91 98333 44556)", city: "Ludhiana" }
+  ],
+  products: [],
+  purchases: [],
+  sales: [],
+  stockMovements: [],
+  customers: [],
+  users: [
+    { id: "USR-01", name: "Suresh Menon", role: "Store Owner / Admin", email: "suresh@apexfashion.com", status: "Active" },
+    { id: "USR-02", name: "Priya Nair", role: "Billing Staff", email: "priya@apexfashion.com", status: "Active" }
+  ]
+};
+
+const initialData = emptyInitialData;
+
 class StoreManager {
   constructor() {
     try {
-      const saved = localStorage.getItem('master_web_admin_data_v2');
-      this.data = saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(initialData));
+      // Clean up legacy storage versions so deleted database is in effect
+      localStorage.removeItem('master_web_admin_data');
+      localStorage.removeItem('master_web_admin_data_v2');
+      const saved = localStorage.getItem('master_web_admin_data_v3');
+      this.data = saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(emptyInitialData));
     } catch (e) {
-      this.data = JSON.parse(JSON.stringify(initialData));
+      this.data = JSON.parse(JSON.stringify(emptyInitialData));
     }
 
     if (!this.data || typeof this.data !== 'object') {
-      this.data = JSON.parse(JSON.stringify(initialData));
+      this.data = JSON.parse(JSON.stringify(emptyInitialData));
     }
 
-    if (!Array.isArray(this.data.products)) this.data.products = initialData.products || [];
-    if (!Array.isArray(this.data.categories)) this.data.categories = initialData.categories || [];
-    if (!Array.isArray(this.data.brands)) this.data.brands = initialData.brands || [];
-    if (!Array.isArray(this.data.purchases)) this.data.purchases = initialData.purchases || [];
-    if (!Array.isArray(this.data.sales)) this.data.sales = initialData.sales || [];
-    if (!Array.isArray(this.data.customers)) this.data.customers = initialData.customers || [];
+    if (!Array.isArray(this.data.products)) this.data.products = [];
+    if (!Array.isArray(this.data.categories)) this.data.categories = emptyInitialData.categories || [];
+    if (!Array.isArray(this.data.brands)) this.data.brands = emptyInitialData.brands || [];
+    if (!Array.isArray(this.data.purchases)) this.data.purchases = [];
+    if (!Array.isArray(this.data.sales)) this.data.sales = [];
+    if (!Array.isArray(this.data.customers)) this.data.customers = [];
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
 
-    // Guarantee totalStock consistency and authoritative createdAt for every product (Safe migration)
-    if (Array.isArray(this.data.products)) {
-      const baseSeedTime = new Date('2026-10-01T08:00:00.000Z').getTime();
-      this.data.products.forEach((p, idx) => {
-        p.totalStock = (p.variants || []).reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+    this.migrateAndRepairData();
+    this.listeners = [];
+  }
 
-        if (!p.createdAt) {
-          let earliestDate = null;
-          if (Array.isArray(this.data.purchases)) {
-            this.data.purchases.forEach(pur => {
-              const matchedItem = (pur.items || []).some(it =>
-                (it.productId && it.productId === p.id) ||
-                (it.product && p.name && it.product.trim().toLowerCase() === p.name.trim().toLowerCase())
-              );
-              if (matchedItem && pur.date) {
-                const pt = new Date(pur.date).getTime();
-                if (!isNaN(pt) && (earliestDate === null || pt < earliestDate)) {
-                  earliestDate = pt;
-                }
+  migrateAndRepairData() {
+    if (!this.data || typeof this.data !== 'object') return;
+    if (!Array.isArray(this.data.products)) this.data.products = [];
+    if (!Array.isArray(this.data.purchases)) this.data.purchases = [];
+    if (!Array.isArray(this.data.sales)) this.data.sales = [];
+    if (!Array.isArray(this.data.customers)) this.data.customers = [];
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+    if (!Array.isArray(this.data.categories)) this.data.categories = ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies'];
+    if (!Array.isArray(this.data.brands)) this.data.brands = ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+    if (!Array.isArray(this.data.sizes)) this.data.sizes = ['S', 'M', 'L', 'XL'];
+
+    // 1. Ensure totalStock consistency and authoritative createdAt for every product
+    const baseSeedTime = new Date('2026-10-01T08:00:00.000Z').getTime();
+    this.data.products.forEach((p, idx) => {
+      p.totalStock = (p.variants || []).reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+      p.stock = p.totalStock;
+
+      if (!p.createdAt) {
+        let earliestDate = null;
+        if (Array.isArray(this.data.purchases)) {
+          this.data.purchases.forEach(pur => {
+            const matchedItem = (pur.items || []).some(it =>
+              (it.productId && it.productId === p.id) ||
+              (it.product && p.name && it.product.trim().toLowerCase() === p.name.trim().toLowerCase())
+            );
+            if (matchedItem && pur.date) {
+              const pt = new Date(pur.date).getTime();
+              if (!isNaN(pt) && (earliestDate === null || pt < earliestDate)) {
+                earliestDate = pt;
               }
-            });
-          }
-          if (earliestDate === null && Array.isArray(this.data.stockMovements)) {
-            this.data.stockMovements.forEach(m => {
-              if ((m.productId === p.id || m.product === p.name) && m.date) {
-                const mt = new Date(m.date).getTime();
-                if (!isNaN(mt) && (earliestDate === null || mt < earliestDate)) {
-                  earliestDate = mt;
-                }
+            }
+          });
+        }
+        if (earliestDate === null && Array.isArray(this.data.stockMovements)) {
+          this.data.stockMovements.forEach(m => {
+            if ((m.productId === p.id || m.product === p.name) && m.date) {
+              const mt = new Date(m.date).getTime();
+              if (!isNaN(mt) && (earliestDate === null || mt < earliestDate)) {
+                earliestDate = mt;
               }
-            });
-          }
-          if (earliestDate !== null) {
-            p.createdAt = new Date(earliestDate).toISOString();
-          } else {
-            p.createdAt = new Date(baseSeedTime + (idx * 60000)).toISOString();
-          }
+            }
+          });
+        }
+        if (earliestDate !== null) {
+          p.createdAt = new Date(earliestDate).toISOString();
+        } else {
+          p.createdAt = new Date(baseSeedTime + (idx * 60000)).toISOString();
+        }
+      }
+    });
+
+    // 2. Normalize and reconcile purchase order receipt quantities
+    const productReceivedMap = {};
+    const historicalCostMap = {};
+    this.data.purchases.forEach(pur => {
+      const isCompletedOrReceived = pur.status === 'Completed' || pur.status === 'Received';
+      const isDraftOrApproved = pur.status === 'Draft' || pur.status === 'Approved';
+
+      let purRecSum = 0;
+      (pur.items || []).forEach(it => {
+        const pName = (it.product || it.productName || '').trim().toLowerCase();
+        const ord = Math.max(0, Number(it.qty !== undefined ? it.qty : (it.received || 0)));
+        const cost = Number(it.buyingPrice || it.price || 0);
+
+        if (cost > 0 && !historicalCostMap[pName]) {
+          historicalCostMap[pName] = { cost, category: it.category, brand: it.brand, sellingPrice: it.sellingPrice };
+        }
+
+        let rec = 0;
+        if (isDraftOrApproved) {
+          rec = 0;
+          it.receivedQty = 0;
+        } else if (it.receivedQty !== undefined && it.receivedQty !== null) {
+          rec = Math.max(0, Number(it.receivedQty) || 0);
+        } else if (it.received !== undefined && it.received !== null) {
+          rec = Math.max(0, Number(it.received) || 0);
+          it.receivedQty = rec;
+        } else if (isCompletedOrReceived) {
+          rec = ord;
+          it.receivedQty = rec;
+        }
+
+        purRecSum += rec;
+        if (rec > 0 && pName) {
+          if (!productReceivedMap[pName]) productReceivedMap[pName] = { units: 0, cost: cost || 0, sellingPrice: it.sellingPrice || 0, category: it.category, brand: it.brand };
+          productReceivedMap[pName].units += rec;
+          if (cost > 0) productReceivedMap[pName].cost = cost;
         }
       });
-    }
 
-    // Ensure inventorySettings exists and has valid lowStockThreshold
+      pur.totalReceived = purRecSum;
+      pur.receivedQuantity = purRecSum;
+    });
+
+    // 3. Map total sold units across active sales
+    const productSoldMap = {};
+    this.data.sales.forEach(sale => {
+      if (sale.status !== 'Cancelled' && sale.status !== 'Failed') {
+        (sale.items || []).forEach(it => {
+          const pName = (it.product || it.productName || '').trim().toLowerCase();
+          const qty = Number(it.qty !== undefined ? it.qty : (it.quantity || 1)) || 0;
+          if (pName && qty > 0) {
+            if (!productSoldMap[pName]) productSoldMap[pName] = { units: 0 };
+            productSoldMap[pName].units += qty;
+          }
+        });
+      }
+    });
+
+    // 4. Discover orphaned products from sales or purchases and register/preserve archived records with real physical stock
+    const knownProductIds = new Set(this.data.products.map(p => p.id));
+    const knownProductNames = new Set(this.data.products.map(p => (p.name || '').trim().toLowerCase()));
+
+    // Check existing archived products and restore legitimate remaining stock if erroneously zeroed out without write-off
+    this.data.products.forEach(p => {
+      if (p.status === 'Archived') {
+        const pNameLower = (p.name || '').trim().toLowerCase();
+        const rec = productReceivedMap[pNameLower]?.units || 0;
+        const sold = productSoldMap[pNameLower]?.units || 0;
+        const expectedNet = Math.max(0, rec - sold);
+
+        if (p.totalStock === 0 && expectedNet > 0) {
+          const hasWriteOff = (this.data.stockMovements || []).some(m =>
+            (m.productId === p.id || (m.product && m.product.trim().toLowerCase() === pNameLower)) &&
+            (m.type === 'Adjustment' || m.type === 'Damaged' || m.type === 'Write-off')
+          );
+          if (!hasWriteOff) {
+            // Restore actual physical remaining stock
+            if (Array.isArray(p.variants) && p.variants.length > 0) {
+              p.variants[0].stock = expectedNet;
+            } else {
+              p.variants = [{ size: 'Standard', stock: expectedNet, damaged: 0, purchasePrice: p.purchasePrice || 0, sellingPrice: p.sellingPrice || 0 }];
+            }
+            p.totalStock = expectedNet;
+            p.stock = expectedNet;
+          }
+        }
+      }
+    });
+
+    this.data.sales.forEach(sale => {
+      (sale.items || []).forEach(it => {
+        const pName = (it.product || it.productName || '').trim();
+        const pNameLower = pName.toLowerCase();
+        const pId = it.productId;
+
+        if (pName && (!pId || !knownProductIds.has(pId)) && !knownProductNames.has(pNameLower)) {
+          // Register archived product stub with genuine remaining physical stock
+          const hist = historicalCostMap[pNameLower] || productReceivedMap[pNameLower] || {};
+          const recUnits = productReceivedMap[pNameLower]?.units || 0;
+          const soldUnits = productSoldMap[pNameLower]?.units || 0;
+          const remainingUnits = Math.max(0, recUnits - soldUnits);
+
+          const stubId = pId || `PROD-ARCH-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*900+100)}`;
+          const stubProduct = {
+            id: stubId,
+            name: pName,
+            category: hist.category || it.category || 'General',
+            brand: hist.brand || it.brand || 'Generic',
+            description: 'Historical product record retained for audit, stock reconciliation, and transactional integrity.',
+            purchasePrice: hist.cost || Number(it.purchasePrice || it.buyingPrice || 0),
+            sellingPrice: hist.sellingPrice || Number(it.price || it.sellingPrice || 0),
+            minStock: 5,
+            totalStock: remainingUnits,
+            stock: remainingUnits,
+            status: 'Archived',
+            variants: [
+              {
+                id: `VAR-ARCH-${stubId}`,
+                size: it.size || 'Standard',
+                stock: remainingUnits,
+                damaged: 0,
+                purchasePrice: hist.cost || Number(it.purchasePrice || it.buyingPrice || 0),
+                sellingPrice: hist.sellingPrice || Number(it.price || it.sellingPrice || 0)
+              }
+            ],
+            createdAt: new Date('2026-10-01T08:00:00.000Z').toISOString()
+          };
+          this.data.products.push(stubProduct);
+          knownProductIds.add(stubId);
+          knownProductNames.add(pNameLower);
+          it.productId = stubId;
+        }
+      });
+    });
+
+    // 3. Ensure sales data integrity (subtotal, customerName, customerId, item unit cost snapshot)
+    this.data.sales.forEach(sale => {
+      if (sale.subtotal === undefined || sale.subtotal === null) {
+        const itemsSum = (sale.items || []).reduce((acc, it) => acc + (Number(it.amount !== undefined ? it.amount : (it.price * it.qty)) || 0), 0);
+        sale.subtotal = itemsSum > 0 ? itemsSum : (Number(sale.totalAmount || 0) + Number(sale.discount || 0));
+      }
+      if (!sale.customerName) {
+        sale.customerName = sale.customer || 'Walk-in Customer';
+      }
+      if (!sale.customer) {
+        sale.customer = sale.customerName;
+      }
+
+      // Link customerId if matching registered customer
+      if (sale.customerName && sale.customerName.toLowerCase() !== 'walk-in customer') {
+        const matchedCust = this.data.customers.find(c =>
+          (c.name && c.name.toLowerCase() === sale.customerName.toLowerCase()) ||
+          (sale.phone && sale.phone !== '-' && c.phone === sale.phone)
+        );
+        if (matchedCust) {
+          sale.customerId = matchedCust.id;
+        }
+      } else {
+        sale.customerId = '';
+      }
+
+      // Snapshot unit costs on sale items
+      (sale.items || []).forEach(it => {
+        if (it.purchasePrice === undefined || it.purchasePrice === null || it.purchasePrice === 0) {
+          it.purchasePrice = this.getItemUnitCost(it);
+        }
+        if (it.buyingPrice === undefined || it.buyingPrice === null) {
+          it.buyingPrice = it.purchasePrice;
+        }
+      });
+    });
+
+    // 4. Ensure inventorySettings exists and has valid lowStockThreshold
     if (!this.data.inventorySettings || typeof this.data.inventorySettings !== 'object') {
       this.data.inventorySettings = { lowStockThreshold: 5 };
     } else {
@@ -1474,7 +1699,138 @@ class StoreManager {
       this.data.inventorySettings.lowStockThreshold = (!isNaN(val) && val >= 1) ? val : 5;
     }
 
-    this.listeners = [];
+    // 5. Recalculate customer metrics from actual sales
+    this.recalculateCustomerMetrics();
+  }
+
+  getItemUnitCost(item, product = null) {
+    if (!item) return 0;
+
+    // 1. Snapshot on item
+    if (item.purchasePrice !== undefined && item.purchasePrice !== null && Number(item.purchasePrice) > 0) {
+      return Number(item.purchasePrice);
+    }
+    if (item.buyingPrice !== undefined && item.buyingPrice !== null && Number(item.buyingPrice) > 0) {
+      return Number(item.buyingPrice);
+    }
+
+    // 2. Product lookup in catalog
+    const prod = product || (this.data.products || []).find(p =>
+      (item.productId && p.id === item.productId) ||
+      (item.product && p.name && p.name.trim().toLowerCase() === item.product.trim().toLowerCase())
+    );
+
+    if (prod) {
+      if (item.size && Array.isArray(prod.variants)) {
+        const v = prod.variants.find(varnt => (varnt.size || 'Standard').trim().toUpperCase() === (item.size || 'Standard').trim().toUpperCase());
+        if (v && (Number(v.purchasePrice) > 0 || Number(v.buyingPrice) > 0)) {
+          return Number(v.purchasePrice || v.buyingPrice);
+        }
+      }
+      if (Number(prod.purchasePrice) > 0 || Number(prod.buyingPrice) > 0) {
+        return Number(prod.purchasePrice || prod.buyingPrice);
+      }
+    }
+
+    // 3. Historical purchase orders lookup
+    const purchases = this.data.purchases || [];
+    for (const pur of purchases) {
+      if (Array.isArray(pur.items)) {
+        const match = pur.items.find(pi =>
+          (item.productId && pi.productId === item.productId) ||
+          (item.product && pi.product && pi.product.trim().toLowerCase() === item.product.trim().toLowerCase())
+        );
+        if (match && (Number(match.buyingPrice) > 0 || Number(match.price) > 0)) {
+          return Number(match.buyingPrice || match.price);
+        }
+      }
+    }
+
+    return 0;
+  }
+
+  calculateSaleCogs(sale) {
+    if (!sale || !Array.isArray(sale.items)) return 0;
+    return sale.items.reduce((sum, item) => {
+      const qty = Number(item.qty !== undefined ? item.qty : (item.quantity || 1)) || 0;
+      const unitCost = this.getItemUnitCost(item);
+      return sum + (qty * unitCost);
+    }, 0);
+  }
+
+  recalculateCustomerMetrics() {
+    if (!Array.isArray(this.data.customers)) this.data.customers = [];
+    const qualifyingSales = (this.data.sales || []).filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed' && s.status !== 'Draft');
+
+    this.data.customers.forEach(c => {
+      const custSales = qualifyingSales.filter(s =>
+        (s.customerId && s.customerId === c.id) ||
+        (!s.customerId && (s.customer || s.customerName || '').toLowerCase() === c.name.toLowerCase())
+      );
+
+      c.ordersCount = custSales.length;
+      c.totalSpend = custSales.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+      if (custSales.length > 0) {
+        const lastSale = custSales[0];
+        c.lastPurchase = lastSale.date ? String(lastSale.date).split(',')[0] : c.lastPurchase;
+      }
+    });
+  }
+
+  getCategories() {
+    const list = this.data.categories || [];
+    const fromProds = (this.data.products || []).map(p => p.category).filter(Boolean);
+    return Array.from(new Set([...list, ...fromProds])).sort();
+  }
+
+  addCategory(category) {
+    const clean = (category || '').trim();
+    if (!clean) return false;
+    if (!Array.isArray(this.data.categories)) this.data.categories = [];
+    if (!this.data.categories.some(c => c.toLowerCase() === clean.toLowerCase())) {
+      this.data.categories.push(clean);
+      this.save();
+    }
+    return true;
+  }
+
+  getBrands() {
+    const list = this.data.brands || [];
+    const fromProds = (this.data.products || []).map(p => p.brand).filter(Boolean);
+    return Array.from(new Set([...list, ...fromProds])).sort();
+  }
+
+  addBrand(brand) {
+    const clean = (brand || '').trim();
+    if (!clean) return false;
+    if (!Array.isArray(this.data.brands)) this.data.brands = [];
+    if (!this.data.brands.some(b => b.toLowerCase() === clean.toLowerCase())) {
+      this.data.brands.push(clean);
+      this.save();
+    }
+    return true;
+  }
+
+  getSizes() {
+    const list = this.data.sizes || ['S', 'M', 'L', 'XL'];
+    const fromProds = [];
+    (this.data.products || []).forEach(p => {
+      (p.variants || []).forEach(v => {
+        if (v.size && v.size !== 'Standard') fromProds.push(v.size);
+      });
+    });
+    return Array.from(new Set([...list, ...fromProds]));
+  }
+
+  addSize(size) {
+    const clean = (size || '').trim().toUpperCase();
+    if (!clean) return false;
+    if (!Array.isArray(this.data.sizes)) this.data.sizes = [];
+    if (!this.data.sizes.some(s => s.toUpperCase() === clean)) {
+      this.data.sizes.push(clean);
+      this.save();
+    }
+    return true;
   }
 
   getLowStockThreshold() {
@@ -1500,11 +1856,25 @@ class StoreManager {
 
   save() {
     try {
-      localStorage.setItem('master_web_admin_data_v2', JSON.stringify(this.data));
+      localStorage.setItem('master_web_admin_data_v3', JSON.stringify(this.data));
     } catch (e) {
       console.warn('LocalStorage save error:', e);
     }
     this.notify();
+  }
+
+  clearDatabase() {
+    this.data = JSON.parse(JSON.stringify(emptyInitialData));
+    this.migrateAndRepairData();
+    this.save();
+    return true;
+  }
+
+  loadSampleData() {
+    this.data = JSON.parse(JSON.stringify(sampleDemoData));
+    this.migrateAndRepairData();
+    this.save();
+    return true;
   }
 
   subscribe(listener) {
@@ -1525,11 +1895,19 @@ class StoreManager {
     const customers = this.data.customers || [];
     const threshold = this.getLowStockThreshold();
 
-    let totalProducts = products.length; // Unique product count
-    let totalStock = 0;
-    let damagedStockCount = 0;
-    let stockValue = 0;
+    let totalProducts = products.length;
+    let activeProductsCount = 0;
+    let archivedProductsCount = 0;
 
+    let totalStock = 0;
+    let activeStock = 0;
+    let archivedStock = 0;
+
+    let stockValue = 0;
+    let activeStockValue = 0;
+    let archivedStockValue = 0;
+
+    let damagedStockCount = 0;
     let inStockCount = 0;
     let partialStockCount = 0;
     let lowStockCount = 0;
@@ -1539,17 +1917,24 @@ class StoreManager {
     let outOfStockVariantsCount = 0;
 
     products.forEach(p => {
-      if (!p || p.status === 'Inactive') return;
+      const isArchived = (p.status === 'Archived');
+      const isInactive = (p.status === 'Inactive');
+      const isActive = !isArchived && !isInactive;
+
+      if (isActive) activeProductsCount++;
+      if (isArchived) archivedProductsCount++;
 
       const statusInfo = getProductStockStatus(p, threshold);
-      if (statusInfo.status === 'IN_STOCK') {
-        inStockCount++;
-      } else if (statusInfo.status === 'PARTIAL_STOCK') {
-        partialStockCount++;
-      } else if (statusInfo.status === 'LOW_STOCK') {
-        lowStockCount++;
-      } else if (statusInfo.status === 'OUT_OF_STOCK') {
-        outOfStockCount++;
+      if (isActive) {
+        if (statusInfo.status === 'IN_STOCK') {
+          inStockCount++;
+        } else if (statusInfo.status === 'PARTIAL_STOCK') {
+          partialStockCount++;
+        } else if (statusInfo.status === 'LOW_STOCK') {
+          lowStockCount++;
+        } else if (statusInfo.status === 'OUT_OF_STOCK') {
+          outOfStockCount++;
+        }
       }
 
       const variants = (p.variants && p.variants.length > 0)
@@ -1558,33 +1943,122 @@ class StoreManager {
 
       variants.forEach(v => {
         const vStock = Math.max(0, Number(v.stock) || 0);
+        const unitCost = Number(v.purchasePrice || v.buyingPrice || p.purchasePrice || p.buyingPrice || 0);
+        const vVal = vStock * unitCost;
+
         totalStock += vStock;
+        stockValue += vVal;
         damagedStockCount += Math.max(0, Number(v.damaged) || 0);
 
-        const unitCost = Number(v.purchasePrice || v.buyingPrice || p.purchasePrice || p.buyingPrice || 0);
-        stockValue += vStock * unitCost;
-
-        if (vStock === 0) {
-          outOfStockVariantsCount++;
-        } else if (vStock <= threshold) {
-          lowStockVariantsCount++;
+        if (isArchived) {
+          archivedStock += vStock;
+          archivedStockValue += vVal;
+        } else if (isActive) {
+          activeStock += vStock;
+          activeStockValue += vVal;
+          if (vStock === 0) {
+            outOfStockVariantsCount++;
+          } else if (vStock <= threshold) {
+            lowStockVariantsCount++;
+          }
         }
       });
     });
 
-    const qualifyingSales = sales.filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed');
+    const qualifyingSales = sales.filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed' && s.status !== 'Draft');
     const totalRevenue = qualifyingSales.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
-    const todaySales = totalRevenue; // preserved for backwards compatibility
+    const todaySales = totalRevenue;
 
-    const qualifyingPurchases = purchases.filter(p => p && (p.status === 'Completed' || p.status === 'Received'));
+    // Single Authoritative COGS, Units Sold, and Missing Cost Detection
+    let totalCogs = 0;
+    let totalUnitsSold = 0;
+    let missingCostsCount = 0;
+    const missingCostItems = [];
+
+    qualifyingSales.forEach(s => {
+      totalCogs += this.calculateSaleCogs(s);
+      (s.items || []).forEach(it => {
+        const itemQty = Number(it.qty !== undefined ? it.qty : (it.quantity || 1)) || 0;
+        totalUnitsSold += itemQty;
+        const itemUnitCost = this.getItemUnitCost(it);
+        if (itemUnitCost === null || itemUnitCost === undefined || itemUnitCost === 0) {
+          missingCostsCount++;
+          missingCostItems.push({
+            saleId: s.id,
+            product: it.product || it.productName,
+            size: it.size,
+            qty: itemQty
+          });
+        }
+      });
+    });
+
+    const hasMissingCosts = missingCostsCount > 0;
+    const grossProfit = Math.max(0, totalRevenue - totalCogs);
+    const marginPct = totalRevenue > 0 ? ((grossProfit / totalRevenue) * 100).toFixed(1) : '0.0';
+
+    const qualifyingPurchases = purchases.filter(p => p && (p.status === 'Completed' || p.status === 'Received' || p.status === 'Partially Received'));
     const totalPurchases = qualifyingPurchases.reduce((sum, p) => sum + (Number(p.totalAmount || p.total) || 0), 0);
+
+    // Calculate total confirmed received units across all purchases
+    let purchasesUnitsReceived = 0;
+    let purchasesOrderedUnits = 0;
+    let purchasesCompletedCount = 0;
+
+    purchases.forEach(p => {
+      const isCompletedOrReceived = (p.status === 'Completed' || p.status === 'Received');
+      if (isCompletedOrReceived) purchasesCompletedCount++;
+
+      const itemsList = Array.isArray(p.items) ? p.items : [];
+      let pRecUnits = 0;
+      let pOrdUnits = 0;
+
+      itemsList.forEach(it => {
+        const ord = Math.max(0, Number(it.qty !== undefined ? it.qty : (it.received !== undefined ? it.received : 0)));
+        pOrdUnits += ord;
+
+        let rec = 0;
+        if (p.status === 'Draft' || p.status === 'Approved') {
+          rec = 0;
+        } else if (it.receivedQty !== undefined && it.receivedQty !== null) {
+          rec = Math.max(0, Number(it.receivedQty) || 0);
+        } else if (it.received !== undefined && it.received !== null) {
+          rec = Math.max(0, Number(it.received) || 0);
+        } else if (isCompletedOrReceived) {
+          rec = ord;
+        }
+        pRecUnits += rec;
+      });
+
+      if (p.status !== 'Draft' && p.status !== 'Approved') {
+        if (p.totalReceived !== undefined && Number(p.totalReceived) > 0) {
+          pRecUnits = Math.max(pRecUnits, Number(p.totalReceived));
+        } else if (p.receivedQuantity !== undefined && Number(p.receivedQuantity) > 0) {
+          pRecUnits = Math.max(pRecUnits, Number(p.receivedQuantity));
+        }
+      } else {
+        pRecUnits = 0;
+      }
+
+      purchasesUnitsReceived += pRecUnits;
+      purchasesOrderedUnits += pOrdUnits;
+    });
 
     return {
       todaySales,
       totalRevenue,
+      totalCogs,
+      grossProfit,
+      marginPct,
       salesCount: qualifyingSales.length,
+      qualifyingSalesCount: qualifyingSales.length,
+      totalUnitsSold,
       totalProducts,
+      activeProducts: activeProductsCount,
+      archivedProducts: archivedProductsCount,
       totalStock,
+      activeStock,
+      archivedStock,
       lowStockCount,
       outOfStockCount,
       partialStockCount,
@@ -1593,9 +2067,18 @@ class StoreManager {
       outOfStockVariantsCount,
       damagedStockCount,
       stockValue,
+      inventoryValuation: stockValue,
+      activeStockValue,
+      archivedStockValue,
       totalPurchases,
+      purchasesUnitsReceived,
+      purchasesOrderedUnits,
       purchasesCount: purchases.length,
-      totalCustomers: customers.length
+      purchasesCompletedCount,
+      totalCustomers: customers.length,
+      hasMissingCosts,
+      missingCostsCount,
+      missingCostItems
     };
   }
 
@@ -1972,6 +2455,8 @@ class StoreManager {
         purchaseRecord.productCount = itemRecords.length;
         purchaseRecord.totalQuantity = totalQty;
         purchaseRecord.totalAmount = totalAmount;
+        purchaseRecord.totalReceived = (purchaseRecord.items || []).reduce((s, it) => s + (Number(it.receivedQty) || 0), 0);
+        purchaseRecord.receivedQuantity = purchaseRecord.totalReceived;
       }
     }
 
@@ -1986,6 +2471,7 @@ class StoreManager {
         totalQuantity: totalQty,
         totalAmount: totalAmount,
         status: 'Draft',
+        totalReceived: 0,
         receivedQuantity: 0,
         items: itemRecords,
         receiptHistory: []
@@ -2224,7 +2710,83 @@ class StoreManager {
   deleteDraftPurchase(purchaseId) {
     const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
     if (!purchase) throw new Error('Purchase not found');
-    if (purchase.status !== 'Draft') throw new Error('Only Draft purchases can be deleted');
+    if (purchase.status !== 'Draft') throw new Error('Only Draft purchases can be deleted with deleteDraftPurchase');
+    return this.deletePurchase(purchaseId);
+  }
+
+  deletePurchase(purchaseId) {
+    const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
+    if (!purchase) throw new Error('Purchase not found');
+
+    const itemsList = Array.isArray(purchase.items) ? purchase.items : [];
+    const totalReceivedAll = itemsList.reduce((s, i) => s + Math.max(0, Number(i.receivedQty !== undefined ? i.receivedQty : (i.received || 0))), 0);
+    const hasReceivedStock = totalReceivedAll > 0 || purchase.status === 'Received' || purchase.status === 'Partially Received' || purchase.status === 'Completed';
+
+    if (hasReceivedStock) {
+      if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+
+      itemsList.forEach(item => {
+        const receivedQty = Math.max(0, Number(item.receivedQty !== undefined ? item.receivedQty : (item.received || 0)));
+        if (receivedQty > 0) {
+          const product = (this.data.products || []).find(p =>
+            p.id === item.productId ||
+            (p.name && item.product && p.name.trim().toLowerCase() === item.product.trim().toLowerCase()) ||
+            (p.name && item.productName && p.name.trim().toLowerCase() === item.productName.trim().toLowerCase())
+          );
+
+          if (product) {
+            let variant = null;
+            let extractedSize = item.size || '';
+            if (!extractedSize && item.sku) {
+              const parts = String(item.sku).split('-');
+              if (parts.length > 1) extractedSize = parts[parts.length - 1];
+            }
+            const targetSize = (extractedSize || 'Standard').trim().toUpperCase();
+
+            if (item.sku) {
+              variant = (product.variants || []).find(v => v.sku && v.sku.toUpperCase() === item.sku.toUpperCase());
+            }
+            if (!variant) {
+              variant = (product.variants || []).find(v => (v.size || 'Standard').trim().toUpperCase() === targetSize);
+            }
+            if (!variant && Array.isArray(product.variants) && product.variants.length > 0) {
+              variant = product.variants[0];
+            }
+
+            const currentStock = variant ? Number(variant.stock || 0) : Number(product.totalStock || product.stock || 0);
+            const actualReversed = Math.min(currentStock, receivedQty);
+            const discrepancy = receivedQty - actualReversed;
+
+            if (variant) {
+              variant.stock = Math.max(0, currentStock - receivedQty);
+            } else {
+              product.totalStock = Math.max(0, currentStock - receivedQty);
+            }
+
+            if (Array.isArray(product.variants) && product.variants.length > 0) {
+              product.totalStock = product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+            }
+            product.stock = product.totalStock;
+
+            this.data.stockMovements.unshift({
+              id: `MOV-REV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 100)}`,
+              date: new Date().toLocaleString(),
+              product: item.product || product.name,
+              productId: product.id,
+              size: item.size || 'Standard',
+              sku: (variant && variant.sku) ? variant.sku : `${(item.product || product.name || 'PRD').slice(0, 3).toUpperCase()}-${targetSize}`,
+              type: 'Purchase Cancelled / Reversal',
+              quantity: -actualReversed,
+              reference: purchase.id,
+              user: 'Admin',
+              notes: discrepancy > 0
+                ? `Reversed ${actualReversed} units from physical stock. Discrepancy noted: ${discrepancy} units were previously consumed/sold before purchase deletion.`
+                : `Reversed ${actualReversed} units from physical stock upon purchase deletion.`
+            });
+          }
+        }
+      });
+    }
 
     this.data.purchases = this.data.purchases.filter(p => p.id !== purchaseId);
     this.save();
@@ -2313,21 +2875,31 @@ class StoreManager {
   }
 
   addSale(salePayload) {
-    // salePayload: { customerName, customerPhone, paymentMethod, paymentStatus, discount, items: [ { productId, size, qty, sellingPrice }, ... ] }
-    
+    // salePayload: { customerName, customerPhone, customerId, paymentMethod, paymentStatus, discount, items: [ { productId, size, qty, sellingPrice }, ... ] }
+    if (!salePayload.items || salePayload.items.length === 0) {
+      throw new Error('Sale must contain at least one product item.');
+    }
+
     // 1. Validate combined stock for all items per product and size
     const requiredStockMap = {};
     (salePayload.items || []).forEach(item => {
+      const q = parseInt(item.qty, 10);
+      if (isNaN(q) || q <= 0) {
+        throw new Error('Quantity must be a positive whole number greater than 0.');
+      }
       const key = `${item.productId}:::${item.size || 'Standard'}`;
-      requiredStockMap[key] = (requiredStockMap[key] || 0) + (parseInt(item.qty, 10) || 0);
+      requiredStockMap[key] = (requiredStockMap[key] || 0) + q;
     });
 
     for (const [key, reqQty] of Object.entries(requiredStockMap)) {
       const [prodId, size] = key.split(':::');
       const prod = this.data.products.find(p => p.id === prodId);
-      if (!prod) throw new Error('Product not found.');
-      const variant = (prod.variants || []).find(v => v.size === size) || (prod.variants || [])[0];
-      const avail = variant ? (variant.stock || 0) : 0;
+      if (!prod) throw new Error('Product not found in inventory.');
+      if (prod.status === 'Archived') {
+        throw new Error(`Product "${prod.name}" is archived and cannot be sold unless explicitly reactivated.`);
+      }
+      const variant = (prod.variants || []).find(v => (v.size || 'Standard').toUpperCase() === (size || 'Standard').toUpperCase()) || (prod.variants || [])[0];
+      const avail = variant ? (variant.stock || 0) : (prod.totalStock || 0);
       if (reqQty > avail) {
         throw new Error(`Insufficient stock for "${prod.name}" (${size}). Available: ${avail}, Requested: ${reqQty}.`);
       }
@@ -2341,43 +2913,86 @@ class StoreManager {
     (salePayload.items || []).forEach(item => {
       const prod = this.data.products.find(p => p.id === item.productId);
       if (prod) {
-        const variant = (prod.variants || []).find(v => v.size === item.size) || (prod.variants && prod.variants.length > 0 ? prod.variants[0] : null);
+        const variant = (prod.variants || []).find(v => (v.size || 'Standard').toUpperCase() === (item.size || 'Standard').toUpperCase()) || (prod.variants && prod.variants.length > 0 ? prod.variants[0] : null);
+        const itemQty = parseInt(item.qty, 10) || 1;
+
         if (variant && shouldDeductStock) {
-          variant.stock = Math.max(0, (variant.stock || 0) - item.qty);
+          variant.stock = Math.max(0, (variant.stock || 0) - itemQty);
         } else if (!variant && shouldDeductStock) {
-          prod.totalStock = Math.max(0, (prod.totalStock || 0) - item.qty);
+          prod.totalStock = Math.max(0, (prod.totalStock || 0) - itemQty);
         }
         if (Array.isArray(prod.variants) && prod.variants.length > 0) {
-          prod.totalStock = prod.variants.reduce((sum, v) => sum + (v.stock || 0), 0);
+          prod.totalStock = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
         }
+        prod.stock = prod.totalStock;
 
         const priceToUse = (item.sellingPrice !== undefined && item.sellingPrice !== null && Number(item.sellingPrice) > 0)
           ? Number(item.sellingPrice)
           : (variant && variant.sellingPrice > 0 ? variant.sellingPrice : (prod.sellingPrice || 0));
-        const lineTotal = priceToUse * item.qty;
+        const lineTotal = priceToUse * itemQty;
         totalAmt += lineTotal;
-        totalItemCount += item.qty;
+        totalItemCount += itemQty;
+
+        // Snapshot unit purchase cost for historical profit integrity
+        const unitCost = this.getItemUnitCost({ ...item, productId: prod.id, size: item.size }, prod);
 
         saleItems.push({
           product: prod.name,
           productId: prod.id,
           size: item.size || 'Standard',
-          qty: item.qty,
+          qty: itemQty,
           price: priceToUse,
+          purchasePrice: unitCost,
+          buyingPrice: unitCost,
           amount: lineTotal
         });
       }
     });
 
-    const discountVal = parseFloat(salePayload.discount) || 0;
+    const discountVal = Math.max(0, parseFloat(salePayload.discount) || 0);
     const finalTotal = Math.max(0, totalAmt - discountVal);
+
+    const custName = (salePayload.customerName || salePayload.customer || 'Walk-in Customer').trim();
+    const custPhone = (salePayload.customerPhone || salePayload.phone || '-').trim();
+    let custId = salePayload.customerId || '';
+
+    if (custName && custName.toLowerCase() !== 'walk-in customer') {
+      let customer = (this.data.customers || []).find(c =>
+        (custId && c.id === custId) ||
+        (c.name && c.name.toLowerCase() === custName.toLowerCase()) ||
+        (custPhone && custPhone !== '-' && c.phone === custPhone)
+      );
+      if (!customer) {
+        custId = custId || `CUST-${String((this.data.customers || []).length + 1).padStart(2, '0')}`;
+        customer = {
+          id: custId,
+          name: custName,
+          phone: custPhone,
+          ordersCount: 0,
+          lastPurchase: new Date().toISOString().split('T')[0],
+          totalSpend: 0
+        };
+        if (!Array.isArray(this.data.customers)) this.data.customers = [];
+        this.data.customers.unshift(customer);
+      } else {
+        custId = customer.id;
+        if (custPhone && custPhone !== '-' && (!customer.phone || customer.phone === '-')) {
+          customer.phone = custPhone;
+        }
+      }
+    } else {
+      custId = '';
+    }
 
     const saleRecord = {
       id: `BILL-${Date.now().toString().slice(-4)}`,
       date: new Date().toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }),
-      customer: salePayload.customerName || 'Walk-in Customer',
-      phone: salePayload.customerPhone || '-',
+      customer: custName,
+      customerName: custName,
+      customerId: custId,
+      phone: custPhone,
       itemCount: totalItemCount,
+      subtotal: totalAmt,
       totalAmount: finalTotal,
       paymentMethod: salePayload.paymentMethod || 'Cash',
       status: salePayload.paymentStatus || 'Paid',
@@ -2393,6 +3008,7 @@ class StoreManager {
           id: `MOV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
           date: new Date().toLocaleString(),
           product: si.product,
+          productId: si.productId,
           size: si.size,
           sku: `${(si.product || 'PRD').slice(0,3).toUpperCase()}-${si.size || 'STD'}`,
           type: 'Sale',
@@ -2403,33 +3019,160 @@ class StoreManager {
       });
     }
 
-    // Automatic Customer Update
-    const custName = salePayload.customerName || 'Walk-in Customer';
-    const custPhone = salePayload.customerPhone || '-';
-
-    if (custName && custName !== 'Walk-in Customer') {
-      let customer = this.data.customers.find(c => c.name.toLowerCase() === custName.toLowerCase());
-      if (!customer) {
-        customer = {
-          id: `CUST-${String(this.data.customers.length + 1).padStart(2, '0')}`,
-          name: custName,
-          phone: custPhone,
-          ordersCount: 0,
-          lastPurchase: new Date().toISOString().split('T')[0],
-          totalSpend: 0
-        };
-        this.data.customers.unshift(customer);
-      }
-
-      customer.ordersCount = (customer.ordersCount || 0) + 1;
-      customer.totalSpend = (customer.totalSpend || 0) + finalTotal;
-      customer.lastPurchase = new Date().toISOString().split('T')[0];
-      if (custPhone && custPhone !== '-') customer.phone = custPhone;
-    }
-
+    if (!Array.isArray(this.data.sales)) this.data.sales = [];
     this.data.sales.unshift(saleRecord);
+
+    // Dynamic customer metrics reconciliation
+    this.recalculateCustomerMetrics();
+
     this.save();
     return saleRecord;
+  }
+
+  updateSalePaymentStatus(saleId, newStatus) {
+    const sale = (this.data.sales || []).find(s => s.id === saleId);
+    if (!sale) throw new Error('Sale not found.');
+    if (sale.status === newStatus) return sale;
+
+    if (newStatus === 'Cancelled') {
+      return this.cancelSale(saleId);
+    }
+
+    // Changing payment status (e.g. Pending -> Paid) DOES NOT deduct stock again!
+    sale.status = newStatus;
+    this.recalculateCustomerMetrics();
+    this.save();
+    return sale;
+  }
+
+  cancelSale(saleId, reason = 'Cancelled by user') {
+    const sale = (this.data.sales || []).find(s => s.id === saleId);
+    if (!sale) throw new Error('Sale not found.');
+    if (sale.status === 'Cancelled') throw new Error('Sale is already cancelled.');
+
+    const previousStatus = sale.status;
+    sale.status = 'Cancelled';
+    sale.cancelledAt = new Date().toISOString();
+    sale.cancelReason = reason;
+
+    // Restore stock if the sale had previously deducted stock
+    const hadDeductedStock = previousStatus !== 'Cancelled' && previousStatus !== 'Failed' && previousStatus !== 'Draft';
+    if (hadDeductedStock) {
+      if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+      (sale.items || []).forEach(item => {
+        const prod = (this.data.products || []).find(p => p.id === item.productId || (p.name && p.name.trim().toLowerCase() === (item.product || '').trim().toLowerCase()));
+        if (prod) {
+          const variant = (prod.variants || []).find(v => (v.size || 'Standard').toUpperCase() === (item.size || 'Standard').toUpperCase()) || (prod.variants && prod.variants[0]);
+          const itemQty = Number(item.qty || 1);
+          if (variant) {
+            variant.stock = Math.max(0, Number(variant.stock || 0) + itemQty);
+          } else {
+            prod.totalStock = Math.max(0, Number(prod.totalStock || 0) + itemQty);
+          }
+          if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+            prod.totalStock = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+          }
+          prod.stock = prod.totalStock;
+
+          this.data.stockMovements.unshift({
+            id: `MOV-RET-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+            date: new Date().toLocaleString(),
+            product: item.product || prod.name,
+            productId: prod.id,
+            size: item.size || 'Standard',
+            sku: variant ? variant.sku : '',
+            type: 'Sale Return',
+            quantity: itemQty,
+            reference: sale.id,
+            user: 'Admin'
+          });
+        }
+      });
+    }
+
+    this.recalculateCustomerMetrics();
+    this.save();
+    return sale;
+  }
+
+  deleteSale(saleId) {
+    const sale = (this.data.sales || []).find(s => s.id === saleId);
+    if (!sale) throw new Error('Sale not found.');
+
+    const hadDeductedStock = sale.status !== 'Cancelled' && sale.status !== 'Failed' && sale.status !== 'Draft';
+    if (hadDeductedStock) {
+      if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+      (sale.items || []).forEach(item => {
+        const prod = (this.data.products || []).find(p =>
+          p.id === item.productId ||
+          (p.name && item.product && p.name.trim().toLowerCase() === item.product.trim().toLowerCase()) ||
+          (p.name && item.productName && p.name.trim().toLowerCase() === item.productName.trim().toLowerCase())
+        );
+        if (prod) {
+          let variant = null;
+          if (item.sku) {
+            variant = (prod.variants || []).find(v => v.sku && v.sku.toUpperCase() === item.sku.toUpperCase());
+          }
+          if (!variant) {
+            let extractedSize = item.size || '';
+            if (!extractedSize && item.sku) {
+              const parts = String(item.sku).split('-');
+              if (parts.length > 1) extractedSize = parts[parts.length - 1];
+            }
+            const targetSize = (extractedSize || 'Standard').trim().toUpperCase();
+            variant = (prod.variants || []).find(v => (v.size || 'Standard').trim().toUpperCase() === targetSize);
+          }
+          if (!variant && Array.isArray(prod.variants) && prod.variants.length > 0) {
+            variant = prod.variants[0];
+          }
+
+          const itemQty = Number(item.qty !== undefined ? item.qty : (item.quantity || 1)) || 0;
+          if (variant) {
+            variant.stock = Math.max(0, Number(variant.stock || 0) + itemQty);
+          } else {
+            prod.totalStock = Math.max(0, Number(prod.totalStock || prod.stock || 0) + itemQty);
+          }
+          if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+            prod.totalStock = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+          }
+          prod.stock = prod.totalStock;
+
+          this.data.stockMovements.unshift({
+            id: `MOV-DEL-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 100)}`,
+            date: new Date().toLocaleString(),
+            product: item.product || prod.name,
+            productId: prod.id,
+            size: item.size || 'Standard',
+            sku: (variant && variant.sku) ? variant.sku : '',
+            type: 'Sale Void / Deleted',
+            quantity: itemQty,
+            reference: sale.id,
+            user: 'Admin'
+          });
+        }
+      });
+    }
+
+    this.data.sales = this.data.sales.filter(s => s.id !== saleId);
+    this.recalculateCustomerMetrics();
+    this.save();
+    return true;
+  }
+
+  deleteCustomer(customerId) {
+    const customer = (this.data.customers || []).find(c => c.id === customerId);
+    if (!customer) throw new Error('Customer not found.');
+
+    (this.data.sales || []).forEach(s => {
+      if (s.customerId === customerId) {
+        s.customerId = '';
+      }
+    });
+
+    this.data.customers = this.data.customers.filter(c => c.id !== customerId);
+    this.recalculateCustomerMetrics();
+    this.save();
+    return true;
   }
 
   adjustProductStock({ productId, size, adjustmentType, quantity, reason }) {
@@ -2473,6 +3216,7 @@ class StoreManager {
     const prevStock = curStock;
     variant.stock = newStock;
     product.totalStock = (product.variants || []).reduce((sum, v) => sum + (v.stock || 0), 0);
+    product.stock = product.totalStock;
 
     const now = new Date();
     const dateFormatted = now.toLocaleDateString('en-GB') + ' ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -2502,7 +3246,7 @@ class StoreManager {
   }
 
   updateProduct(id, updatedData) {
-    const idx = this.data.products.findIndex(p => p.id === id);
+    const idx = (this.data.products || []).findIndex(p => p.id === id);
     if (idx !== -1) {
       const existing = this.data.products[idx];
       const updatedVariants = (existing.variants || []).map(v => {
@@ -2523,9 +3267,10 @@ class StoreManager {
         sellingPrice: updatedData.sellingPrice !== undefined ? updatedData.sellingPrice : existing.sellingPrice,
         description: updatedData.description !== undefined ? updatedData.description : existing.description,
         status: updatedData.status !== undefined ? updatedData.status : existing.status,
-        variants: updatedVariants, // PRESERVE INVENTORY STOCK AND BUYING COSTS INTACT
+        variants: updatedVariants,
         totalStock: updatedVariants.reduce((sum, v) => sum + (v.stock || 0), 0)
       };
+      this.data.products[idx].stock = this.data.products[idx].totalStock;
       this.save();
     }
   }
@@ -2533,25 +3278,55 @@ class StoreManager {
   deleteProduct(id) {
     const idx = (this.data.products || []).findIndex(p => p.id === id);
     if (idx === -1) throw new Error('Product not found.');
-    const deletedProduct = this.data.products[idx];
-    this.data.products.splice(idx, 1);
+    const product = this.data.products[idx];
 
-    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
-    this.data.stockMovements.unshift({
-      id: `MOV-DEL-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
-      date: new Date().toLocaleString(),
-      product: deletedProduct.name,
-      productId: deletedProduct.id,
-      size: 'All',
-      sku: `${(deletedProduct.name || 'PRD').slice(0,3).toUpperCase()}-ALL`,
-      type: 'Delete Product',
-      quantity: -(deletedProduct.totalStock || 0),
-      reference: `DELETE-${deletedProduct.id}`,
-      user: 'Admin'
-    });
+    if (product.status === 'Archived') {
+      throw new Error('Product is already archived.');
+    }
+
+    // Check if product has historical sales or purchases
+    const hasSales = (this.data.sales || []).some(s => (s.items || []).some(it => it.productId === id || (it.product && it.product.trim().toLowerCase() === product.name.trim().toLowerCase())));
+    const hasPurchases = (this.data.purchases || []).some(p => (p.items || []).some(it => it.productId === id || (it.product && it.product.trim().toLowerCase() === product.name.trim().toLowerCase())));
+
+    if (hasSales || hasPurchases) {
+      // Soft-delete: Mark as Archived to preserve financial, stock, and audit history
+      product.status = 'Archived';
+      // Physical stock and variants are preserved intact — never discarded
+      if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+      this.data.stockMovements.unshift({
+        id: `MOV-ARCH-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+        date: new Date().toLocaleString(),
+        product: product.name,
+        productId: product.id,
+        size: 'All',
+        sku: `${(product.name || 'PRD').slice(0,3).toUpperCase()}-ARCH`,
+        type: 'Product Archived',
+        quantity: 0,
+        reference: `ARCHIVE-${product.id}`,
+        user: 'Admin',
+        notes: `Product archived. Remaining stock of ${product.totalStock || 0} units preserved for audit and reconciliation.`
+      });
+    } else {
+      // Hard delete: No historical transactions depend on this record
+      const prevStock = product.totalStock || 0;
+      this.data.products.splice(idx, 1);
+      if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+      this.data.stockMovements.unshift({
+        id: `MOV-DEL-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+        date: new Date().toLocaleString(),
+        product: product.name,
+        productId: product.id,
+        size: 'All',
+        sku: `${(product.name || 'PRD').slice(0,3).toUpperCase()}-DEL`,
+        type: 'Delete Product',
+        quantity: -prevStock,
+        reference: `DELETE-${product.id}`,
+        user: 'Admin'
+      });
+    }
 
     this.save();
-    return deletedProduct;
+    return product;
   }
 
   adjustStock(sku, newStock, reason) {
@@ -2583,6 +3358,22 @@ class StoreManager {
 const store = new StoreManager();
 window.store = store;
 window.StoreManager = StoreManager;
+
+window.clearDatabase = function() {
+  store.clearDatabase();
+  if (typeof toast !== 'undefined' && toast.show) {
+    toast.show({ message: 'Database cleared! Products, purchases, and sales are now empty.', type: 'success' });
+  }
+  if (window.appInstance) window.appInstance.render();
+};
+
+window.loadSampleData = function() {
+  store.loadSampleData();
+  if (typeof toast !== 'undefined' && toast.show) {
+    toast.show({ message: 'Sample demo data restored successfully.', type: 'success' });
+  }
+  if (window.appInstance) window.appInstance.render();
+};
 
 // ==========================================
 // 2. UI HELPER COMPONENTS
@@ -3226,6 +4017,29 @@ function openSaleDetailsModal(saleInput) {
   // Crucial: Append inner content to modalEl
   modalEl.appendChild(innerContent);
 
+  const deleteBtn = createButton({
+    text: 'Delete Sale',
+    icon: 'trash-2',
+    variant: 'ghost',
+    onClick: () => {
+      const confirmed = confirm(`Are you sure you want to delete sale "${saleRef}"?\n\nThis will restore deducted inventory quantities and recalculate customer metrics.\n\nThis action cannot be undone.`);
+      if (confirmed) {
+        try {
+          store.deleteSale(sale.id);
+          toast.show({ message: `Sale ${saleRef} deleted successfully.`, type: 'info' });
+          if (modalObj && modalObj.closeModal) modalObj.closeModal();
+          const salesTbody = document.getElementById('sales-table-body');
+          if (salesTbody && window.appInstance) {
+            window.appInstance.renderPage('sales');
+          }
+        } catch (err) {
+          toast.show({ message: err.message, type: 'danger' });
+        }
+      }
+    }
+  });
+  deleteBtn.style.color = 'var(--status-danger)';
+
   const printBtn = createButton({
     text: 'Print Receipt',
     icon: 'printer',
@@ -3243,7 +4057,7 @@ function openSaleDetailsModal(saleInput) {
   modalObj = createModal({
     title: `Sale Details — ${saleRef}`,
     bodyElement: modalEl,
-    footerButtons: [printBtn, closeBtn]
+    footerButtons: [deleteBtn, printBtn, closeBtn]
   });
 
   if (modalObj && modalObj.overlay) {
@@ -4073,19 +4887,7 @@ function renderOverview(onNavigate) {
     });
 
     function calculateSaleCogs(sale) {
-      let cost = 0;
-      (sale.items || []).forEach(item => {
-        let uCost = 0;
-        if (item.productId && prodCostMap[item.productId] !== undefined) {
-          uCost = prodCostMap[item.productId];
-        } else if (item.product && prodCostMap[item.product.toLowerCase()] !== undefined) {
-          uCost = prodCostMap[item.product.toLowerCase()];
-        } else {
-          uCost = Number(item.price || item.sellingPrice || 0);
-        }
-        cost += (Number(item.qty || 1) || 1) * uCost;
-      });
-      return cost;
+      return store.calculateSaleCogs(sale);
     }
 
     const salesWithDates = qualifyingSales.map(s => ({
@@ -4497,14 +5299,24 @@ function renderOverview(onNavigate) {
   topSellingCard.style.justifyContent = 'space-between';
 
   const topSellingMap = {};
-  sales.forEach(s => {
+  const qualOverviewSales = sales.filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed' && s.status !== 'Draft');
+  qualOverviewSales.forEach(s => {
+    const saleSubtotal = Number(s.subtotal) || (s.items || []).reduce((acc, it) => acc + (Number(it.amount !== undefined ? it.amount : (it.price * it.qty)) || 0), 0) || Number(s.totalAmount) || 1;
+    const saleDiscount = Number(s.discount) || 0;
+    const discountRatio = saleSubtotal > 0 ? Math.min(1, saleDiscount / saleSubtotal) : 0;
+
     (s.items || []).forEach(item => {
       const pName = item.product || item.productName || 'Product';
       if (!topSellingMap[pName]) {
         topSellingMap[pName] = { name: pName, units: 0, revenue: 0 };
       }
-      topSellingMap[pName].units += (item.qty || 0);
-      topSellingMap[pName].revenue += (item.amount || item.total || 0);
+      const itemQty = Number(item.qty !== undefined ? item.qty : (item.quantity || 1)) || 0;
+      const rawAmt = Number(item.amount !== undefined ? item.amount : (item.price * itemQty)) || 0;
+      // Pro-rate discount so product revenue accurately aligns with net store sales revenue
+      const netAmt = Math.round(rawAmt * (1 - discountRatio));
+
+      topSellingMap[pName].units += itemQty;
+      topSellingMap[pName].revenue += netAmt;
     });
   });
   const topSellingList = Object.values(topSellingMap)
@@ -4522,7 +5334,7 @@ function renderOverview(onNavigate) {
       </div>
       
       <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-        ${topSellingList.map((p, idx) => `
+        ${topSellingList.length > 0 ? topSellingList.map((p, idx) => `
           <div class="top-selling-item" data-product-name="${p.name}" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); transition: background-color 0.15s ease; ${idx < topSellingList.length - 1 ? 'border-bottom: 1px solid var(--border-color);' : ''}">
             <div style="display: flex; align-items: center; gap: 0.75rem;">
               <span style="font-weight: 700; font-size: 0.85rem; color: ${idx === 0 ? 'var(--brand-primary)' : 'var(--text-secondary)'}; background: ${idx === 0 ? 'var(--brand-soft)' : 'var(--bg-secondary)'}; width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">0${idx + 1}</span>
@@ -4533,14 +5345,26 @@ function renderOverview(onNavigate) {
             </div>
             <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">₹${(p.revenue || 0).toLocaleString('en-IN')}</div>
           </div>
-        `).join('')}
+        `).join('') : `
+          <div style="text-align: center; color: var(--text-secondary); padding: 1.5rem 0.5rem; font-size: 0.85rem;">
+            No sales recorded yet.
+          </div>
+        `}
       </div>
     </div>
   `;
 
   topSellingCard.querySelectorAll('.top-selling-item').forEach(item => {
     item.addEventListener('click', () => {
-      onNavigate('inventory', { openProduct: item.dataset.productName });
+      const prodName = item.dataset.productName;
+      const foundInCatalog = (store.data.products || []).some(p => p.name && p.name.trim().toLowerCase() === prodName.trim().toLowerCase() && p.status !== 'Archived');
+      if (foundInCatalog) {
+        onNavigate('inventory', { openProduct: prodName });
+      } else {
+        if (typeof toast !== 'undefined' && toast.show) {
+          toast.show({ message: `Product "${prodName}" is archived or no longer in active stock.`, type: 'info' });
+        }
+      }
     });
   });
 
@@ -4665,18 +5489,21 @@ function getProductStockStatus(product, customThreshold) {
     };
   }
 
-  if (product.status === 'Inactive') {
+  if (product.status === 'Archived' || product.status === 'Inactive') {
+    const actStock = Array.isArray(product.variants) && product.variants.length > 0
+      ? product.variants.reduce((sum, v) => sum + Math.max(0, Number(v.stock) || 0), 0)
+      : Math.max(0, Number(product.totalStock || product.stock || 0));
     return {
-      status: 'Inactive',
-      label: 'Inactive',
+      status: product.status,
+      label: product.status,
       variant: 'secondary',
-      totalStock: 0,
+      totalStock: actStock,
       hasSizes: false,
-      totalSizes: 0,
-      availableSizes: 0,
-      outOfStockSizes: 0,
+      totalSizes: Array.isArray(product.variants) ? product.variants.length : 0,
+      availableSizes: Array.isArray(product.variants) ? product.variants.filter(v => (Number(v.stock) || 0) > 0).length : 0,
+      outOfStockSizes: Array.isArray(product.variants) ? product.variants.filter(v => (Number(v.stock) || 0) === 0).length : 0,
       lowStockSizes: 0,
-      stockSummary: 'Inactive'
+      stockSummary: `${product.status} (${actStock} units)`
     };
   }
 
@@ -6375,14 +7202,19 @@ function renderInventory(params = {}, onNavigate = null) {
       if (deleteInvBtn) {
         deleteInvBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const confirmed = confirm(`Are you sure you want to delete "${p.name}" (${p.id})?\n\nThis will remove the product and all its size variants from inventory.`);
+          const hasHistory = (store.data.sales || []).some(s => (s.items || []).some(it => it.productId === p.id || (it.product && it.product.trim().toLowerCase() === p.name.trim().toLowerCase()))) ||
+                             (store.data.purchases || []).some(po => (po.items || []).some(it => it.productId === p.id || (it.product && it.product.trim().toLowerCase() === p.name.trim().toLowerCase())));
+          const confirmMsg = hasHistory
+            ? `Are you sure you want to delete "${p.name}" (${p.id})?\n\nThis product has transaction history. It will be safely archived to preserve financial records and stock reconciliation, and will no longer be available for new sales.`
+            : `Are you sure you want to delete "${p.name}" (${p.id})?\n\nThis will remove the product and all its size variants from inventory.`;
+          const confirmed = confirm(confirmMsg);
           if (confirmed) {
             try {
               if (expandedProductIds.has(p.id)) {
                 expandedProductIds.delete(p.id);
               }
               store.deleteProduct(p.id);
-              toast.show({ message: `Product "${p.name}" deleted successfully.`, type: 'info' });
+              toast.show({ message: hasHistory ? `Product "${p.name}" archived successfully.` : `Product "${p.name}" deleted successfully.`, type: 'info' });
               renderInventoryTable();
             } catch (err) {
               toast.show({ message: err.message, type: 'danger' });
@@ -7179,6 +8011,10 @@ function renderPurchases(params = {}, onNavigate = null) {
               <i data-lucide="package-check"></i>
               <span class="sr-only">Receive Purchase</span>
             </button>
+            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
+              <i data-lucide="trash-2"></i>
+              <span class="sr-only">Delete</span>
+            </button>
           </div>
         `;
       } else if (status === 'Partially Received') {
@@ -7188,6 +8024,14 @@ function renderPurchases(params = {}, onNavigate = null) {
               <i data-lucide="package-check"></i>
               <span class="sr-only">Receive Remaining</span>
             </button>
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
+              <i data-lucide="eye"></i>
+              <span class="sr-only">View</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
+              <i data-lucide="trash-2"></i>
+              <span class="sr-only">Delete</span>
+            </button>
           </div>
         `;
       } else {
@@ -7196,6 +8040,10 @@ function renderPurchases(params = {}, onNavigate = null) {
             <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
               <i data-lucide="eye"></i>
               <span class="sr-only">View</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
+              <i data-lucide="trash-2"></i>
+              <span class="sr-only">Delete</span>
             </button>
           </div>
         `;
@@ -7251,13 +8099,18 @@ Status will change to Approved. Stock will remain unchanged until goods are rece
       if (deleteBtn) {
         deleteBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          const confirmed = confirm(`Delete draft purchase order ${p.id}?
-
-This action cannot be undone.`);
+          const hasReceived = (p.totalReceived > 0) || (p.status === 'Received' || p.status === 'Partially Received' || p.status === 'Completed');
+          let confirmMsg = `Delete purchase order ${p.id}?`;
+          if (hasReceived) {
+            confirmMsg = `Are you sure you want to delete purchase order ${p.id} from "${p.supplier || 'Supplier'}"?\n\nThis order has received stock. Deleting it will reverse the received quantities from inventory and log stock reversal movements.\n\nThis action cannot be undone.`;
+          } else {
+            confirmMsg = `Are you sure you want to delete purchase order ${p.id}?\n\nThis action cannot be undone.`;
+          }
+          const confirmed = confirm(confirmMsg);
           if (confirmed) {
             try {
-              store.deleteDraftPurchase(p.id);
-              toast.show({ message: `Draft purchase ${p.id} deleted.`, type: 'info' });
+              store.deletePurchase(p.id);
+              toast.show({ message: `Purchase order ${p.id} deleted.`, type: 'info' });
               renderPurchasesTable();
             } catch (err) {
               toast.show({ message: err.message, type: 'danger' });
@@ -7664,7 +8517,9 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
         <button type="button" class="btn btn-ghost modal-delete-btn" style="color: var(--status-danger);">Delete Draft</button>
         <button type="button" class="btn btn-secondary modal-edit-btn">Edit Draft</button>
         <button type="button" class="btn btn-primary modal-approve-btn">Approve Purchase</button>
-      ` : ''}
+      ` : `
+        <button type="button" class="btn btn-ghost modal-delete-btn" style="color: var(--status-danger);">Delete Purchase</button>
+      `}
 
       ${status === 'Approved' ? `
         <button type="button" class="btn btn-primary modal-receive-btn">
@@ -7715,12 +8570,23 @@ Stock will remain unchanged until goods are received.`);
   const modalDeleteBtn = modalBox.querySelector('.modal-delete-btn');
   if (modalDeleteBtn) {
     modalDeleteBtn.addEventListener('click', () => {
-      const confirmed = confirm(`Delete draft purchase ${purchase.id}?`);
+      const hasReceived = (purchase.totalReceived > 0) || (purchase.status === 'Received' || purchase.status === 'Partially Received' || purchase.status === 'Completed');
+      let confirmMsg = `Delete purchase order ${purchase.id}?`;
+      if (hasReceived) {
+        confirmMsg = `Are you sure you want to delete purchase order ${purchase.id} from "${purchase.supplier || 'Supplier'}"?\n\nThis order has received stock. Deleting it will reverse the received quantities from inventory and log stock reversal movements.\n\nThis action cannot be undone.`;
+      } else {
+        confirmMsg = `Are you sure you want to delete purchase order ${purchase.id}?\n\nThis action cannot be undone.`;
+      }
+      const confirmed = confirm(confirmMsg);
       if (confirmed) {
-        store.deleteDraftPurchase(purchase.id);
-        toast.show({ message: `Draft ${purchase.id} deleted.`, type: 'info' });
-        closeModal();
-        if (onRefresh) onRefresh();
+        try {
+          store.deletePurchase(purchase.id);
+          toast.show({ message: `Purchase ${purchase.id} deleted.`, type: 'info' });
+          closeModal();
+          if (onRefresh) onRefresh();
+        } catch (err) {
+          toast.show({ message: err.message, type: 'danger' });
+        }
       }
     });
   }
@@ -8707,6 +9573,10 @@ function renderSales(params = {}, onNavigate = null) {
               <i data-lucide="eye"></i>
               <span class="sr-only">View</span>
             </button>
+            <button type="button" class="btn btn-sm btn-ghost table-action-btn delete-sale-btn" data-sale-id="${s.id || ''}" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
+              <i data-lucide="trash-2"></i>
+              <span class="sr-only">Delete</span>
+            </button>
           </div>
         </td>
       `;
@@ -8721,6 +9591,23 @@ function renderSales(params = {}, onNavigate = null) {
         e.stopPropagation();
         openSaleDetailsModal(s);
       });
+
+      const deleteSaleBtn = tr.querySelector('.delete-sale-btn');
+      if (deleteSaleBtn) {
+        deleteSaleBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const confirmed = confirm(`Are you sure you want to delete sale "${saleRef}"?\n\nThis will restore deducted inventory quantities and recalculate customer metrics.\n\nThis action cannot be undone.`);
+          if (confirmed) {
+            try {
+              store.deleteSale(s.id);
+              toast.show({ message: `Sale ${saleRef} deleted successfully.`, type: 'info' });
+              renderSalesTable();
+            } catch (err) {
+              toast.show({ message: err.message, type: 'danger' });
+            }
+          }
+        });
+      }
 
       tbody.appendChild(tr);
     });
@@ -8832,7 +9719,7 @@ function renderAddSalePage(onNavigate = null) {
   }
 
   function createProductGroup(defaultProductId = null) {
-    const prods = store.data.products || [];
+    const prods = (store.data.products || []).filter(p => p && p.status !== 'Archived' && p.status !== 'Inactive');
     let p = null;
     if (defaultProductId) {
       p = prods.find(x => x.id === defaultProductId);
@@ -9039,7 +9926,7 @@ function renderAddSalePage(onNavigate = null) {
 
   function renderSaleItems() {
     itemsContainer.innerHTML = '';
-    const prods = store.data.products || [];
+    const prods = (store.data.products || []).filter(p => p && p.status !== 'Archived' && p.status !== 'Inactive');
     const brands = Array.from(
       new Set(prods.map(p => (p.brand || '').trim()).filter(Boolean))
     ).sort((a, b) => a.localeCompare(b));
@@ -9703,8 +10590,10 @@ function openCustomerDetailsModal(customer, onNavigate = null) {
 
   // Customer sales history
   const customerSales = (store.data.sales || []).filter(s => {
-    const cust = (s.customer || s.customerName || '').toLowerCase();
-    return cust === (customer.name || '').toLowerCase();
+    const isIdMatch = s.customerId && customer.id && s.customerId === customer.id;
+    const isNameMatch = (s.customer || s.customerName || '').toLowerCase() === (customer.name || '').toLowerCase();
+    const isPhoneMatch = customer.phone && customer.phone !== '-' && s.phone === customer.phone;
+    return isIdMatch || isNameMatch || isPhoneMatch;
   });
 
   const innerContent = document.createElement('div');
@@ -9829,9 +10718,12 @@ function openEditCustomerModal(customer, onSaved = null) {
         </div>
       </div>
 
-      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-        <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
-        <button type="button" class="btn btn-primary save-modal-btn">Save Changes</button>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+        <button type="button" class="btn btn-ghost delete-modal-cust-btn" style="color: var(--status-danger);">Delete Customer</button>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" class="btn btn-secondary cancel-modal-btn">Cancel</button>
+          <button type="button" class="btn btn-primary save-modal-btn">Save Changes</button>
+        </div>
       </div>
     </div>
   `;
@@ -9843,6 +10735,23 @@ function openEditCustomerModal(customer, onSaved = null) {
   modal.querySelector('.modal-close-btn').onclick = closeModal;
   modal.querySelector('.cancel-modal-btn').onclick = closeModal;
 
+  const deleteModalCustBtn = modal.querySelector('.delete-modal-cust-btn');
+  if (deleteModalCustBtn) {
+    deleteModalCustBtn.onclick = () => {
+      const confirmed = confirm(`Are you sure you want to delete customer "${customer.name}" (${customer.id})?\n\nTheir past sales records will be preserved for store reporting.\n\nThis action cannot be undone.`);
+      if (confirmed) {
+        try {
+          store.deleteCustomer(customer.id);
+          toast.show({ message: `Customer "${customer.name}" deleted successfully.`, type: 'info' });
+          closeModal();
+          if (onSaved) onSaved();
+        } catch (err) {
+          toast.show({ message: err.message, type: 'danger' });
+        }
+      }
+    };
+  }
+
   modal.querySelector('.save-modal-btn').onclick = () => {
     const name = modal.querySelector('#edit-cust-name').value.trim();
     const phone = modal.querySelector('#edit-cust-phone').value.trim();
@@ -9852,8 +10761,21 @@ function openEditCustomerModal(customer, onSaved = null) {
       return;
     }
 
+    const oldName = customer.name;
     customer.name = name;
     customer.phone = phone || '-';
+
+    // Synchronize customer name across sales linked by ID or previous name
+    (store.data.sales || []).forEach(s => {
+      if (s.customerId === customer.id || (!s.customerId && (s.customer || s.customerName || '').toLowerCase() === oldName.toLowerCase())) {
+        s.customerId = customer.id;
+        s.customer = customer.name;
+        s.customerName = customer.name;
+        if (customer.phone && customer.phone !== '-') s.phone = customer.phone;
+      }
+    });
+
+    store.recalculateCustomerMetrics();
     store.save();
 
     toast.show({ message: `Customer details updated for ${name}.`, type: 'success' });
@@ -10020,6 +10942,10 @@ function renderCustomers(onNavigate = null) {
               <i data-lucide="pencil"></i>
               <span class="sr-only">Edit</span>
             </button>
+            <button type="button" class="btn btn-sm btn-ghost table-action-btn delete-cust-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
+              <i data-lucide="trash-2"></i>
+              <span class="sr-only">Delete</span>
+            </button>
           </div>
         </td>
       `;
@@ -10039,6 +10965,23 @@ function renderCustomers(onNavigate = null) {
         e.stopPropagation();
         openEditCustomerModal(c, () => renderCustomersTable());
       });
+
+      const deleteCustBtn = tr.querySelector('.delete-cust-btn');
+      if (deleteCustBtn) {
+        deleteCustBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const confirmed = confirm(`Are you sure you want to delete customer "${c.name}" (${c.id})?\n\nTheir past sales records will be preserved for store reporting.\n\nThis action cannot be undone.`);
+          if (confirmed) {
+            try {
+              store.deleteCustomer(c.id);
+              toast.show({ message: `Customer "${c.name}" deleted successfully.`, type: 'info' });
+              renderCustomersTable();
+            } catch (err) {
+              toast.show({ message: err.message, type: 'danger' });
+            }
+          }
+        });
+      }
 
       tbody.appendChild(tr);
     });
@@ -10143,51 +11086,41 @@ function renderReports(onNavigate = null) {
   const purchases = data.purchases || [];
   const customers = data.customers || [];
 
-  // Map products for accurate unit cost lookup (no dummy multipliers or estimations)
-  const prodCostMap = {};
-  products.forEach(p => {
-    if (p) {
-      if (p.id) prodCostMap[p.id] = Number(p.purchasePrice || p.buyingPrice || 0);
-      if (p.name) prodCostMap[p.name.toLowerCase().trim()] = Number(p.purchasePrice || p.buyingPrice || 0);
-    }
-  });
-
-  let totalRevenue = 0;
-  let totalCogs = 0;
-  let qualifyingSalesCount = 0;
-  let totalUnitsSold = 0;
-
-  sales.forEach(s => {
-    if (s && s.status !== 'Cancelled' && s.status !== 'Failed') {
-      qualifyingSalesCount++;
-      totalRevenue += Number(s.totalAmount || 0);
-
-      (s.items || []).forEach(item => {
-        const itemQty = Number(item.qty || 1) || 1;
-        totalUnitsSold += itemQty;
-
-        let unitCost = 0;
-        if (item.productId && prodCostMap[item.productId] !== undefined) {
-          unitCost = prodCostMap[item.productId];
-        } else if (item.product && prodCostMap[item.product.toLowerCase().trim()] !== undefined) {
-          unitCost = prodCostMap[item.product.toLowerCase().trim()];
-        } else if (item.purchasePrice !== undefined) {
-          unitCost = Number(item.purchasePrice) || 0;
-        } else if (item.buyingPrice !== undefined) {
-          unitCost = Number(item.buyingPrice) || 0;
-        } else {
-          const found = products.find(p => p && (p.id === item.productId || (p.name && p.name.toLowerCase().trim() === (item.product || '').toLowerCase().trim())));
-          unitCost = found ? Number(found.purchasePrice || found.buyingPrice || 0) : 0;
-        }
-        totalCogs += itemQty * unitCost;
-      });
-    }
-  });
-
-  const grossProfit = Math.max(0, totalRevenue - totalCogs);
-  const marginPct = totalRevenue > 0 ? ((grossProfit / totalRevenue) * 100).toFixed(1) : '0.0';
+  const totalRevenue = metrics.totalRevenue;
+  const totalCogs = metrics.totalCogs;
+  const grossProfit = metrics.grossProfit;
+  const marginPct = metrics.marginPct;
+  const qualifyingSalesCount = metrics.qualifyingSalesCount || metrics.salesCount;
+  const totalUnitsSold = metrics.totalUnitsSold || 0;
   const totalPurchases = metrics.totalPurchases || 0;
   const stockValue = metrics.stockValue || 0;
+
+  // Real-time verification assertions across all modules
+  const qualSales = sales.filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed' && s.status !== 'Draft');
+  const actualSalesRev = qualSales.reduce((sum, s) => sum + Number(s.totalAmount || 0), 0);
+  const isSalesReconciled = totalRevenue === actualSalesRev;
+
+  const isCogsReconciled = !metrics.hasMissingCosts;
+  const isProfitReconciled = isCogsReconciled && (grossProfit === Math.max(0, totalRevenue - totalCogs));
+
+  const actualTotalStock = products.reduce((sum, p) => sum + (p.variants || []).reduce((vSum, v) => vSum + Number(v.stock || 0), 0), 0);
+  const isStockReconciled = metrics.totalStock === actualTotalStock;
+
+  const isPurchasesReconciled = typeof metrics.purchasesUnitsReceived === 'number' && !isNaN(metrics.purchasesUnitsReceived);
+
+  const regCustSpend = customers.reduce((s, c) => s + (c.totalSpend || 0), 0);
+  const walkInRev = qualSales.filter(s => {
+    const isReg = customers.some(c => (s.customerId && s.customerId === c.id) || (!s.customerId && (s.customer || s.customerName || '').toLowerCase() === c.name.toLowerCase()));
+    return !isReg;
+  }).reduce((sum, s) => sum + Number(s.totalAmount || 0), 0);
+  const isCustomerReconciled = (regCustSpend + walkInRev) === totalRevenue;
+
+  function renderReconBadge(isOk, okText, failText) {
+    if (isOk) {
+      return `<span class="badge badge-success"><i data-lucide="check-circle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>${okText}</span>`;
+    }
+    return `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3);"><i data-lucide="alert-triangle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>${failText}</span>`;
+  }
 
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
@@ -10254,37 +11187,37 @@ function renderReports(onNavigate = null) {
             <td style="font-weight: 600; color: var(--text-primary);">Sales Revenue</td>
             <td>${qualifyingSalesCount} Qualifying Orders (${totalUnitsSold} Units)</td>
             <td style="font-weight: 700; color: var(--text-primary);">₹${totalRevenue.toLocaleString('en-IN')}</td>
-            <td><span class="badge badge-success"><i data-lucide="check-circle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>Reconciled with Sales Page</span></td>
+            <td>${renderReconBadge(isSalesReconciled, 'Reconciled with Sales Page', 'Discrepancy Detected')}</td>
           </tr>
           <tr>
             <td style="font-weight: 600; color: var(--text-primary);">Cost of Goods Sold (COGS)</td>
             <td>${qualifyingSalesCount} Orders (${totalUnitsSold} Units Sold)</td>
             <td style="font-weight: 700; color: var(--text-primary);">₹${totalCogs.toLocaleString('en-IN')}</td>
-            <td><span class="badge badge-success"><i data-lucide="check-circle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>Exact Purchase Cost Lookup</span></td>
+            <td>${renderReconBadge(isCogsReconciled, 'Exact Purchase Cost Lookup', 'Unmapped Cost Detected (' + (metrics.missingCostsCount || 0) + ' items)')}</td>
           </tr>
           <tr>
             <td style="font-weight: 600; color: var(--text-primary);">Gross Profit</td>
             <td>${marginPct}% Margin</td>
             <td style="font-weight: 700; color: var(--status-success);">₹${grossProfit.toLocaleString('en-IN')}</td>
-            <td><span class="badge badge-success"><i data-lucide="check-circle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>Verified (Revenue − COGS)</span></td>
+            <td>${renderReconBadge(isProfitReconciled, 'Verified (Revenue − COGS)', 'Provisional (Pending Cost Review)')}</td>
           </tr>
           <tr>
-            <td style="font-weight: 600; color: var(--text-primary);">Available Inventory Stock</td>
-            <td>${metrics.totalProducts} Products / ${metrics.totalStock} Units</td>
+            <td style="font-weight: 600; color: var(--text-primary);">Physical Inventory Stock</td>
+            <td>${metrics.totalProducts} Products (${metrics.activeStock} Active · ${metrics.archivedStock} Archived)</td>
             <td style="font-weight: 700; color: var(--text-primary);">₹${stockValue.toLocaleString('en-IN')}</td>
-            <td><span class="badge badge-success"><i data-lucide="check-circle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>Matches Inventory Size Variants</span></td>
+            <td>${renderReconBadge(isStockReconciled, 'Matches Physical Stock (' + metrics.totalStock + ' Units)', 'Stock Variant Mismatch')}</td>
           </tr>
           <tr>
             <td style="font-weight: 600; color: var(--text-primary);">Purchases / Stock In</td>
-            <td>${metrics.purchasesCount} Completed POs (${metrics.purchasesUnitsReceived} Units Rec.)</td>
+            <td>${metrics.purchasesCompletedCount} Completed POs (${metrics.purchasesUnitsReceived} Units Rec.)</td>
             <td style="font-weight: 700; color: var(--text-primary);">₹${totalPurchases.toLocaleString('en-IN')}</td>
-            <td><span class="badge badge-success"><i data-lucide="check-circle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>Reconciled with Purchases Page</span></td>
+            <td>${renderReconBadge(isPurchasesReconciled, 'Reconciled with Purchases Page', 'Received Units Discrepancy')}</td>
           </tr>
           <tr>
             <td style="font-weight: 600; color: var(--text-primary);">Registered Customers</td>
             <td>${customers.length} Unique Customers</td>
-            <td style="font-weight: 700; color: var(--brand-primary);">₹${customers.reduce((s, c) => s + (c.totalSpend || 0), 0).toLocaleString('en-IN')}</td>
-            <td><span class="badge badge-success"><i data-lucide="check-circle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>Reconciled Customer Billing</span></td>
+            <td style="font-weight: 700; color: var(--brand-primary);">₹${regCustSpend.toLocaleString('en-IN')}</td>
+            <td>${renderReconBadge(isCustomerReconciled, 'Reconciled Customer Billing', 'Customer & Walk-in Discrepancy')}</td>
           </tr>
         </tbody>
       </table>
@@ -10427,6 +11360,137 @@ function renderSettings(onThemeToggle, onNavigate = null) {
   });
 
   container.appendChild(invSettingsCard);
+
+  // SHARED STORE CONFIGURATION CARD (Categories, Brands, Sizes)
+  const configCard = document.createElement('div');
+  configCard.className = 'card';
+  configCard.style.marginTop = '1.25rem';
+  const categoriesList = store.getCategories();
+  const brandsList = store.getBrands();
+  const sizesList = store.getSizes();
+
+  configCard.innerHTML = `
+    <div style="padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1.25rem;">
+      <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+        <i data-lucide="tag" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Store & Catalog Configuration
+      </h3>
+      <p style="font-size: 0.78rem; color: var(--text-secondary); margin: 0;">Shared categories, brands, and size attributes used across Inventory, Purchases, and Sales.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem;">
+      <!-- Categories -->
+      <div style="display: flex; flex-direction: column; gap: 0.65rem;">
+        <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Categories (${categoriesList.length})</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-categories-list">
+          ${categoriesList.map(c => `<span class="badge badge-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.55rem;">${c}</span>`).join('')}
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
+          <input type="text" id="add-category-input" class="form-input" placeholder="New category..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-category">Add</button>
+        </div>
+      </div>
+
+      <!-- Brands -->
+      <div style="display: flex; flex-direction: column; gap: 0.65rem;">
+        <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Brands (${brandsList.length})</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-brands-list">
+          ${brandsList.map(b => `<span class="badge badge-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.55rem;">${b}</span>`).join('')}
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
+          <input type="text" id="add-brand-input" class="form-input" placeholder="New brand..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-brand">Add</button>
+        </div>
+      </div>
+
+      <!-- Sizes -->
+      <div style="display: flex; flex-direction: column; gap: 0.65rem;">
+        <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Sizes (${sizesList.length})</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-sizes-list">
+          ${sizesList.map(s => `<span class="badge badge-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.55rem; font-weight: 600;">${s}</span>`).join('')}
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
+          <input type="text" id="add-size-input" class="form-input" placeholder="e.g. XXL, 42..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-size">Add</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  configCard.querySelector('#btn-add-category').addEventListener('click', () => {
+    const inp = configCard.querySelector('#add-category-input');
+    const val = inp.value.trim();
+    if (val && store.addCategory(val)) {
+      inp.value = '';
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Category "${val}" added.`, type: 'success' });
+      if (window.appInstance) window.appInstance.render();
+    }
+  });
+
+  configCard.querySelector('#btn-add-brand').addEventListener('click', () => {
+    const inp = configCard.querySelector('#add-brand-input');
+    const val = inp.value.trim();
+    if (val && store.addBrand(val)) {
+      inp.value = '';
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Brand "${val}" added.`, type: 'success' });
+      if (window.appInstance) window.appInstance.render();
+    }
+  });
+
+  configCard.querySelector('#btn-add-size').addEventListener('click', () => {
+    const inp = configCard.querySelector('#add-size-input');
+    const val = inp.value.trim();
+    if (val && store.addSize(val)) {
+      inp.value = '';
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Size "${val}" added.`, type: 'success' });
+      if (window.appInstance) window.appInstance.render();
+    }
+  });
+
+  container.appendChild(configCard);
+
+  // DATABASE / DATA MANAGEMENT SECTION
+  const dbCard = document.createElement('div');
+  dbCard.className = 'card';
+  dbCard.style.marginTop = '1.25rem';
+  dbCard.innerHTML = `
+    <div style="padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1.25rem;">
+      <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+        <i data-lucide="database" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Database & Data Management
+      </h3>
+      <p style="font-size: 0.78rem; color: var(--text-secondary); margin: 0;">Reset the database to test the end-to-end workflow from an empty store, or restore sample demo records.</p>
+    </div>
+
+    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-db" style="border-color: #ef4444; color: #ef4444; font-weight: 600; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem;">
+        <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+        Clear Database (Empty Store)
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-restore-demo" style="font-weight: 600; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem;">
+        <i data-lucide="rotate-ccw" style="width: 15px; height: 15px;"></i>
+        Restore Sample Demo Data
+      </button>
+    </div>
+  `;
+
+  dbCard.querySelector('#btn-clear-db').addEventListener('click', () => {
+    store.clearDatabase();
+    if (typeof toast !== 'undefined' && toast.show) {
+      toast.show({ message: 'Database cleared! Products, purchases, and sales are now empty.', type: 'success' });
+    }
+    if (window.appInstance) window.appInstance.render();
+  });
+
+  dbCard.querySelector('#btn-restore-demo').addEventListener('click', () => {
+    store.loadSampleData();
+    if (typeof toast !== 'undefined' && toast.show) {
+      toast.show({ message: 'Sample demo data restored successfully.', type: 'success' });
+    }
+    if (window.appInstance) window.appInstance.render();
+  });
+
+  container.appendChild(dbCard);
 
   if (window.lucide) window.lucide.createIcons();
   return container;
