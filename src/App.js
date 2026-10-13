@@ -1468,6 +1468,19 @@ class StoreManager {
     this.listeners = [];
   }
 
+  loadFromStorage() {
+    try {
+      const saved = localStorage.getItem('master_web_admin_data_v3');
+      if (saved) {
+        this.data = JSON.parse(saved);
+        this.migrateAndRepairData();
+      }
+    } catch (e) {
+      console.error('Error loading from storage:', e);
+    }
+    return this.data;
+  }
+
   migrateAndRepairData() {
     if (!this.data || typeof this.data !== 'object') return;
     if (!Array.isArray(this.data.products)) this.data.products = [];
@@ -1778,7 +1791,7 @@ class StoreManager {
   }
 
   getCategories() {
-    const list = this.data.categories || [];
+    const list = Array.isArray(this.data.categories) ? this.data.categories : [];
     const fromProds = (this.data.products || []).map(p => p.category).filter(Boolean);
     return Array.from(new Set([...list, ...fromProds])).sort();
   }
@@ -1787,15 +1800,104 @@ class StoreManager {
     const clean = (category || '').trim();
     if (!clean) return false;
     if (!Array.isArray(this.data.categories)) this.data.categories = [];
-    if (!this.data.categories.some(c => c.toLowerCase() === clean.toLowerCase())) {
-      this.data.categories.push(clean);
-      this.save();
+    if (this.data.categories.some(c => c.toLowerCase() === clean.toLowerCase())) {
+      return false;
     }
+    this.data.categories.push(clean);
+    this.save();
+    this.notify();
     return true;
   }
 
+  checkCategoryUsage(category) {
+    const clean = (category || '').trim();
+    if (!clean) return { inUse: false, count: 0, details: '', summary: '' };
+    const lower = clean.toLowerCase();
+
+    // 1. Check products
+    const products = (this.data.products || []).filter(p => {
+      const pCat = (p.category || '').trim().toLowerCase();
+      return pCat === lower;
+    });
+
+    // 2. Check purchases
+    const purchases = (this.data.purchases || []).filter(pur => {
+      return (pur.items || []).some(it => {
+        if (it.category && it.category.trim().toLowerCase() === lower) return true;
+        if (it.productId) {
+          const matchedProd = (this.data.products || []).find(p => p.id === it.productId);
+          if (matchedProd && (matchedProd.category || '').trim().toLowerCase() === lower) return true;
+        }
+        if (it.product) {
+          const matchedProd = (this.data.products || []).find(p => p.name && p.name.trim().toLowerCase() === it.product.trim().toLowerCase());
+          if (matchedProd && (matchedProd.category || '').trim().toLowerCase() === lower) return true;
+        }
+        return false;
+      });
+    });
+
+    // 3. Check sales
+    const sales = (this.data.sales || []).filter(sale => {
+      return (sale.items || []).some(it => {
+        if (it.category && it.category.trim().toLowerCase() === lower) return true;
+        if (it.productId) {
+          const matchedProd = (this.data.products || []).find(p => p.id === it.productId);
+          if (matchedProd && (matchedProd.category || '').trim().toLowerCase() === lower) return true;
+        }
+        if (it.product) {
+          const matchedProd = (this.data.products || []).find(p => p.name && p.name.trim().toLowerCase() === it.product.trim().toLowerCase());
+          if (matchedProd && (matchedProd.category || '').trim().toLowerCase() === lower) return true;
+        }
+        return false;
+      });
+    });
+
+    const parts = [];
+    if (products.length > 0) {
+      const prodNames = products.slice(0, 3).map(p => `"${p.name}"`).join(', ');
+      const more = products.length > 3 ? ` and ${products.length - 3} more` : '';
+      parts.push(`${products.length} product(s) (${prodNames}${more})`);
+    }
+    if (purchases.length > 0) {
+      parts.push(`${purchases.length} purchase record(s)`);
+    }
+    if (sales.length > 0) {
+      parts.push(`${sales.length} sales record(s)`);
+    }
+
+    const inUse = parts.length > 0;
+    return {
+      inUse,
+      count: products.length + purchases.length + sales.length,
+      productsCount: products.length,
+      purchasesCount: purchases.length,
+      salesCount: sales.length,
+      details: parts.join(', '),
+      summary: `${products.length} product(s), ${purchases.length} purchase(s), ${sales.length} sale(s)`
+    };
+  }
+
+  deleteCategory(category) {
+    const clean = (category || '').trim();
+    if (!clean) return { success: false, error: 'Category name is required.' };
+    const usage = this.checkCategoryUsage(clean);
+    if (usage.inUse) {
+      return {
+        success: false,
+        inUse: true,
+        usage,
+        error: `Cannot delete category "${clean}" because it is currently used by ${usage.details}. Deactivate or archive associated products instead.`
+      };
+    }
+    const beforeCount = (this.data.categories || []).length;
+    this.data.categories = (this.data.categories || []).filter(c => c.trim().toLowerCase() !== clean.toLowerCase());
+    this.save();
+    this.notify();
+    return { success: true, removed: beforeCount !== this.data.categories.length };
+  }
+
   getBrands() {
-    const list = this.data.brands || [];
+    const list = Array.isArray(this.data.brands) ? this.data.brands : [];
     const fromProds = (this.data.products || []).map(p => p.brand).filter(Boolean);
     return Array.from(new Set([...list, ...fromProds])).sort();
   }
@@ -1804,15 +1906,104 @@ class StoreManager {
     const clean = (brand || '').trim();
     if (!clean) return false;
     if (!Array.isArray(this.data.brands)) this.data.brands = [];
-    if (!this.data.brands.some(b => b.toLowerCase() === clean.toLowerCase())) {
-      this.data.brands.push(clean);
-      this.save();
+    if (this.data.brands.some(b => b.toLowerCase() === clean.toLowerCase())) {
+      return false;
     }
+    this.data.brands.push(clean);
+    this.save();
+    this.notify();
     return true;
   }
 
+  checkBrandUsage(brand) {
+    const clean = (brand || '').trim();
+    if (!clean) return { inUse: false, count: 0, details: '', summary: '' };
+    const lower = clean.toLowerCase();
+
+    // 1. Check products
+    const products = (this.data.products || []).filter(p => {
+      const pBrand = (p.brand || '').trim().toLowerCase();
+      return pBrand === lower;
+    });
+
+    // 2. Check purchases
+    const purchases = (this.data.purchases || []).filter(pur => {
+      return (pur.items || []).some(it => {
+        if (it.brand && it.brand.trim().toLowerCase() === lower) return true;
+        if (it.productId) {
+          const matchedProd = (this.data.products || []).find(p => p.id === it.productId);
+          if (matchedProd && (matchedProd.brand || '').trim().toLowerCase() === lower) return true;
+        }
+        if (it.product) {
+          const matchedProd = (this.data.products || []).find(p => p.name && p.name.trim().toLowerCase() === it.product.trim().toLowerCase());
+          if (matchedProd && (matchedProd.brand || '').trim().toLowerCase() === lower) return true;
+        }
+        return false;
+      });
+    });
+
+    // 3. Check sales
+    const sales = (this.data.sales || []).filter(sale => {
+      return (sale.items || []).some(it => {
+        if (it.brand && it.brand.trim().toLowerCase() === lower) return true;
+        if (it.productId) {
+          const matchedProd = (this.data.products || []).find(p => p.id === it.productId);
+          if (matchedProd && (matchedProd.brand || '').trim().toLowerCase() === lower) return true;
+        }
+        if (it.product) {
+          const matchedProd = (this.data.products || []).find(p => p.name && p.name.trim().toLowerCase() === it.product.trim().toLowerCase());
+          if (matchedProd && (matchedProd.brand || '').trim().toLowerCase() === lower) return true;
+        }
+        return false;
+      });
+    });
+
+    const parts = [];
+    if (products.length > 0) {
+      const prodNames = products.slice(0, 3).map(p => `"${p.name}"`).join(', ');
+      const more = products.length > 3 ? ` and ${products.length - 3} more` : '';
+      parts.push(`${products.length} product(s) (${prodNames}${more})`);
+    }
+    if (purchases.length > 0) {
+      parts.push(`${purchases.length} purchase record(s)`);
+    }
+    if (sales.length > 0) {
+      parts.push(`${sales.length} sales record(s)`);
+    }
+
+    const inUse = parts.length > 0;
+    return {
+      inUse,
+      count: products.length + purchases.length + sales.length,
+      productsCount: products.length,
+      purchasesCount: purchases.length,
+      salesCount: sales.length,
+      details: parts.join(', '),
+      summary: `${products.length} product(s), ${purchases.length} purchase(s), ${sales.length} sale(s)`
+    };
+  }
+
+  deleteBrand(brand) {
+    const clean = (brand || '').trim();
+    if (!clean) return { success: false, error: 'Brand name is required.' };
+    const usage = this.checkBrandUsage(clean);
+    if (usage.inUse) {
+      return {
+        success: false,
+        inUse: true,
+        usage,
+        error: `Cannot delete brand "${clean}" because it is currently used by ${usage.details}. Deactivate or archive associated products instead.`
+      };
+    }
+    const beforeCount = (this.data.brands || []).length;
+    this.data.brands = (this.data.brands || []).filter(b => b.trim().toLowerCase() !== clean.toLowerCase());
+    this.save();
+    this.notify();
+    return { success: true, removed: beforeCount !== this.data.brands.length };
+  }
+
   getSizes() {
-    const list = this.data.sizes || ['S', 'M', 'L', 'XL'];
+    const list = Array.isArray(this.data.sizes) ? this.data.sizes : [];
     const fromProds = [];
     (this.data.products || []).forEach(p => {
       (p.variants || []).forEach(v => {
@@ -1823,14 +2014,109 @@ class StoreManager {
   }
 
   addSize(size) {
-    const clean = (size || '').trim().toUpperCase();
+    const clean = (size || '').trim();
     if (!clean) return false;
+    const formatted = clean.length <= 4 ? clean.toUpperCase() : clean;
     if (!Array.isArray(this.data.sizes)) this.data.sizes = [];
-    if (!this.data.sizes.some(s => s.toUpperCase() === clean)) {
-      this.data.sizes.push(clean);
-      this.save();
+    if (this.data.sizes.some(s => s.toLowerCase() === clean.toLowerCase())) {
+      return false;
     }
+    this.data.sizes.push(formatted);
+    this.save();
+    this.notify();
     return true;
+  }
+
+  checkSizeUsage(size) {
+    const clean = (size || '').trim();
+    if (!clean) return { inUse: false, count: 0, details: '', summary: '' };
+    const cleanLower = clean.toLowerCase();
+
+    // 1. Check products & variants (including inventory)
+    const products = [];
+    let variantsCount = 0;
+    let stockCount = 0;
+    (this.data.products || []).forEach(p => {
+      const matchedVariants = (p.variants || []).filter(v => (v.size || '').trim().toLowerCase() === cleanLower);
+      if (matchedVariants.length > 0) {
+        products.push(p);
+        variantsCount += matchedVariants.length;
+        matchedVariants.forEach(v => {
+          stockCount += (Number(v.stock) || 0);
+        });
+      }
+    });
+
+    // 2. Check purchases
+    const purchases = (this.data.purchases || []).filter(pur => {
+      return (pur.items || []).some(it => {
+        if (it.size && it.size.trim().toLowerCase() === cleanLower) return true;
+        if (it.sku) {
+          const matchedProd = (this.data.products || []).find(p => (p.variants || []).some(v => v.sku === it.sku && (v.size || '').trim().toLowerCase() === cleanLower));
+          if (matchedProd) return true;
+          if (it.sku.toLowerCase().endsWith('-' + cleanLower)) return true;
+        }
+        return false;
+      });
+    });
+
+    // 3. Check sales
+    const sales = (this.data.sales || []).filter(sale => {
+      return (sale.items || []).some(it => {
+        if (it.size && it.size.trim().toLowerCase() === cleanLower) return true;
+        if (it.sku) {
+          const matchedProd = (this.data.products || []).find(p => (p.variants || []).some(v => v.sku === it.sku && (v.size || '').trim().toLowerCase() === cleanLower));
+          if (matchedProd) return true;
+          if (it.sku.toLowerCase().endsWith('-' + cleanLower)) return true;
+        }
+        return false;
+      });
+    });
+
+    const parts = [];
+    if (products.length > 0) {
+      const prodNames = products.slice(0, 3).map(p => `"${p.name}"`).join(', ');
+      const more = products.length > 3 ? ` and ${products.length - 3} more` : '';
+      parts.push(`${products.length} product(s) with ${stockCount} unit(s) in inventory (${prodNames}${more})`);
+    }
+    if (purchases.length > 0) {
+      parts.push(`${purchases.length} purchase record(s)`);
+    }
+    if (sales.length > 0) {
+      parts.push(`${sales.length} sales record(s)`);
+    }
+
+    const inUse = parts.length > 0;
+    return {
+      inUse,
+      count: products.length + purchases.length + sales.length,
+      productsCount: products.length,
+      variantsCount,
+      stockCount,
+      purchasesCount: purchases.length,
+      salesCount: sales.length,
+      details: parts.join(', '),
+      summary: `${products.length} product(s) (${stockCount} in stock), ${purchases.length} purchase(s), ${sales.length} sale(s)`
+    };
+  }
+
+  deleteSize(size) {
+    const clean = (size || '').trim();
+    if (!clean) return { success: false, error: 'Size name is required.' };
+    const usage = this.checkSizeUsage(clean);
+    if (usage.inUse) {
+      return {
+        success: false,
+        inUse: true,
+        usage,
+        error: `Cannot delete size "${clean}" because it is currently used by ${usage.details}. Deactivate or archive associated products instead.`
+      };
+    }
+    const beforeCount = (this.data.sizes || []).length;
+    this.data.sizes = (this.data.sizes || []).filter(s => s.trim().toLowerCase() !== clean.toLowerCase());
+    this.save();
+    this.notify();
+    return { success: true, removed: beforeCount !== this.data.sizes.length };
   }
 
   getLowStockThreshold() {
@@ -4402,8 +4688,8 @@ function renderAddProductPage(params = {}, onNavigate = null) {
   mainCard.className = 'card';
   mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
 
-  const catOptions = (store.data.categories || []).length > 0 ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
-  const brandOptions = (store.data.brands || []).length > 0 ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+  const catOptions = store.getCategories();
+  const brandOptions = store.getBrands();
 
   let isSubmitting = false;
 
@@ -5792,8 +6078,8 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     container.appendChild(summaryCard);
 
     // 3. SECTION 01 — Basic Information
-    const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
-    const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+    const catOptions = store.getCategories();
+    const brandOptions = store.getBrands();
 
     const sec1Card = document.createElement('div');
     sec1Card.className = 'card';
@@ -7359,8 +7645,8 @@ function openEditProductModal(product, onSaved) {
   modal.id = 'modal-edit-product';
   modal.className = 'modal-overlay active';
 
-  const catOptions = (store.data.categories && store.data.categories.length > 0) ? store.data.categories : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
-  const brandOptions = (store.data.brands && store.data.brands.length > 0) ? store.data.brands : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+  const catOptions = store.getCategories();
+  const brandOptions = store.getBrands();
   const hasSizes = Array.isArray(product.variants) && product.variants.length > 0 && product.variants.some(v => v.size !== 'Standard');
 
   let sizePricesHtml = '';
@@ -8633,26 +8919,23 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
 
   const supplierVal = editingPurchase
-    ? editingPurchase.supplier
-    : 'Apex Apparel Ltd';
+    ? (editingPurchase.supplier || '')
+    : '';
 
   const dateVal = editingPurchase
-    ? editingPurchase.date
-    : new Date().toISOString().split('T')[0];
+    ? (editingPurchase.date || '')
+    : '';
 
   const notesVal = editingPurchase
     ? (editingPurchase.notes || '')
     : '';
 
-  const standardSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size', 'Standard'];
+  const standardSizes = (store.getSizes && store.getSizes().length > 0)
+    ? store.getSizes()
+    : ['S', 'M', 'L', 'XL', 'Free Size', 'Standard'];
 
-  const categoriesList = (store.data.categories && store.data.categories.length > 0)
-    ? store.data.categories
-    : ['Shirts', 'T-Shirts', 'Jeans', 'Trousers', 'Hoodies', 'Accessories'];
-
-  const brandsList = (store.data.brands && store.data.brands.length > 0)
-    ? store.data.brands
-    : ['ClassicFit', 'UrbanWear', 'DenimCo', 'EssentialStudio'];
+  const categoriesList = store.getCategories();
+  const brandsList = store.getBrands();
 
   const productsList = store.data.products || [];
 
@@ -8661,7 +8944,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     const prodMap = new Map();
     editingPurchase.items.forEach(it => {
       const pName = it.product || it.productName || '';
-      const pCat = it.category || 'Shirts';
+      const pCat = it.category || '';
       const pBrand = it.brand || '';
       const pId = it.productId || '';
       const key = pId || `${pName.trim().toLowerCase()}:::${pBrand.trim().toLowerCase()}:::${pCat.trim().toLowerCase()}`;
@@ -8673,22 +8956,25 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           brand: pBrand,
           productId: pId,
           isCustomCategory: (pCat && !categoriesList.includes(pCat)),
+          isExpanded: prodMap.size === 0,
+          nameError: null,
           sizes: []
         });
       }
-      const isCustomSize = !standardSizes.includes(it.size || 'Standard');
+      const isCustomSize = Boolean(it.size && !standardSizes.includes(it.size));
       prodMap.get(key).sizes.push({
         id: 'size_' + Math.random().toString(36).substr(2, 9),
-        size: it.size || 'Standard',
-        qty: it.qty !== undefined ? it.qty : 50,
-        buyingPrice: it.buyingPrice !== undefined ? it.buyingPrice : 200,
-        sellingPrice: it.sellingPrice !== undefined ? it.sellingPrice : 400,
+        size: it.size || '',
+        qty: it.qty !== undefined ? it.qty : '',
+        buyingPrice: it.buyingPrice !== undefined ? it.buyingPrice : '',
+        sellingPrice: it.sellingPrice !== undefined ? it.sellingPrice : '',
         isCustomSize: isCustomSize
       });
     });
     productsData = Array.from(prodMap.values());
   }
 
+  // When creating a new purchase (or draft has no items), display exactly ONE empty product entry section by default
   if (productsData.length === 0) {
     productsData.push({
       id: 'prod_' + Date.now() + '_1',
@@ -8697,18 +8983,22 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       brand: '',
       productId: '',
       isCustomCategory: false,
+      isExpanded: true,
+      nameError: null,
       sizes: [
         {
           id: 'size_' + Date.now() + '_1',
-          size: 'M',
-          qty: 50,
-          buyingPrice: 200,
-          sellingPrice: 400,
+          size: '',
+          qty: '',
+          buyingPrice: '',
+          sellingPrice: '',
           isCustomSize: false
         }
       ]
     });
   }
+
+  let isSubmitting = false;
 
   mainCard.innerHTML = `
     <!-- Product & Brand Auto-suggest Datalists -->
@@ -8750,40 +9040,60 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             Product & Size-wise Items
           </h3>
           <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
-            Group purchase items by product. Enter product details once and add multiple size/variant entries.
+            Group purchase items by product. Expand cards to configure variants and prices, or collapse to focus on specific products.
           </p>
         </div>
       </div>
 
-      <!-- Items List Container -->
+      <!-- Items List Container (Accordion Cards) -->
       <div id="pur-items-container" style="display: flex; flex-direction: column; gap: 0.75rem;"></div>
 
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding-top: 0.5rem;">
-        <button type="button" id="btn-add-pur-product" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
+      <div style="display: flex; justify-content: flex-start; align-items: center; padding-top: 0.25rem; margin-bottom: 0.75rem;">
+        <button type="button" id="btn-add-pur-product" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600; border-color: var(--brand-primary); color: var(--brand-primary); background: transparent;">
           <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
           <span>Add Another Product</span>
         </button>
-
-        <div style="display: flex; gap: 1.5rem; font-size: 0.875rem; font-weight: 600; background: var(--bg-secondary); padding: 0.75rem 1.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); flex-wrap: wrap;">
-          <div>Total Units: <span id="pur-summary-qty" style="color: var(--text-primary); font-weight: 700;">0 units</span></div>
-          <div>Total Purchase Cost: <span id="pur-summary-cost" style="color: var(--brand-primary); font-weight: 700;">₹0</span></div>
-          <div>Est. Selling Value: <span id="pur-summary-sell" style="color: var(--status-success); font-weight: 700;">₹0</span></div>
-          <div>Est. Gross Profit: <span id="pur-summary-profit" style="color: var(--status-success); font-weight: 700;">₹0</span></div>
-        </div>
       </div>
     </div>
 
-    <!-- SECTION C: ACTION BUTTONS (Save as Draft & Save & Receive Stock) -->
-    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem; margin-top: 0.5rem; flex-wrap: wrap;">
-      <button type="button" id="btn-cancel-pur" class="btn btn-secondary">Cancel</button>
-      <button type="button" id="btn-save-draft-pur" class="btn btn-secondary" style="font-weight: 600; border: 1px solid var(--brand-primary); color: var(--brand-primary);">
-        <i data-lucide="save" style="width: 16px; height: 16px;"></i>
-        Save as Draft
-      </button>
-      <button type="button" id="btn-save-pur" class="btn btn-primary" style="padding: 0.65rem 1.5rem; font-weight: 600;">
-        <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
-        Save & Receive Stock
-      </button>
+    <!-- STICKY BOTTOM PURCHASE SUMMARY & ACTIONS BAR -->
+    <div class="pur-sticky-bar">
+      <div class="pur-sticky-metrics">
+        <div class="pur-metric-item">
+          <span class="pur-metric-label">Total Units</span>
+          <span id="pur-summary-qty" class="pur-metric-value" style="color: var(--text-primary);">0 units</span>
+        </div>
+        <div class="pur-metric-divider"></div>
+        <div class="pur-metric-item">
+          <span class="pur-metric-label">Total Purchase Cost</span>
+          <span id="pur-summary-cost" class="pur-metric-value pur-cost-accent">₹0</span>
+        </div>
+        <div class="pur-metric-divider"></div>
+        <div class="pur-metric-item">
+          <span class="pur-metric-label">Est. Selling Value</span>
+          <span id="pur-summary-sell" class="pur-metric-value pur-selling-accent">₹0</span>
+        </div>
+        <div class="pur-metric-divider"></div>
+        <div class="pur-metric-item">
+          <span class="pur-metric-label">Est. Gross Profit</span>
+          <div style="display: flex; align-items: baseline; gap: 0.35rem;">
+            <span id="pur-summary-profit" class="pur-metric-value pur-profit-accent">₹0</span>
+            <span id="pur-summary-margin" class="badge badge-success" style="font-size: 0.7rem; padding: 0.1rem 0.35rem; display: none;"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="pur-sticky-actions">
+        <button type="button" id="btn-cancel-pur" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="btn-save-draft-pur" class="btn btn-secondary" style="font-weight: 600; border: 1px solid var(--brand-primary); color: var(--brand-primary); display: inline-flex; align-items: center; gap: 0.35rem;">
+          <i data-lucide="save" style="width: 15px; height: 15px;"></i>
+          Save as Draft
+        </button>
+        <button type="button" id="btn-save-pur" class="btn btn-primary" style="padding: 0.65rem 1.4rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem;">
+          <i data-lucide="check-circle" style="width: 17px; height: 17px;"></i>
+          Save & Receive Stock
+        </button>
+      </div>
     </div>
   `;
 
@@ -8791,12 +9101,111 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   const itemsContainer = mainCard.querySelector('#pur-items-container');
 
+  function validateProductName(prod, allProds) {
+    const raw = prod.productName || '';
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      return 'Product Name is required.';
+    }
+    if (trimmed.length > 100) {
+      return 'Product Name must not exceed 100 characters.';
+    }
+
+    const brandLower = (prod.brand || '').trim().toLowerCase();
+    const isDuplicate = allProds.some(other => {
+      if (other.id === prod.id) return false;
+      const otherName = (other.productName || '').trim();
+      if (!otherName) return false;
+      if (otherName.toLowerCase() !== trimmed.toLowerCase()) return false;
+      const otherBrand = (other.brand || '').trim().toLowerCase();
+      return (brandLower === otherBrand || (!brandLower && !otherBrand));
+    });
+
+    if (isDuplicate) {
+      return `Another product in this purchase already uses the name "${trimmed}".`;
+    }
+
+    return null;
+  }
+
+  function checkFormValidity() {
+    const supplierEl = mainCard.querySelector('#pur-supplier');
+    const dateEl = mainCard.querySelector('#pur-date');
+    const supplier = (supplierEl ? supplierEl.value : supplierVal).trim();
+    const date = (dateEl ? dateEl.value : dateVal).trim();
+
+    if (!supplier) return false;
+    if (!date) return false;
+    if (!productsData || productsData.length === 0) return false;
+
+    for (let pIdx = 0; pIdx < productsData.length; pIdx++) {
+      const prod = productsData[pIdx];
+      const nameErr = validateProductName(prod, productsData);
+      if (nameErr || prod.nameError) return false;
+
+      const cat = (prod.category || '').trim();
+      if (!cat) return false;
+
+      if (!prod.sizes || prod.sizes.length === 0) return false;
+
+      const seenSizes = new Set();
+      for (let sIdx = 0; sIdx < prod.sizes.length; sIdx++) {
+        const sz = prod.sizes[sIdx];
+        const sVal = (sz.size || '').trim();
+        if (!sVal) return false;
+        const lower = sVal.toLowerCase();
+        if (seenSizes.has(lower)) return false;
+        seenSizes.add(lower);
+
+        const q = parseInt(sz.qty, 10);
+        if (isNaN(q) || q <= 0) return false;
+
+        const rawBuy = sz.buyingPrice;
+        if (rawBuy === '' || rawBuy === null || rawBuy === undefined) return false;
+        const bp = parseFloat(rawBuy);
+        if (isNaN(bp) || bp < 0) return false;
+
+        const rawSell = sz.sellingPrice;
+        if (rawSell === '' || rawSell === null || rawSell === undefined) return false;
+        const sp = parseFloat(rawSell);
+        if (isNaN(sp) || sp < 0) return false;
+      }
+    }
+
+    return true;
+  }
+
+  function updateFormValidity() {
+    const isValid = checkFormValidity();
+    const btnDraft = mainCard.querySelector('#btn-save-draft-pur');
+    const btnSave = mainCard.querySelector('#btn-save-pur');
+    const shouldDisable = !isValid || isSubmitting;
+
+    if (btnDraft) {
+      btnDraft.disabled = shouldDisable;
+      btnDraft.style.opacity = shouldDisable ? '0.5' : '1';
+      btnDraft.style.cursor = shouldDisable ? 'not-allowed' : 'pointer';
+      btnDraft.title = isSubmitting
+        ? 'Saving purchase draft...'
+        : (shouldDisable ? 'Fill all required fields to save draft' : 'Save purchase order as Draft');
+    }
+
+    if (btnSave) {
+      btnSave.disabled = shouldDisable;
+      btnSave.style.opacity = shouldDisable ? '0.5' : '1';
+      btnSave.style.cursor = shouldDisable ? 'not-allowed' : 'pointer';
+      btnSave.title = isSubmitting
+        ? 'Processing purchase...'
+        : (shouldDisable ? 'Fill all required fields to receive stock' : 'Save purchase and receive stock');
+    }
+  }
+
   function updateSummaries() {
     let overallUnits = 0;
     let overallCost = 0;
     let overallSellingValue = 0;
 
-    productsData.forEach((prod, pIdx) => {
+    productsData.forEach((prod) => {
       let prodUnits = 0;
       let prodCost = 0;
       let prodSellingValue = 0;
@@ -8804,17 +9213,22 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       const prodSectionEl = itemsContainer.querySelector(`[data-product-id="${prod.id}"]`);
 
       prod.sizes.forEach(sz => {
-        const q = parseInt(sz.qty, 10) || 0;
-        const b = parseFloat(sz.buyingPrice) || 0;
-        const s = parseFloat(sz.sellingPrice) || 0;
-        const lineCost = q * b;
-        const lineVal = q * s;
+        const q = parseInt(sz.qty, 10);
+        const b = parseFloat(sz.buyingPrice);
+        const s = parseFloat(sz.sellingPrice);
 
-        prodUnits += q;
+        const validQ = (!isNaN(q) && q > 0) ? q : 0;
+        const validB = (!isNaN(b) && b >= 0) ? b : 0;
+        const validS = (!isNaN(s) && s >= 0) ? s : 0;
+
+        const lineCost = validQ * validB;
+        const lineVal = validQ * validS;
+
+        prodUnits += validQ;
         prodCost += lineCost;
         prodSellingValue += lineVal;
 
-        overallUnits += q;
+        overallUnits += validQ;
         overallCost += lineCost;
         overallSellingValue += lineVal;
 
@@ -8823,20 +9237,34 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           if (sizeRowEl) {
             const costEl = sizeRowEl.querySelector('.pur-cost-display');
             const valEl = sizeRowEl.querySelector('.pur-value-display');
-            if (costEl) costEl.value = `₹${lineCost.toLocaleString()}`;
-            if (valEl) valEl.value = `₹${lineVal.toLocaleString()}`;
+            const hasCost = (sz.qty !== '' && sz.qty !== null && !isNaN(q) && q > 0 &&
+                             sz.buyingPrice !== '' && sz.buyingPrice !== null && !isNaN(b) && b >= 0);
+            const hasVal = (sz.qty !== '' && sz.qty !== null && !isNaN(q) && q > 0 &&
+                            sz.sellingPrice !== '' && sz.sellingPrice !== null && !isNaN(s) && s >= 0);
+            if (costEl) costEl.value = hasCost ? `₹${lineCost.toLocaleString()}` : '';
+            if (valEl) valEl.value = hasVal ? `₹${lineVal.toLocaleString()}` : '';
           }
         }
       });
 
       if (prodSectionEl) {
-        const subtotalEl = prodSectionEl.querySelector('.pur-prod-subtotal');
-        if (subtotalEl) {
-          subtotalEl.innerHTML = `Subtotal: <strong>${prodUnits} units</strong> · <strong style="color: var(--brand-primary);">₹${prodCost.toLocaleString()}</strong> · <span style="color: var(--status-success);">Est. ₹${prodSellingValue.toLocaleString()}</span>`;
-        }
+        const unitsEl = prodSectionEl.querySelector('.pur-header-units');
+        const costEl = prodSectionEl.querySelector('.pur-header-cost');
+        const valEl = prodSectionEl.querySelector('.pur-header-value');
+        if (unitsEl) unitsEl.textContent = prodUnits;
+        if (costEl) costEl.textContent = prodCost.toLocaleString();
+        if (valEl) valEl.textContent = prodSellingValue.toLocaleString();
+
         const titlePreviewEl = prodSectionEl.querySelector('.pur-prod-title-preview');
         if (titlePreviewEl) {
           titlePreviewEl.textContent = (prod.productName && prod.productName.trim()) ? prod.productName.trim() : 'Untitled Product';
+        }
+
+        const metaPreviewEl = prodSectionEl.querySelector('.pur-prod-meta-preview');
+        if (metaPreviewEl) {
+          const catText = prod.category ? prod.category.trim() : 'No Category';
+          const brandText = prod.brand ? ' · ' + prod.brand.trim() : '';
+          metaPreviewEl.textContent = `(${catText}${brandText})`;
         }
       }
     });
@@ -8846,15 +9274,52 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     const sumCostEl = mainCard.querySelector('#pur-summary-cost');
     const sumSellEl = mainCard.querySelector('#pur-summary-sell');
     const sumProfitEl = mainCard.querySelector('#pur-summary-profit');
+    const sumMarginEl = mainCard.querySelector('#pur-summary-margin');
 
     if (sumQtyEl) sumQtyEl.textContent = `${overallUnits} units`;
     if (sumCostEl) sumCostEl.textContent = `₹${overallCost.toLocaleString()}`;
     if (sumSellEl) sumSellEl.textContent = `₹${overallSellingValue.toLocaleString()}`;
     if (sumProfitEl) sumProfitEl.textContent = `₹${overallProfit.toLocaleString()}`;
+
+    if (sumMarginEl) {
+      if (overallSellingValue > 0) {
+        const marginPct = ((overallProfit / overallSellingValue) * 100).toFixed(1);
+        sumMarginEl.textContent = `${marginPct}% margin`;
+        sumMarginEl.style.display = 'inline-block';
+      } else {
+        sumMarginEl.textContent = '';
+        sumMarginEl.style.display = 'none';
+      }
+    }
+
+    updateFormValidity();
   }
 
   function renderPurchaseItems() {
     itemsContainer.innerHTML = '';
+
+    const addProdBtn = mainCard.querySelector('#btn-add-pur-product');
+    if (addProdBtn) {
+      const btnSpan = addProdBtn.querySelector('span');
+      if (btnSpan) {
+        btnSpan.textContent = productsData.length === 0 ? 'Add Product' : 'Add Another Product';
+      }
+    }
+
+    if (productsData.length === 0) {
+      itemsContainer.innerHTML = `
+        <div class="pur-empty-state" style="padding: 2.25rem 1.5rem; text-align: center; border: 1px dashed var(--border-color); border-radius: var(--radius-md); background: var(--bg-surface); display: flex; flex-direction: column; align-items: center; gap: 0.5rem;">
+          <i data-lucide="package-plus" style="width: 32px; height: 32px; color: var(--text-secondary); opacity: 0.6;"></i>
+          <div style="font-weight: 600; font-size: 0.95rem; color: var(--text-primary);">No Products Added</div>
+          <p style="margin: 0; font-size: 0.825rem; color: var(--text-secondary); max-width: 420px;">
+            Click &quot;Add Product&quot; below to add product details and size-wise purchase entries.
+          </p>
+        </div>
+      `;
+      updateSummaries();
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
 
     productsData.forEach((prod, pIdx) => {
       const isCustomCat = !!prod.isCustomCategory || (prod.category && !categoriesList.includes(prod.category));
@@ -8864,160 +9329,220 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       let initialProdCost = 0;
       let initialProdVal = 0;
       prod.sizes.forEach(sz => {
-        const q = parseInt(sz.qty, 10) || 0;
-        const b = parseFloat(sz.buyingPrice) !== undefined ? parseFloat(sz.buyingPrice) : 200;
-        const s = parseFloat(sz.sellingPrice) !== undefined ? parseFloat(sz.sellingPrice) : Math.round(b * 1.5);
-        initialProdUnits += q;
-        initialProdCost += (q * b);
-        initialProdVal += (q * s);
+        const q = parseInt(sz.qty, 10);
+        const b = parseFloat(sz.buyingPrice);
+        const s = parseFloat(sz.sellingPrice);
+        const validQ = (!isNaN(q) && q > 0) ? q : 0;
+        const validB = (!isNaN(b) && b >= 0) ? b : 0;
+        const validS = (!isNaN(s) && s >= 0) ? s : 0;
+        initialProdUnits += validQ;
+        initialProdCost += (validQ * validB);
+        initialProdVal += (validQ * validS);
       });
 
+      if (prod.isExpanded === undefined) {
+        prod.isExpanded = (pIdx === 0);
+      }
+
       const sectionEl = document.createElement('div');
-      sectionEl.className = 'purchase-product-section';
+      sectionEl.className = `pur-accordion-card ${prod.isExpanded ? 'expanded' : 'collapsed'}`;
       sectionEl.setAttribute('data-product-id', prod.id);
-      sectionEl.style.cssText = 'display: flex; flex-direction: column; gap: 0.5rem; padding: 0.65rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);';
 
       sectionEl.innerHTML = `
-        <!-- Product Section Header: Product #, Title Preview, Subtotal, Remove Product -->
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <span style="font-size: 0.775rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase; letter-spacing: 0.04em;">Product #${pIdx + 1}</span>
-            <span class="pur-prod-title-preview" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${prod.productName || 'Untitled Product'}</span>
+        <!-- ACCORDION HEADER (Collapsed & Expanded state header) -->
+        <div class="pur-accordion-header" title="Click to expand/collapse product">
+          <div style="display: flex; align-items: center; gap: 0.65rem; min-width: 0; flex: 1;">
+            <div class="pur-chevron-icon" style="transform: ${prod.isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'}; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <i data-lucide="chevron-down" style="width: 16px; height: 16px;"></i>
+            </div>
+            <div style="display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; min-width: 0;">
+              <span class="pur-prod-badge badge badge-primary" style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;">Product #${pIdx + 1}</span>
+              <span class="pur-prod-title-preview" style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(prod.productName && prod.productName.trim()) ? prod.productName.trim() : 'Untitled Product'}</span>
+              <span class="pur-prod-meta-preview" style="font-size: 0.775rem; color: var(--text-secondary); white-space: nowrap;">(${prod.category ? prod.category : 'No Category'}${prod.brand ? ' · ' + prod.brand : ''})</span>
+            </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 0.6rem;">
-            <span class="pur-prod-subtotal" style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); background: var(--bg-secondary); padding: 0.2rem 0.55rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
-              Subtotal: <strong>${initialProdUnits} units</strong> · <strong style="color: var(--brand-primary);">₹${initialProdCost.toLocaleString()}</strong> · <span style="color: var(--status-success);">Est. ₹${initialProdVal.toLocaleString()}</span>
-            </span>
-            <button type="button" class="btn btn-ghost pur-remove-product-btn" title="Remove Product" style="height: 26px; width: 26px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer;">
-              <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+
+          <div style="display: flex; align-items: center; gap: 0.65rem; flex-shrink: 0;">
+            <div class="pur-prod-header-metrics" style="display: flex; align-items: center; gap: 0.45rem; font-size: 0.75rem;">
+              <span class="pur-metric-pill" style="padding: 0.2rem 0.5rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); color: var(--text-primary); font-weight: 600;">
+                <span class="pur-header-units">${initialProdUnits}</span> units
+              </span>
+              <span class="pur-metric-pill" style="padding: 0.2rem 0.5rem; background: var(--status-info-bg, rgba(37,99,235,0.08)); border-radius: var(--radius-sm); border: 1px solid var(--status-info-border, rgba(37,99,235,0.2)); color: var(--status-info-text, #2563EB); font-weight: 700;">
+                <span style="font-size: 0.7rem; font-weight: 500; opacity: 0.8; margin-right: 2px;">Cost:</span>₹<span class="pur-header-cost">${initialProdCost.toLocaleString()}</span>
+              </span>
+              <span class="pur-metric-pill" style="padding: 0.2rem 0.5rem; background: var(--status-success-bg); border-radius: var(--radius-sm); border: 1px solid var(--status-success-border); color: var(--status-success-text, #16A34A); font-weight: 700;">
+                <span style="font-size: 0.7rem; font-weight: 500; opacity: 0.8; margin-right: 2px;">Est:</span>₹<span class="pur-header-value">${initialProdVal.toLocaleString()}</span>
+              </span>
+            </div>
+
+            <button type="button" class="btn btn-ghost pur-remove-product-btn" title="Remove Product" style="height: 28px; width: 28px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer;">
+              <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
             </button>
           </div>
         </div>
 
-        <!-- Scrollable wrapper for compact product inputs & size grid -->
-        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
-          <div style="min-width: 680px; display: flex; flex-direction: column; gap: 0.45rem;">
-            <!-- Horizontal Product Details Row: Product Name, Category, Brand -->
-            <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.55rem; align-items: end;">
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
-                <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${prod.productName || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
-              </div>
-              <div class="form-group pur-cat-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Category <span style="color: #ef4444;">*</span></label>
-                <div class="pur-cat-container" style="position: relative; width: 100%;">
-                  <select class="form-select pur-cat-select" style="display: ${isCustomCat ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
-                    <option value="">Select Category *</option>
-                    ${categoriesList.map(c => `<option value="${c}" ${(!isCustomCat && c === prod.category) ? 'selected' : ''}>${c}</option>`).join('')}
-                    <option value="__CUSTOM__">+ Custom Category...</option>
-                  </select>
-                  <div class="pur-cat-custom-wrapper" style="display: ${isCustomCat ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
-                    <input type="text" class="form-input pur-cat-custom-input" placeholder="Enter category" value="${isCustomCat ? (prod.category || '') : ''}" style="width: 100%; height: 32px; padding: 0.25rem 2rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; box-sizing: border-box;">
-                    <button type="button" class="btn btn-ghost pur-cat-back-btn" title="Switch back to Category dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.15rem; height: 24px; width: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
-                      <i data-lucide="list" style="width: 13px; height: 13px;"></i>
-                    </button>
-                  </div>
+        <!-- ACCORDION BODY (Expanded State) -->
+        <div class="pur-accordion-body" style="display: ${prod.isExpanded ? 'flex' : 'none'};">
+          <!-- Horizontal Product Details Row: Product Name, Category, Brand -->
+          <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.65rem; align-items: end;">
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
+              <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${prod.productName || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; ${prod.nameError ? 'border-color: var(--status-danger, #ef4444);' : ''}">
+              <div class="pur-name-error" style="font-size: 0.725rem; color: var(--status-danger, #ef4444); margin-top: 3px; display: ${prod.nameError ? 'block' : 'none'};">${prod.nameError || ''}</div>
+            </div>
+            <div class="form-group pur-cat-group" style="margin: 0;">
+              <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; white-space: nowrap;">Category <span style="color: #ef4444;">*</span></label>
+              <div class="pur-cat-container" style="position: relative; width: 100%;">
+                <select class="form-select pur-cat-select" style="display: ${isCustomCat ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
+                  <option value="" ${!prod.category ? 'selected' : ''}>Select Category *</option>
+                  ${categoriesList.map(c => `<option value="${c}" ${(!isCustomCat && c === prod.category) ? 'selected' : ''}>${c}</option>`).join('')}
+                  <option value="__CUSTOM__">+ Custom Category...</option>
+                </select>
+                <div class="pur-cat-custom-wrapper" style="display: ${isCustomCat ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
+                  <input type="text" class="form-input pur-cat-custom-input" placeholder="Enter category" value="${isCustomCat ? (prod.category || '') : ''}" style="width: 100%; height: 32px; padding: 0.25rem 2rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; box-sizing: border-box;">
+                  <button type="button" class="btn btn-ghost pur-cat-back-btn" title="Switch back to Category dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.15rem; height: 24px; width: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
+                    <i data-lucide="list" style="width: 13px; height: 13px;"></i>
+                  </button>
                 </div>
               </div>
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Brand</label>
-                <input type="text" class="form-input pur-brand-input" placeholder="e.g. ClassicFit" list="pur-brands-list" value="${prod.brand || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; box-sizing: border-box;">
-              </div>
             </div>
+            <div class="form-group" style="margin: 0;">
+              <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; white-space: nowrap;">Brand</label>
+              <input type="text" class="form-input pur-brand-input" placeholder="e.g. ClassicFit" list="pur-brands-list" value="${prod.brand || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; box-sizing: border-box;">
+            </div>
+          </div>
 
-            <!-- Size-wise Entries Subheader & Actions -->
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.4rem; border-top: 1px dashed var(--border-color);">
-              <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); display: flex; align-items: center; gap: 0.35rem;">
-                <i data-lucide="layers" style="width: 12px; height: 12px; color: var(--brand-primary);"></i>
-                <span>Size-wise Entries</span>
-              </div>
-              <div style="display: flex; align-items: center; gap: 0.4rem;">
-                ${prod.sizes.length > 1 ? `
-                  <button type="button" class="btn btn-ghost btn-sm pur-copy-price-btn" title="Copy prices from the first size to all other sizes of this product" style="font-size: 0.72rem; padding: 0.15rem 0.5rem; color: var(--brand-primary); height: 24px; border: 1px solid var(--border-color); background: var(--bg-secondary); border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer;">
-                    <i data-lucide="copy" style="width: 11px; height: 11px;"></i> Copy Prices to All Sizes
-                  </button>
-                ` : ''}
-                <button type="button" class="btn btn-secondary btn-sm pur-add-size-btn" style="height: 24px; padding: 0 0.55rem; font-size: 0.72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; border-color: var(--brand-primary); color: var(--brand-primary); background: transparent; cursor: pointer;">
-                  <i data-lucide="plus" style="width: 12px; height: 12px;"></i> Add Size
+          <!-- Size-wise Entries Subheader & Actions -->
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--border-color); flex-wrap: wrap;">
+            <div style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); display: flex; align-items: center; gap: 0.35rem;">
+              <i data-lucide="layers" style="width: 13px; height: 13px; color: var(--brand-primary);"></i>
+              <span>Size-wise Entries</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.4rem;">
+              ${prod.sizes.length > 1 ? `
+                <button type="button" class="btn btn-ghost btn-sm pur-copy-price-btn" title="Copy prices from the first size to all other sizes of this product" style="font-size: 0.72rem; padding: 0.2rem 0.5rem; color: var(--brand-primary); height: 26px; border: 1px solid var(--border-color); background: var(--bg-secondary); border-radius: var(--radius-sm); display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                  <i data-lucide="copy" style="width: 12px; height: 12px;"></i> Copy Prices to All Sizes
                 </button>
-              </div>
+              ` : ''}
+              <button type="button" class="btn btn-secondary btn-sm pur-add-size-btn" style="height: 26px; padding: 0 0.65rem; font-size: 0.73rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.3rem; border-color: var(--brand-primary); color: var(--brand-primary); background: transparent; cursor: pointer;">
+                <i data-lucide="plus" style="width: 13px; height: 13px;"></i> Add Size
+              </button>
             </div>
+          </div>
 
-            <!-- Size Column Headers -->
-            <div style="display: grid; grid-template-columns: 1.15fr 0.85fr 1.1fr 1.15fr 1.1fr 1.15fr 30px; gap: 0.55rem; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); padding: 0.1rem 0;">
-              <div>Size / Variant <span style="color: #ef4444;">*</span></div>
-              <div>Quantity <span style="color: #ef4444;">*</span></div>
-              <div>Buying Price (₹) <span style="color: #ef4444;">*</span></div>
-              <div>Total Cost (₹)</div>
-              <div>Selling Price (₹)</div>
-              <div>Est. Value (₹)</div>
-              <div></div>
-            </div>
+          <!-- Size-wise Table -->
+          <div class="pur-table-responsive-wrapper">
+            <table class="pur-size-table">
+              <thead>
+                <tr>
+                  <th style="width: 20%;">Size / Variant <span style="color: #ef4444;">*</span></th>
+                  <th style="width: 12%;">Quantity <span style="color: #ef4444;">*</span></th>
+                  <th style="width: 16%;">Buying Price (₹) <span style="color: #ef4444;">*</span></th>
+                  <th style="width: 17%;">Total Cost (₹)</th>
+                  <th style="width: 16%;">Selling Price (₹) <span style="color: #ef4444;">*</span></th>
+                  <th style="width: 17%;">Estimated Value (₹)</th>
+                  <th style="width: 40px; text-align: center;">Action</th>
+                </tr>
+              </thead>
+              <tbody class="pur-sizes-container">
+                ${prod.sizes.length === 0 ? `
+                  <tr class="pur-size-empty-row">
+                    <td colspan="7" style="text-align: center; padding: 1.25rem; color: var(--text-secondary); font-size: 0.8rem; background: var(--bg-surface);">
+                      No size variants added yet. Click &quot;Add Size&quot; above to add a variant row.
+                    </td>
+                  </tr>
+                ` : prod.sizes.map((sz) => {
+                  const q = parseInt(sz.qty, 10);
+                  const bp = parseFloat(sz.buyingPrice);
+                  const sp = parseFloat(sz.sellingPrice);
 
-            <!-- Size Rows Container -->
-            <div class="pur-sizes-container" style="display: flex; flex-direction: column; gap: 0.35rem;">
-              ${prod.sizes.map((sz) => {
-                const q = parseInt(sz.qty, 10) || 0;
-                const bPrice = parseFloat(sz.buyingPrice) !== undefined ? parseFloat(sz.buyingPrice) : 200;
-                sz.buyingPrice = bPrice;
-                const lineCost = q * bPrice;
+                  const validQ = (!isNaN(q) && q > 0) ? q : 0;
+                  const validB = (!isNaN(bp) && bp >= 0) ? bp : 0;
+                  const validS = (!isNaN(sp) && sp >= 0) ? sp : 0;
 
-                const sPrice = parseFloat(sz.sellingPrice) !== undefined ? parseFloat(sz.sellingPrice) : Math.round(bPrice * 1.5);
-                sz.sellingPrice = sPrice;
-                const lineValue = q * sPrice;
+                  const lineCost = validQ * validB;
+                  const lineValue = validQ * validS;
 
-                const isCustomSize = !!sz.isCustomSize || (sz.size && !standardSizes.includes(sz.size));
-                sz.isCustomSize = isCustomSize;
+                  const hasCost = (sz.qty !== '' && sz.qty !== null && !isNaN(q) && q > 0 &&
+                                   sz.buyingPrice !== '' && sz.buyingPrice !== null && !isNaN(bp) && bp >= 0);
+                  const hasValue = (sz.qty !== '' && sz.qty !== null && !isNaN(q) && q > 0 &&
+                                    sz.sellingPrice !== '' && sz.sellingPrice !== null && !isNaN(sp) && sp >= 0);
 
-                return `
-                  <div class="pur-size-row" data-size-id="${sz.id}" style="display: grid; grid-template-columns: 1.15fr 0.85fr 1.1fr 1.15fr 1.1fr 1.15fr 30px; gap: 0.55rem; align-items: center;">
-                    <div class="form-group pur-size-group" style="margin: 0;">
-                      <div class="pur-size-container" style="position: relative; width: 100%;">
-                        <select class="form-select pur-size-select" style="display: ${isCustomSize ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
-                          ${standardSizes.map(s => `<option value="${s}" ${(!isCustomSize && s === sz.size) ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
-                          <option value="__CUSTOM__">+ Custom Size...</option>
-                        </select>
-                        <div class="pur-size-custom-wrapper" style="display: ${isCustomSize ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
-                          <input type="text" class="form-input pur-size-custom-input" placeholder="Enter size" value="${isCustomSize ? (sz.size || '') : ''}" style="width: 100%; height: 32px; padding: 0.25rem 2rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; box-sizing: border-box;">
-                          <button type="button" class="btn btn-ghost pur-size-back-btn" title="Switch back to Size dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.15rem; height: 24px; width: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
-                            <i data-lucide="list" style="width: 13px; height: 13px;"></i>
-                          </button>
+                  const costDisplayVal = hasCost ? `₹${lineCost.toLocaleString()}` : '';
+                  const valueDisplayVal = hasValue ? `₹${lineValue.toLocaleString()}` : '';
+
+                  const isCustomSize = Boolean(sz.isCustomSize || (sz.size && !standardSizes.includes(sz.size)));
+                  sz.isCustomSize = isCustomSize;
+
+                  const qtyDisplay = (sz.qty !== undefined && sz.qty !== null && sz.qty !== '') ? sz.qty : '';
+                  const buyDisplay = (sz.buyingPrice !== undefined && sz.buyingPrice !== null && sz.buyingPrice !== '') ? sz.buyingPrice : '';
+                  const sellDisplay = (sz.sellingPrice !== undefined && sz.sellingPrice !== null && sz.sellingPrice !== '') ? sz.sellingPrice : '';
+
+                  return `
+                    <tr class="pur-size-row" data-size-id="${sz.id}">
+                      <td>
+                        <div class="pur-size-container" style="position: relative; width: 100%;">
+                          <select class="form-select pur-size-select" style="display: ${isCustomSize ? 'none' : 'block'}; width: 100%;">
+                            <option value="" ${!sz.size ? 'selected' : ''}>Select Size *</option>
+                            ${standardSizes.map(s => `<option value="${s}" ${(!isCustomSize && s === sz.size) ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
+                            <option value="__CUSTOM__">+ Custom Size...</option>
+                          </select>
+                          <div class="pur-size-custom-wrapper" style="display: ${isCustomSize ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
+                            <input type="text" class="form-input pur-size-custom-input" placeholder="Enter size" value="${isCustomSize ? (sz.size || '') : ''}" style="width: 100%; padding-right: 2rem;">
+                            <button type="button" class="btn btn-ghost pur-size-back-btn" title="Switch back to Size dropdown" style="position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 0.15rem; height: 24px; width: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-secondary); border: none; background: transparent; cursor: pointer;">
+                              <i data-lucide="list" style="width: 13px; height: 13px;"></i>
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-
-                    <div class="form-group" style="margin: 0;">
-                      <input type="number" class="form-input pur-qty-input" min="1" value="${q}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
-                    </div>
-
-                    <div class="form-group" style="margin: 0;">
-                      <input type="number" class="form-input pur-buying-input" min="0" step="any" value="${bPrice}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
-                    </div>
-
-                    <div class="form-group" style="margin: 0;">
-                      <input type="text" class="form-input pur-cost-display" value="₹${lineCost.toLocaleString()}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; background: var(--bg-secondary); color: var(--brand-primary); box-sizing: border-box;">
-                    </div>
-
-                    <div class="form-group" style="margin: 0;">
-                      <input type="number" class="form-input pur-selling-input" min="0" step="any" value="${sPrice}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box;">
-                    </div>
-
-                    <div class="form-group" style="margin: 0;">
-                      <input type="text" class="form-input pur-value-display" value="₹${lineValue.toLocaleString()}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; background: var(--bg-secondary); color: var(--status-success); box-sizing: border-box;">
-                    </div>
-
-                    <div style="display: flex; justify-content: center; align-items: center;">
-                      <button type="button" class="btn btn-ghost pur-remove-size-btn" title="Remove size" style="height: 28px; width: 28px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer;">
-                        <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
-                      </button>
-                    </div>
-                  </div>
-                `;
-              }).join('')}
-            </div>
+                      </td>
+                      <td>
+                        <input type="number" class="form-input pur-qty-input" min="1" placeholder="Qty *" value="${qtyDisplay}" style="font-weight: 600;">
+                      </td>
+                      <td>
+                        <input type="number" class="form-input pur-buying-input" min="0" step="any" placeholder="0.00" value="${buyDisplay}" style="font-weight: 600;">
+                      </td>
+                      <td>
+                        <input type="text" class="form-input pur-cost-display pur-cost-accent" placeholder="—" value="${costDisplayVal}" readonly style="font-weight: 700; background: var(--bg-secondary);">
+                      </td>
+                      <td>
+                        <input type="number" class="form-input pur-selling-input" min="0" step="any" placeholder="0.00" value="${sellDisplay}" style="font-weight: 600;">
+                      </td>
+                      <td>
+                        <input type="text" class="form-input pur-value-display pur-selling-accent" placeholder="—" value="${valueDisplayVal}" readonly style="font-weight: 700; background: var(--bg-secondary);">
+                      </td>
+                      <td style="text-align: center;">
+                        <button type="button" class="btn btn-ghost pur-remove-size-btn" title="Remove size" style="height: 28px; width: 28px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer; margin: 0 auto;">
+                          <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
           </div>
         </div>
       `;
+
+      // Wire up Accordion Toggle
+      const headerEl = sectionEl.querySelector('.pur-accordion-header');
+      headerEl.addEventListener('click', (e) => {
+        if (e.target.closest('.pur-remove-product-btn')) return;
+        prod.isExpanded = !prod.isExpanded;
+        const bodyEl = sectionEl.querySelector('.pur-accordion-body');
+        const chevron = sectionEl.querySelector('.pur-chevron-icon');
+        if (prod.isExpanded) {
+          sectionEl.classList.remove('collapsed');
+          sectionEl.classList.add('expanded');
+          if (bodyEl) bodyEl.style.display = 'flex';
+          if (chevron) chevron.style.transform = 'rotate(0deg)';
+        } else {
+          sectionEl.classList.remove('expanded');
+          sectionEl.classList.add('collapsed');
+          if (bodyEl) bodyEl.style.display = 'none';
+          if (chevron) chevron.style.transform = 'rotate(-90deg)';
+        }
+      });
 
       // Product Level Controls
       const nameInp = sectionEl.querySelector('.pur-name-input');
@@ -9029,15 +9554,79 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       const removeProdBtn = sectionEl.querySelector('.pur-remove-product-btn');
       const addSizeBtn = sectionEl.querySelector('.pur-add-size-btn');
       const copyPriceBtn = sectionEl.querySelector('.pur-copy-price-btn');
+      const nameErrorEl = sectionEl.querySelector('.pur-name-error');
+
+      function updateMetaPreview() {
+        const metaPreview = sectionEl.querySelector('.pur-prod-meta-preview');
+        if (metaPreview) {
+          const catText = prod.category ? prod.category.trim() : 'No Category';
+          const brandText = prod.brand ? ' · ' + prod.brand.trim() : '';
+          metaPreview.textContent = `(${catText}${brandText})`;
+        }
+      }
+
+      function validateThisProductName() {
+        const err = validateProductName(prod, productsData);
+        if (err) {
+          prod.nameError = err;
+          if (nameErrorEl) {
+            nameErrorEl.textContent = err;
+            nameErrorEl.style.display = 'block';
+          }
+          nameInp.style.borderColor = 'var(--status-danger, #ef4444)';
+        } else {
+          prod.nameError = null;
+          if (nameErrorEl) {
+            nameErrorEl.textContent = '';
+            nameErrorEl.style.display = 'none';
+          }
+          nameInp.style.borderColor = '';
+        }
+        updateFormValidity();
+        return !err;
+      }
 
       nameInp.addEventListener('input', (e) => {
         prod.productName = e.target.value;
-        const matched = productsList.find(p => p.name && p.name.trim().toLowerCase() === e.target.value.trim().toLowerCase());
-        prod.productId = matched ? matched.id : '';
+        const val = e.target.value;
+        const trimmed = val.trim();
         const titlePreview = sectionEl.querySelector('.pur-prod-title-preview');
         if (titlePreview) {
-          titlePreview.textContent = e.target.value.trim() || 'Untitled Product';
+          titlePreview.textContent = trimmed || 'Untitled Product';
         }
+
+        if (prod.nameError) {
+          if (!val) {
+            prod.nameError = null;
+            if (nameErrorEl) {
+              nameErrorEl.textContent = '';
+              nameErrorEl.style.display = 'none';
+            }
+            nameInp.style.borderColor = '';
+          } else {
+            const err = validateProductName(prod, productsData);
+            if (!err) {
+              prod.nameError = null;
+              if (nameErrorEl) {
+                nameErrorEl.textContent = '';
+                nameErrorEl.style.display = 'none';
+              }
+              nameInp.style.borderColor = '';
+            } else {
+              prod.nameError = err;
+              if (nameErrorEl) {
+                nameErrorEl.textContent = err;
+                nameErrorEl.style.display = 'block';
+              }
+            }
+          }
+        }
+
+        updateFormValidity();
+      });
+
+      nameInp.addEventListener('blur', () => {
+        validateThisProductName();
       });
 
       nameInp.addEventListener('change', (e) => {
@@ -9045,7 +9634,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         const matched = productsList.find(p => p.name && p.name.trim().toLowerCase() === e.target.value.trim().toLowerCase());
         prod.productId = matched ? matched.id : '';
         if (matched) {
-          if (!prod.category || prod.category === 'General' || prod.category === 'Shirts') {
+          if (!prod.category || prod.category === 'General') {
             prod.category = matched.category || '';
             if (categoriesList.includes(prod.category)) {
               prod.isCustomCategory = false;
@@ -9053,24 +9642,26 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
               prod.isCustomCategory = true;
             }
           }
-          if (!prod.brand || prod.brand === 'Generic' || prod.brand === 'ClassicFit') {
+          if (!prod.brand || prod.brand === 'Generic') {
             prod.brand = matched.brand || '';
           }
           if (matched.purchasePrice) {
             prod.sizes.forEach(s => {
-              if (!s.buyingPrice || s.buyingPrice === 200) {
+              if (s.buyingPrice === '' || s.buyingPrice === null || s.buyingPrice === undefined) {
                 s.buyingPrice = matched.purchasePrice;
               }
             });
           }
           if (matched.sellingPrice) {
             prod.sizes.forEach(s => {
-              if (!s.sellingPrice || s.sellingPrice === 400) {
+              if (s.sellingPrice === '' || s.sellingPrice === null || s.sellingPrice === undefined) {
                 s.sellingPrice = matched.sellingPrice;
               }
             });
           }
           renderPurchaseItems();
+        } else {
+          validateThisProductName();
         }
       });
 
@@ -9091,10 +9682,14 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           prod.isCustomCategory = false;
           prod.category = e.target.value;
         }
+        updateMetaPreview();
+        updateFormValidity();
       });
 
       catCustomInp.addEventListener('input', (e) => {
         prod.category = e.target.value;
+        updateMetaPreview();
+        updateFormValidity();
       });
 
       catBackBtn.addEventListener('click', () => {
@@ -9107,24 +9702,29 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           catSel.value = categoriesList[0] || '';
           prod.category = catSel.value;
         }
+        updateMetaPreview();
         catSel.focus();
+        updateFormValidity();
       });
 
       brandInp.addEventListener('input', (e) => {
         prod.brand = e.target.value;
+        updateMetaPreview();
+        if (prod.nameError && prod.nameError.includes('Another product in this purchase')) {
+          validateThisProductName();
+        } else {
+          updateFormValidity();
+        }
       });
 
-      removeProdBtn.addEventListener('click', () => {
-        if (productsData.length <= 1) {
-          toast.show({ message: 'At least one product is required for a purchase.', type: 'warning' });
-          return;
-        }
+      removeProdBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
 
         const hasEnteredData = Boolean(
           (prod.productName && prod.productName.trim().length > 0) ||
           (prod.brand && prod.brand.trim().length > 0) ||
-          (prod.category && prod.category.trim().length > 0 && prod.category !== 'Shirts') ||
-          (prod.sizes && prod.sizes.some(s => (s.size && s.size !== 'M' && s.size !== 'Standard') || (s.qty && s.qty !== 50) || (s.buyingPrice && s.buyingPrice !== 200)))
+          (prod.category && prod.category.trim().length > 0) ||
+          (prod.sizes && prod.sizes.length > 0)
         );
 
         if (hasEnteredData) {
@@ -9139,21 +9739,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       });
 
       addSizeBtn.addEventListener('click', () => {
-        const usedSizes = new Set(prod.sizes.map(s => s.size));
-        const candidateSizes = ['S', 'M', 'L', 'XL', 'XXL', '3XL', 'Free Size', 'Standard'];
-        const nextSize = candidateSizes.find(s => !usedSizes.has(s)) || 'Standard';
-
-        const lastSize = prod.sizes[prod.sizes.length - 1];
-        const defQty = lastSize ? lastSize.qty : 50;
-        const defBuy = lastSize ? lastSize.buyingPrice : 200;
-        const defSell = lastSize ? lastSize.sellingPrice : 400;
-
         prod.sizes.push({
           id: 'size_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-          size: nextSize,
-          qty: defQty,
-          buyingPrice: defBuy,
-          sellingPrice: defSell,
+          size: '',
+          qty: '',
+          buyingPrice: '',
+          sellingPrice: '',
           isCustomSize: false
         });
         renderPurchaseItems();
@@ -9169,7 +9760,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           }
           renderPurchaseItems();
           toast.show({
-            message: `Copied prices (₹${first.buyingPrice} / ₹${first.sellingPrice}) to all sizes of ${prod.productName || 'this product'}.`,
+            message: `Copied prices to all sizes of ${prod.productName || 'this product'}.`,
             type: 'info'
           });
         });
@@ -9206,10 +9797,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             sz.isCustomSize = false;
             sz.size = e.target.value;
           }
+          updateSummaries();
         });
 
         sizeCustomInp.addEventListener('input', (e) => {
           sz.size = e.target.value;
+          updateSummaries();
         });
 
         sizeBackBtn.addEventListener('click', () => {
@@ -9219,32 +9812,30 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           if (sz.size && standardSizes.includes(sz.size.trim())) {
             sizeSel.value = sz.size.trim();
           } else {
-            sizeSel.value = standardSizes[0] || 'M';
-            sz.size = sizeSel.value;
+            sizeSel.value = '';
+            sz.size = '';
           }
           sizeSel.focus();
+          updateSummaries();
         });
 
         qtyInp.addEventListener('input', (e) => {
-          sz.qty = parseInt(e.target.value, 10) || 0;
+          sz.qty = e.target.value;
           updateSummaries();
         });
 
         buyInp.addEventListener('input', (e) => {
-          sz.buyingPrice = parseFloat(e.target.value) || 0;
+          sz.buyingPrice = e.target.value;
           updateSummaries();
         });
 
         sellInp.addEventListener('input', (e) => {
-          sz.sellingPrice = parseFloat(e.target.value) || 0;
+          sz.sellingPrice = e.target.value;
           updateSummaries();
         });
 
-        removeSizeBtn.addEventListener('click', () => {
-          if (prod.sizes.length <= 1) {
-            toast.show({ message: 'Each product must have at least one size row.', type: 'warning' });
-            return;
-          }
+        removeSizeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
           prod.sizes.splice(sIdx, 1);
           renderPurchaseItems();
         });
@@ -9257,6 +9848,18 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     if (window.lucide) window.lucide.createIcons();
   }
 
+  // Wire top purchase order inputs
+  const supplierInput = mainCard.querySelector('#pur-supplier');
+  const dateInput = mainCard.querySelector('#pur-date');
+  if (supplierInput) {
+    supplierInput.addEventListener('input', updateFormValidity);
+    supplierInput.addEventListener('change', updateFormValidity);
+  }
+  if (dateInput) {
+    dateInput.addEventListener('input', updateFormValidity);
+    dateInput.addEventListener('change', updateFormValidity);
+  }
+
   renderPurchaseItems();
 
   mainCard.querySelector('#btn-add-pur-product').addEventListener('click', () => {
@@ -9267,13 +9870,15 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       brand: '',
       productId: '',
       isCustomCategory: false,
+      isExpanded: true,
+      nameError: null,
       sizes: [
         {
           id: 'size_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-          size: 'M',
-          qty: 50,
-          buyingPrice: 200,
-          sellingPrice: 400,
+          size: '',
+          qty: '',
+          buyingPrice: '',
+          sellingPrice: '',
           isCustomSize: false
         }
       ]
@@ -9285,9 +9890,96 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     if (onNavigate) onNavigate('purchases');
   });
 
+  function getFirstValidationError() {
+    const supplierEl = mainCard.querySelector('#pur-supplier');
+    const dateEl = mainCard.querySelector('#pur-date');
+    const supplier = (supplierEl ? supplierEl.value : '').trim();
+    const date = (dateEl ? dateEl.value : '').trim();
+
+    if (!supplier) {
+      return { message: 'Supplier name is required.', focusEl: supplierEl };
+    }
+    if (!date) {
+      return { message: 'Purchase date is required.', focusEl: dateEl };
+    }
+    if (!productsData || productsData.length === 0) {
+      return { message: 'At least one product is required.', focusEl: null };
+    }
+
+    for (let pIdx = 0; pIdx < productsData.length; pIdx++) {
+      const prod = productsData[pIdx];
+      const pNum = pIdx + 1;
+      const nameErr = validateProductName(prod, productsData);
+      const cardEl = itemsContainer.querySelector(`[data-product-id="${prod.id}"]`);
+
+      if (nameErr) {
+        prod.nameError = nameErr;
+        if (cardEl) {
+          const errEl = cardEl.querySelector('.pur-name-error');
+          const inpEl = cardEl.querySelector('.pur-name-input');
+          if (errEl) { errEl.textContent = nameErr; errEl.style.display = 'block'; }
+          if (inpEl) { inpEl.style.borderColor = 'var(--status-danger, #ef4444)'; }
+          return { message: `Product #${pNum}: ${nameErr}`, focusEl: inpEl };
+        }
+        return { message: `Product #${pNum}: ${nameErr}`, focusEl: null };
+      }
+
+      const pName = (prod.productName || '').trim();
+      const pCat = (prod.category || '').trim();
+      if (!pCat) {
+        const catSelEl = cardEl ? cardEl.querySelector('.pur-cat-select') : null;
+        return { message: `Product #${pNum} (${pName}): Category is required.`, focusEl: catSelEl };
+      }
+
+      if (!prod.sizes || prod.sizes.length === 0) {
+        return { message: `Product #${pNum} (${pName}): At least one size entry is required.`, focusEl: null };
+      }
+
+      const seenSizes = new Set();
+      for (let sIdx = 0; sIdx < prod.sizes.length; sIdx++) {
+        const sz = prod.sizes[sIdx];
+        const sNum = sIdx + 1;
+        const sVal = (sz.size || '').trim();
+        const sizeRowEl = cardEl ? cardEl.querySelector(`[data-size-id="${sz.id}"]`) : null;
+
+        if (!sVal) {
+          const szSel = sizeRowEl ? sizeRowEl.querySelector('.pur-size-select') : null;
+          return { message: `Product #${pNum} (${pName}), Size #${sNum}: Size / Variant is required.`, focusEl: szSel };
+        }
+
+        const lower = sVal.toLowerCase();
+        if (seenSizes.has(lower)) {
+          return { message: `Product #${pNum} (${pName}): Duplicate size "${sVal}". Each variant must be unique.`, focusEl: null };
+        }
+        seenSizes.add(lower);
+
+        const q = parseInt(sz.qty, 10);
+        if (isNaN(q) || q <= 0) {
+          const qtyInp = sizeRowEl ? sizeRowEl.querySelector('.pur-qty-input') : null;
+          return { message: `Product #${pNum} (${pName}), Size "${sVal}": Quantity must be a positive number greater than 0.`, focusEl: qtyInp };
+        }
+
+        const rawBuy = sz.buyingPrice;
+        const bp = parseFloat(rawBuy);
+        if (rawBuy === '' || rawBuy === null || rawBuy === undefined || isNaN(bp) || bp < 0) {
+          const buyInp = sizeRowEl ? sizeRowEl.querySelector('.pur-buying-input') : null;
+          return { message: `Product #${pNum} (${pName}), Size "${sVal}": Buying Price must be a valid non-negative number.`, focusEl: buyInp };
+        }
+
+        const rawSell = sz.sellingPrice;
+        const sp = parseFloat(rawSell);
+        if (rawSell === '' || rawSell === null || rawSell === undefined || isNaN(sp) || sp < 0) {
+          const sellInp = sizeRowEl ? sizeRowEl.querySelector('.pur-selling-input') : null;
+          return { message: `Product #${pNum} (${pName}), Size "${sVal}": Selling Price must be a valid non-negative number.`, focusEl: sellInp };
+        }
+      }
+    }
+
+    return null;
+  }
+
   function validateAndGetFlattenedItems() {
     if (!productsData || productsData.length === 0) {
-      toast.show({ message: 'At least one product is required.', type: 'danger' });
       return null;
     }
 
@@ -9295,48 +9987,21 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
     for (let pIdx = 0; pIdx < productsData.length; pIdx++) {
       const prod = productsData[pIdx];
-      const pNum = pIdx + 1;
       const pName = (prod.productName || '').trim();
-      if (!pName) {
-        toast.show({ message: `Product #${pNum}: Product Name is required.`, type: 'danger' });
-        return null;
-      }
       const pCat = (prod.category || '').trim();
-      if (!pCat) {
-        toast.show({ message: `Product #${pNum} (${pName}): Category is required.`, type: 'danger' });
-        return null;
-      }
       const pBrand = (prod.brand || '').trim();
       const pId = prod.productId || '';
 
       if (!prod.sizes || prod.sizes.length === 0) {
-        toast.show({ message: `Product #${pNum} (${pName}): At least one size entry is required.`, type: 'danger' });
         return null;
       }
 
       for (let sIdx = 0; sIdx < prod.sizes.length; sIdx++) {
         const sz = prod.sizes[sIdx];
-        const sNum = sIdx + 1;
         const sVal = (sz.size || '').trim();
-        if (!sVal) {
-          toast.show({ message: `Product #${pNum} (${pName}), Size #${sNum}: Size / Variant is required.`, type: 'danger' });
-          return null;
-        }
         const q = parseInt(sz.qty, 10);
-        if (isNaN(q) || q <= 0) {
-          toast.show({ message: `Product #${pNum} (${pName}), Size "${sVal}": Quantity must be a positive number greater than 0.`, type: 'danger' });
-          return null;
-        }
         const bp = parseFloat(sz.buyingPrice);
-        if (isNaN(bp) || bp < 0) {
-          toast.show({ message: `Product #${pNum} (${pName}), Size "${sVal}": Buying Price must be a valid non-negative number.`, type: 'danger' });
-          return null;
-        }
         const sp = parseFloat(sz.sellingPrice);
-        if (isNaN(sp) || sp < 0) {
-          toast.show({ message: `Product #${pNum} (${pName}), Size "${sVal}": Selling Price must be a valid non-negative number.`, type: 'danger' });
-          return null;
-        }
 
         flattened.push({
           productId: pId,
@@ -9358,70 +10023,92 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   // 1. SAVE AS DRAFT (No Stock Change)
   mainCard.querySelector('#btn-save-draft-pur').addEventListener('click', () => {
+    if (isSubmitting) return;
+
+    const validationErr = getFirstValidationError();
+    if (validationErr) {
+      toast.show({ message: validationErr.message, type: 'danger' });
+      if (validationErr.focusEl && typeof validationErr.focusEl.focus === 'function') {
+        validationErr.focusEl.focus();
+      }
+      return;
+    }
+
     const supplier = mainCard.querySelector('#pur-supplier').value.trim();
     const date = mainCard.querySelector('#pur-date').value;
     const notes = mainCard.querySelector('#pur-notes').value.trim();
-
-    if (!supplier) {
-      toast.show({ message: 'Supplier name is required.', type: 'danger' });
-      return;
-    }
-    if (!date) {
-      toast.show({ message: 'Purchase date is required.', type: 'danger' });
-      return;
-    }
-
     const flattenedItems = validateAndGetFlattenedItems();
     if (!flattenedItems) return;
 
-    store.savePurchaseDraft({
-      supplier,
-      date,
-      notes,
-      items: flattenedItems
-    }, editingPurchase ? editingPurchase.id : null);
+    try {
+      isSubmitting = true;
+      updateFormValidity();
 
-    toast.show({ message: `Purchase order saved as Draft! Inventory stock is unchanged.`, type: 'success' });
-    if (onNavigate) onNavigate('purchases');
+      store.savePurchaseDraft({
+        supplier,
+        date,
+        notes,
+        items: flattenedItems
+      }, editingPurchase ? editingPurchase.id : null);
+
+      toast.show({ message: `Purchase order saved as Draft! Inventory stock is unchanged.`, type: 'success' });
+      if (onNavigate) onNavigate('purchases');
+    } catch (err) {
+      isSubmitting = false;
+      updateFormValidity();
+      toast.show({ message: err.message || 'Error saving draft purchase.', type: 'danger' });
+    }
   });
 
   // 2. SAVE & RECEIVE STOCK (Instant Receive)
   mainCard.querySelector('#btn-save-pur').addEventListener('click', () => {
+    if (isSubmitting) return;
+
+    const validationErr = getFirstValidationError();
+    if (validationErr) {
+      toast.show({ message: validationErr.message, type: 'danger' });
+      if (validationErr.focusEl && typeof validationErr.focusEl.focus === 'function') {
+        validationErr.focusEl.focus();
+      }
+      return;
+    }
+
     const supplier = mainCard.querySelector('#pur-supplier').value.trim();
     const date = mainCard.querySelector('#pur-date').value;
     const notes = mainCard.querySelector('#pur-notes').value.trim();
-
-    if (!supplier) {
-      toast.show({ message: 'Supplier name is required.', type: 'danger' });
-      return;
-    }
-    if (!date) {
-      toast.show({ message: 'Purchase date is required.', type: 'danger' });
-      return;
-    }
-
     const flattenedItems = validateAndGetFlattenedItems();
     if (!flattenedItems) return;
 
-    // Save as draft first if editing or new, then receive
-    const draft = store.savePurchaseDraft({
-      supplier,
-      date,
-      notes,
-      items: flattenedItems
-    }, editingPurchase ? editingPurchase.id : null);
+    try {
+      isSubmitting = true;
+      updateFormValidity();
 
-    // Auto approve and receive all
-    store.approvePurchase(draft.id);
-    const receiveMap = {};
-    (draft.items || []).forEach((item, idx) => {
-      receiveMap[idx] = item.qty;
-    });
-    store.receivePurchaseStock(draft.id, receiveMap, date, notes);
+      // Save as draft first if editing or new, then receive
+      const draft = store.savePurchaseDraft({
+        supplier,
+        date,
+        notes,
+        items: flattenedItems
+      }, editingPurchase ? editingPurchase.id : null);
 
-    toast.show({ message: `Purchase confirmed and stock received into inventory!`, type: 'success' });
-    if (onNavigate) onNavigate('purchases');
+      // Auto approve and receive all
+      store.approvePurchase(draft.id);
+      const receiveMap = {};
+      (draft.items || []).forEach((item, idx) => {
+        receiveMap[idx] = item.qty;
+      });
+      store.receivePurchaseStock(draft.id, receiveMap, date, notes);
+
+      toast.show({ message: `Purchase confirmed and stock received into inventory!`, type: 'success' });
+      if (onNavigate) onNavigate('purchases');
+    } catch (err) {
+      isSubmitting = false;
+      updateFormValidity();
+      toast.show({ message: err.message || 'Error saving purchase and receiving stock.', type: 'danger' });
+    }
   });
+
+  updateFormValidity();
 
   if (window.lucide) window.lucide.createIcons();
   return container;
@@ -11365,9 +12052,6 @@ function renderSettings(onThemeToggle, onNavigate = null) {
   const configCard = document.createElement('div');
   configCard.className = 'card';
   configCard.style.marginTop = '1.25rem';
-  const categoriesList = store.getCategories();
-  const brandsList = store.getBrands();
-  const sizesList = store.getSizes();
 
   configCard.innerHTML = `
     <div style="padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1.25rem;">
@@ -11381,10 +12065,8 @@ function renderSettings(onThemeToggle, onNavigate = null) {
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem;">
       <!-- Categories -->
       <div style="display: flex; flex-direction: column; gap: 0.65rem;">
-        <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Categories (${categoriesList.length})</label>
-        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-categories-list">
-          ${categoriesList.map(c => `<span class="badge badge-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.55rem;">${c}</span>`).join('')}
-        </div>
+        <label id="settings-categories-label" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Categories (0)</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-categories-list"></div>
         <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
           <input type="text" id="add-category-input" class="form-input" placeholder="New category..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
           <button type="button" class="btn btn-secondary btn-sm" id="btn-add-category">Add</button>
@@ -11393,10 +12075,8 @@ function renderSettings(onThemeToggle, onNavigate = null) {
 
       <!-- Brands -->
       <div style="display: flex; flex-direction: column; gap: 0.65rem;">
-        <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Brands (${brandsList.length})</label>
-        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-brands-list">
-          ${brandsList.map(b => `<span class="badge badge-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.55rem;">${b}</span>`).join('')}
-        </div>
+        <label id="settings-brands-label" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Brands (0)</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-brands-list"></div>
         <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
           <input type="text" id="add-brand-input" class="form-input" placeholder="New brand..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
           <button type="button" class="btn btn-secondary btn-sm" id="btn-add-brand">Add</button>
@@ -11405,10 +12085,8 @@ function renderSettings(onThemeToggle, onNavigate = null) {
 
       <!-- Sizes -->
       <div style="display: flex; flex-direction: column; gap: 0.65rem;">
-        <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Sizes (${sizesList.length})</label>
-        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-sizes-list">
-          ${sizesList.map(s => `<span class="badge badge-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.55rem; font-weight: 600;">${s}</span>`).join('')}
-        </div>
+        <label id="settings-sizes-label" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Sizes (0)</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-sizes-list"></div>
         <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
           <input type="text" id="add-size-input" class="form-input" placeholder="e.g. XXL, 42..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
           <button type="button" class="btn btn-secondary btn-sm" id="btn-add-size">Add</button>
@@ -11417,35 +12095,220 @@ function renderSettings(onThemeToggle, onNavigate = null) {
     </div>
   `;
 
-  configCard.querySelector('#btn-add-category').addEventListener('click', () => {
-    const inp = configCard.querySelector('#add-category-input');
-    const val = inp.value.trim();
-    if (val && store.addCategory(val)) {
-      inp.value = '';
+  function showInUseWarning(type, item, usage) {
+    const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+    const body = document.createElement('div');
+    body.style.cssText = 'display: flex; flex-direction: column; gap: 0.85rem; font-size: 0.85rem; color: var(--text-primary);';
+    body.innerHTML = `
+      <div style="display: flex; align-items: flex-start; gap: 0.65rem; padding: 0.75rem 0.9rem; background: var(--status-danger-bg, rgba(239, 68, 68, 0.08)); border: 1px solid var(--status-danger-border, rgba(239, 68, 68, 0.25)); border-radius: var(--radius-sm, 6px); color: var(--status-danger, #ef4444);">
+        <i data-lucide="alert-triangle" style="width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px;"></i>
+        <div>
+          <div style="font-weight: 600; font-size: 0.88rem; margin-bottom: 2px;">Cannot Delete ${typeLabel} "${item}"</div>
+          <div style="font-size: 0.8rem; opacity: 0.9;">This catalog option is currently linked to existing store records.</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+        <div style="font-weight: 600; color: var(--text-secondary); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em;">Active References:</div>
+        <div style="background: var(--bg-secondary); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm, 6px); border: 1px solid var(--border-color); font-size: 0.825rem; line-height: 1.45;">
+          ${usage.details}
+        </div>
+      </div>
+      <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.45;">
+        To preserve historical inventory, purchase orders, and sales integrity, deletion is prevented.
+      </div>
+      <div style="display: flex; align-items: center; gap: 0.45rem; padding: 0.6rem 0.8rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm, 6px); font-size: 0.8rem; color: var(--text-primary);">
+        <i data-lucide="info" style="width: 16px; height: 16px; color: var(--brand-primary); flex-shrink: 0;"></i>
+        <span><strong>Recommendation:</strong> If you no longer wish to stock or sell this item, consider deactivating or archiving the associated products in Inventory instead.</span>
+      </div>
+    `;
+
+    const okBtn = document.createElement('button');
+    okBtn.className = 'btn btn-primary';
+    okBtn.textContent = 'Understood';
+    okBtn.style.padding = '0.45rem 1.25rem';
+    okBtn.style.fontSize = '0.85rem';
+
+    const modalObj = createModal({
+      title: 'Safe Deletion Guard',
+      bodyElement: body,
+      footerButtons: [okBtn]
+    });
+
+    okBtn.addEventListener('click', () => {
+      modalObj.closeModal();
+    });
+
+    if (typeof window.alert === 'function' && window.alert.toString().indexOf('[native code]') === -1) {
+      window.alert(`Cannot delete ${type} "${item}" because it is currently used by ${usage.details}. Deactivate or archive associated products instead.`);
+    }
+  }
+
+  function handleDeleteCatalogItem(type, item) {
+    let usage;
+    if (type === 'category') usage = store.checkCategoryUsage(item);
+    else if (type === 'brand') usage = store.checkBrandUsage(item);
+    else if (type === 'size') usage = store.checkSizeUsage(item);
+
+    if (usage && usage.inUse) {
+      showInUseWarning(type, item, usage);
+      if (typeof toast !== 'undefined' && toast.show) {
+        toast.show({
+          message: `Cannot delete "${item}": in use by ${usage.summary}. Suggest deactivating or archiving instead.`,
+          type: 'danger'
+        });
+      }
+      return;
+    }
+
+    const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+    const confirmMsg = `Are you sure you want to delete ${type} "${item}" from the catalog?\n\nThis option is not currently in use and will be permanently removed.`;
+    const confirmed = (typeof window.confirm === 'function') ? window.confirm(confirmMsg) : true;
+    if (!confirmed) return;
+
+    let res;
+    if (type === 'category') res = store.deleteCategory(item);
+    else if (type === 'brand') res = store.deleteBrand(item);
+    else if (type === 'size') res = store.deleteSize(item);
+
+    if (res && res.success) {
+      if (typeof toast !== 'undefined' && toast.show) {
+        toast.show({ message: `${typeLabel} "${item}" deleted successfully.`, type: 'success' });
+      }
+      renderCatalogLists();
+    } else {
+      const errMsg = (res && res.error) || `Failed to delete ${type} "${item}".`;
+      if (typeof toast !== 'undefined' && toast.show) {
+        toast.show({ message: errMsg, type: 'danger' });
+      }
+    }
+  }
+
+  function createCatalogChip(type, name) {
+    const chip = document.createElement('span');
+    chip.className = 'badge badge-secondary settings-chip';
+    chip.style.cssText = 'font-size: 0.78rem; padding: 0.22rem 0.45rem 0.22rem 0.6rem; display: inline-flex; align-items: center; gap: 0.4rem; border-radius: var(--radius-sm, 6px); line-height: 1.2;';
+
+    const textSpan = document.createElement('span');
+    textSpan.style.fontWeight = '500';
+    textSpan.textContent = name;
+    chip.appendChild(textSpan);
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn-chip-delete';
+    delBtn.setAttribute('data-type', type);
+    delBtn.setAttribute('data-item', name);
+    delBtn.setAttribute('aria-label', `Delete ${type} ${name}`);
+    delBtn.title = `Delete ${type} "${name}"`;
+    delBtn.style.cssText = 'display: inline-flex; align-items: center; justify-content: center; background: transparent; border: none; padding: 0; margin: 0; width: 14px; height: 14px; cursor: pointer; color: var(--text-secondary); font-size: 0.85rem; font-weight: 700; line-height: 1; border-radius: 3px; transition: color 0.15s, background-color 0.15s;';
+    delBtn.innerHTML = '&times;';
+
+    delBtn.addEventListener('mouseenter', () => {
+      delBtn.style.color = 'var(--status-danger, #ef4444)';
+      delBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+    });
+    delBtn.addEventListener('mouseleave', () => {
+      delBtn.style.color = 'var(--text-secondary)';
+      delBtn.style.backgroundColor = 'transparent';
+    });
+
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      handleDeleteCatalogItem(type, name);
+    });
+
+    chip.appendChild(delBtn);
+    return chip;
+  }
+
+  function renderCatalogLists() {
+    const cats = store.getCategories();
+    const brs = store.getBrands();
+    const szs = store.getSizes();
+
+    const catLabel = configCard.querySelector('#settings-categories-label');
+    const catContainer = configCard.querySelector('#settings-categories-list');
+    if (catLabel) catLabel.textContent = `Categories (${cats.length})`;
+    if (catContainer) {
+      catContainer.innerHTML = '';
+      cats.forEach(c => catContainer.appendChild(createCatalogChip('category', c)));
+    }
+
+    const brLabel = configCard.querySelector('#settings-brands-label');
+    const brContainer = configCard.querySelector('#settings-brands-list');
+    if (brLabel) brLabel.textContent = `Brands (${brs.length})`;
+    if (brContainer) {
+      brContainer.innerHTML = '';
+      brs.forEach(b => brContainer.appendChild(createCatalogChip('brand', b)));
+    }
+
+    const szLabel = configCard.querySelector('#settings-sizes-label');
+    const szContainer = configCard.querySelector('#settings-sizes-list');
+    if (szLabel) szLabel.textContent = `Sizes (${szs.length})`;
+    if (szContainer) {
+      szContainer.innerHTML = '';
+      szs.forEach(s => szContainer.appendChild(createCatalogChip('size', s)));
+    }
+  }
+
+  renderCatalogLists();
+
+  const addCatInp = configCard.querySelector('#add-category-input');
+  const addCatBtn = configCard.querySelector('#btn-add-category');
+  function doAddCategory() {
+    const val = addCatInp.value.trim();
+    if (!val) {
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: 'Please enter a category name.', type: 'warning' });
+      return;
+    }
+    if (store.addCategory(val)) {
+      addCatInp.value = '';
       if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Category "${val}" added.`, type: 'success' });
-      if (window.appInstance) window.appInstance.render();
+      renderCatalogLists();
+    } else {
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Category "${val}" already exists.`, type: 'warning' });
     }
-  });
+  }
+  addCatBtn.addEventListener('click', doAddCategory);
+  addCatInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAddCategory(); } });
 
-  configCard.querySelector('#btn-add-brand').addEventListener('click', () => {
-    const inp = configCard.querySelector('#add-brand-input');
-    const val = inp.value.trim();
-    if (val && store.addBrand(val)) {
-      inp.value = '';
+  const addBrandInp = configCard.querySelector('#add-brand-input');
+  const addBrandBtn = configCard.querySelector('#btn-add-brand');
+  function doAddBrand() {
+    const val = addBrandInp.value.trim();
+    if (!val) {
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: 'Please enter a brand name.', type: 'warning' });
+      return;
+    }
+    if (store.addBrand(val)) {
+      addBrandInp.value = '';
       if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Brand "${val}" added.`, type: 'success' });
-      if (window.appInstance) window.appInstance.render();
+      renderCatalogLists();
+    } else {
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Brand "${val}" already exists.`, type: 'warning' });
     }
-  });
+  }
+  addBrandBtn.addEventListener('click', doAddBrand);
+  addBrandInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAddBrand(); } });
 
-  configCard.querySelector('#btn-add-size').addEventListener('click', () => {
-    const inp = configCard.querySelector('#add-size-input');
-    const val = inp.value.trim();
-    if (val && store.addSize(val)) {
-      inp.value = '';
-      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Size "${val}" added.`, type: 'success' });
-      if (window.appInstance) window.appInstance.render();
+  const addSizeInp = configCard.querySelector('#add-size-input');
+  const addSizeBtn = configCard.querySelector('#btn-add-size');
+  function doAddSize() {
+    const val = addSizeInp.value.trim();
+    if (!val) {
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: 'Please enter a size.', type: 'warning' });
+      return;
     }
-  });
+    if (store.addSize(val)) {
+      addSizeInp.value = '';
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Size "${val}" added.`, type: 'success' });
+      renderCatalogLists();
+    } else {
+      if (typeof toast !== 'undefined' && toast.show) toast.show({ message: `Size "${val}" already exists.`, type: 'warning' });
+    }
+  }
+  addSizeBtn.addEventListener('click', doAddSize);
+  addSizeInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doAddSize(); } });
 
   container.appendChild(configCard);
 

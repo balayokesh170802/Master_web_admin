@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test Add Purchase Empty Defaults & Product Name Validation</title>
+  <link rel="stylesheet" href="./src/styles/typography.css">
+  <link rel="stylesheet" href="./src/styles/theme.css">
+  <link rel="stylesheet" href="./src/styles/main.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="./src/App.js"></script>
+  <script>
+    window.testResults = [];
+
+    function recordTest(name, passed, details = '') {
+      const res = { name, passed, details };
+      window.testResults.push(res);
+      if (passed) {
+        console.log(`[PASS] ${name}: ${details}`);
+      } else {
+        console.error(`[FAIL] ${name}: ${details}`);
+      }
+    }
+
+    async function runAcceptanceTests() {
+      console.log('--- STARTING ACCEPTANCE TESTS ---');
+
+      try {
+        store.loadSampleData();
+
+        // -------------------------------------------------------------
+        // Test 1: Fresh Purchase shows Supplier/Date/Notes empty and exactly ONE empty product card with ONE empty size row
+        // -------------------------------------------------------------
+        let navigatedRoute = null;
+        const page1 = renderPurchases({ action: 'add' }, (route) => { navigatedRoute = route; });
+        document.getElementById('app').innerHTML = '';
+        document.getElementById('app').appendChild(page1);
+
+        const supplierInp1 = page1.querySelector('#pur-supplier');
+        const dateInp1 = page1.querySelector('#pur-date');
+        const notesInp1 = page1.querySelector('#pur-notes');
+        const cards1 = page1.querySelectorAll('.pur-accordion-card');
+        const card1 = cards1[0];
+        const card1Name = card1 ? card1.querySelector('.pur-name-input') : null;
+        const card1Cat = card1 ? card1.querySelector('.pur-cat-select') : null;
+        const card1Brand = card1 ? card1.querySelector('.pur-brand-input') : null;
+        const card1SizeRows = card1 ? card1.querySelectorAll('.pur-size-row') : [];
+        const card1SizeRow1 = card1SizeRows[0];
+        const sz1Select = card1SizeRow1 ? card1SizeRow1.querySelector('.pur-size-select') : null;
+        const sz1Qty = card1SizeRow1 ? card1SizeRow1.querySelector('.pur-qty-input') : null;
+        const sz1Buy = card1SizeRow1 ? card1SizeRow1.querySelector('.pur-buying-input') : null;
+        const sz1Sell = card1SizeRow1 ? card1SizeRow1.querySelector('.pur-selling-input') : null;
+        const sz1Cost = card1SizeRow1 ? card1SizeRow1.querySelector('.pur-cost-display') : null;
+        const sz1Val = card1SizeRow1 ? card1SizeRow1.querySelector('.pur-value-display') : null;
+        const saveDraftBtn1 = page1.querySelector('#btn-save-draft-pur');
+        const savePurBtn1 = page1.querySelector('#btn-save-pur');
+
+        recordTest(
+          'Test 1a: Supplier, Purchase Date, and Notes start empty on new purchase',
+          supplierInp1 && supplierInp1.value === '' &&
+          dateInp1 && dateInp1.value === '' &&
+          notesInp1 && notesInp1.value === '',
+          `Supplier: "${supplierInp1.value}", Date: "${dateInp1.value}", Notes: "${notesInp1.value}"`
+        );
+
+        recordTest(
+          'Test 1b: Exactly one empty product entry card is visible immediately by default',
+          cards1.length === 1 &&
+          card1Name && card1Name.value === '' &&
+          card1Cat && card1Cat.value === '' &&
+          card1Brand && card1Brand.value === '',
+          `Cards: ${cards1.length}, Name: "${card1Name ? card1Name.value : ''}", Cat: "${card1Cat ? card1Cat.value : ''}", Brand: "${card1Brand ? card1Brand.value : ''}"`
+        );
+
+        recordTest(
+          'Test 1c: Exactly one empty size row is displayed in initial product with neutral cost/value placeholders',
+          card1SizeRows.length === 1 &&
+          sz1Select && sz1Select.value === '' &&
+          sz1Qty && sz1Qty.value === '' &&
+          sz1Buy && sz1Buy.value === '' &&
+          sz1Sell && sz1Sell.value === '' &&
+          sz1Cost && sz1Cost.value === '' && sz1Cost.placeholder === '—' &&
+          sz1Val && sz1Val.value === '' && sz1Val.placeholder === '—' &&
+          saveDraftBtn1.disabled === true && savePurBtn1.disabled === true,
+          `Sizes: ${card1SizeRows.length}, Size: "${sz1Select ? sz1Select.value : ''}", Qty: "${sz1Qty ? sz1Qty.value : ''}", Cost: "${sz1Cost ? sz1Cost.value : ''}" (ph: "${sz1Cost ? sz1Cost.placeholder : ''}")`
+        );
+
+        // -------------------------------------------------------------
+        // Test 2: Adding another size row to product 1 and adding another product
+        // -------------------------------------------------------------
+        const addSizeBtn = page1.querySelector('.pur-add-size-btn');
+        addSizeBtn.click();
+        let currentCard1 = page1.querySelectorAll('.pur-accordion-card')[0];
+        let sizeRowsAfterAdd = currentCard1.querySelectorAll('.pur-size-row');
+
+        recordTest(
+          'Test 2a: Add Size creates an additional empty size row within product 1',
+          sizeRowsAfterAdd.length === 2 &&
+          sizeRowsAfterAdd[1].querySelector('.pur-size-select').value === '' &&
+          sizeRowsAfterAdd[1].querySelector('.pur-qty-input').value === '',
+          `Sizes in card 1: ${sizeRowsAfterAdd.length}`
+        );
+
+        // Remove the extra size row to keep card 1 clean for following tests
+        sizeRowsAfterAdd[1].querySelector('.pur-remove-size-btn').click();
+        currentCard1 = page1.querySelectorAll('.pur-accordion-card')[0];
+        const sizeRowsAfterRemove = currentCard1.querySelectorAll('.pur-size-row');
+        recordTest(
+          'Test 2b: Remove size row removes the row without resetting other entries',
+          sizeRowsAfterRemove.length === 1,
+          `Sizes after remove: ${sizeRowsAfterRemove.length}`
+        );
+
+        // Test Add Another Product button
+        const addProdBtn1 = page1.querySelector('#btn-add-pur-product');
+        addProdBtn1.click();
+        const cardsAfterAddProd = page1.querySelectorAll('.pur-accordion-card');
+        const card2 = cardsAfterAddProd[1];
+        const card2Sizes = card2 ? card2.querySelectorAll('.pur-size-row') : [];
+
+        recordTest(
+          'Test 2c: Add Another Product creates a second independent product card with 1 empty size row',
+          cardsAfterAddProd.length === 2 &&
+          card2.querySelector('.pur-name-input').value === '' &&
+          card2Sizes.length === 1,
+          `Cards: ${cardsAfterAddProd.length}, Card 2 sizes: ${card2Sizes.length}`
+        );
+
+        // Remove card 2 so tests 3-7 run on single card 1 cleanly
+        card2.querySelector('.pur-remove-product-btn').click();
+        const cardsAfterRemoveProd = page1.querySelectorAll('.pur-accordion-card');
+        recordTest(
+          'Test 2d: Removing product card 2 retains product card 1 without resetting it',
+          cardsAfterRemoveProd.length === 1,
+          `Cards after remove: ${cardsAfterRemoveProd.length}`
+        );
+
+        // Reference card1 for Test 3+
+        const card1AfterSize = cardsAfterRemoveProd[0];
+        const szSelect = card1AfterSize.querySelector('.pur-size-select');
+        const szQty = card1AfterSize.querySelector('.pur-qty-input');
+        const szBuy = card1AfterSize.querySelector('.pur-buying-input');
+        const szSell = card1AfterSize.querySelector('.pur-selling-input');
+
+        // -------------------------------------------------------------
+        // Test 3: Enter invalid product name & verify only ONE error displayed
+        // -------------------------------------------------------------
+        const cardNameInp = card1AfterSize.querySelector('.pur-name-input');
+        // Type spaces and blur
+        cardNameInp.value = '   ';
+        cardNameInp.dispatchEvent(new Event('input', { bubbles: true }));
+        cardNameInp.dispatchEvent(new Event('blur', { bubbles: true }));
+
+        const errorDivs = card1AfterSize.querySelectorAll('.pur-name-error');
+        const errorDiv = errorDivs[0];
+        const isErrorVisible = errorDiv && errorDiv.style.display !== 'none' && errorDiv.textContent.includes('Product Name is required');
+
+        recordTest(
+          'Test 3: Enter invalid product name displays exactly one clear error message',
+          errorDivs.length === 1 && isErrorVisible,
+          `Error count: ${errorDivs.length}, Visible: ${isErrorVisible}, Text: "${errorDiv.textContent}"`
+        );
+
+        // -------------------------------------------------------------
+        // Test 4: Attempt to save while name is invalid; confirm NO purchase saved
+        // -------------------------------------------------------------
+        const purCountBeforeSave = store.data.purchases.length;
+        navigatedRoute = null;
+        saveDraftBtn1.click();
+        savePurBtn1.click();
+
+        recordTest(
+          'Test 4: Attempting to save while product name is invalid is blocked; no purchase saved',
+          store.data.purchases.length === purCountBeforeSave && navigatedRoute === null,
+          `Purchases before: ${purCountBeforeSave}, after: ${store.data.purchases.length}, Route: ${navigatedRoute}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 5: Correct the name and verify the error disappears immediately
+        // -------------------------------------------------------------
+        cardNameInp.value = 'Premium Oxford Linen Shirt';
+        cardNameInp.dispatchEvent(new Event('input', { bubbles: true }));
+
+        const isErrorHiddenNow = errorDiv.style.display === 'none' && errorDiv.textContent === '';
+        recordTest(
+          'Test 5: Correcting the product name immediately removes the error',
+          isErrorHiddenNow,
+          `Display: "${errorDiv.style.display}", Text: "${errorDiv.textContent}"`
+        );
+
+        // -------------------------------------------------------------
+        // Test 6: Verify Save as Draft becomes available ONLY when all required fields valid
+        // -------------------------------------------------------------
+        recordTest(
+          'Test 6a: Save as Draft is still disabled because supplier, date, cat, and size inputs are incomplete',
+          saveDraftBtn1.disabled === true,
+          `Save Draft disabled: ${saveDraftBtn1.disabled}`
+        );
+
+        // Fill remaining required fields
+        supplierInp1.value = 'Alpha Global Textile Ltd';
+        supplierInp1.dispatchEvent(new Event('input', { bubbles: true }));
+        dateInp1.value = '2026-10-14';
+        dateInp1.dispatchEvent(new Event('input', { bubbles: true }));
+
+        const catSelectEl = card1AfterSize.querySelector('.pur-cat-select');
+        catSelectEl.value = 'Shirts';
+        catSelectEl.dispatchEvent(new Event('change', { bubbles: true }));
+
+        szSelect.value = 'L';
+        szSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        szQty.value = '25';
+        szQty.dispatchEvent(new Event('input', { bubbles: true }));
+        szBuy.value = '350';
+        szBuy.dispatchEvent(new Event('input', { bubbles: true }));
+        szSell.value = '700';
+        szSell.dispatchEvent(new Event('input', { bubbles: true }));
+
+        recordTest(
+          'Test 6b: Save as Draft becomes enabled when all required fields and entries are valid',
+          saveDraftBtn1.disabled === false && savePurBtn1.disabled === false,
+          `Save Draft disabled: ${saveDraftBtn1.disabled}, Save Pur disabled: ${savePurBtn1.disabled}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 7: Verify Save & Receive Stock cannot bypass validation
+        // -------------------------------------------------------------
+        // Break quantity to invalid <= 0
+        szQty.value = '0';
+        szQty.dispatchEvent(new Event('input', { bubbles: true }));
+
+        recordTest(
+          'Test 7a: Save & Receive Stock is disabled when size quantity is invalid (0)',
+          savePurBtn1.disabled === true,
+          `Save Pur disabled: ${savePurBtn1.disabled}`
+        );
+
+        navigatedRoute = null;
+        const countBeforeBypass = store.data.purchases.length;
+        savePurBtn1.click();
+
+        recordTest(
+          'Test 7b: Save & Receive Stock cannot bypass validation when clicked with invalid data',
+          store.data.purchases.length === countBeforeBypass && navigatedRoute === null,
+          `Purchases count: ${store.data.purchases.length}, Navigated: ${navigatedRoute}`
+        );
+
+        // Restore valid quantity
+        szQty.value = '30';
+        szQty.dispatchEvent(new Event('input', { bubbles: true }));
+
+        // Now save as Draft
+        navigatedRoute = null;
+        saveDraftBtn1.click();
+        const savedDraftPO = store.data.purchases.find(p => p.supplier === 'Alpha Global Textile Ltd');
+
+        recordTest(
+          'Test 7c: Valid purchase is successfully saved as draft',
+          savedDraftPO && savedDraftPO.status === 'Draft' && navigatedRoute === 'purchases',
+          `Draft ID: ${savedDraftPO ? savedDraftPO.id : 'null'}, Status: ${savedDraftPO ? savedDraftPO.status : 'null'}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 8: Open an existing saved draft and confirm previously saved data is preserved
+        // -------------------------------------------------------------
+        navigatedRoute = null;
+        const pageDraft = renderPurchases({ action: 'edit', id: savedDraftPO.id }, (route) => { navigatedRoute = route; });
+        document.getElementById('app').innerHTML = '';
+        document.getElementById('app').appendChild(pageDraft);
+
+        const draftSupplier = pageDraft.querySelector('#pur-supplier').value;
+        const draftDate = pageDraft.querySelector('#pur-date').value;
+        const draftCard = pageDraft.querySelector('.pur-accordion-card');
+        const draftProdName = draftCard ? draftCard.querySelector('.pur-name-input').value : '';
+        const draftCat = draftCard ? draftCard.querySelector('.pur-cat-select').value : '';
+        const draftSizeRow = draftCard ? draftCard.querySelector('.pur-size-row') : null;
+        const draftQty = draftSizeRow ? draftSizeRow.querySelector('.pur-qty-input').value : '';
+        const draftBuy = draftSizeRow ? draftSizeRow.querySelector('.pur-buying-input').value : '';
+
+        recordTest(
+          'Test 8: Editing existing draft preserves all previously saved data exactly',
+          draftSupplier === 'Alpha Global Textile Ltd' &&
+          draftDate === '2026-10-14' &&
+          draftProdName === 'Premium Oxford Linen Shirt' &&
+          draftCat === 'Shirts' &&
+          draftQty === '30' &&
+          Number(draftBuy) === 350,
+          `Supplier: "${draftSupplier}", Name: "${draftProdName}", Qty: "${draftQty}", Buy: "${draftBuy}"`
+        );
+
+        // -------------------------------------------------------------
+        // Test 9: Start a new purchase after saving and confirm no form values leak
+        // -------------------------------------------------------------
+        navigatedRoute = null;
+        const pageNewAfterSave = renderPurchases({ action: 'add' }, (route) => { navigatedRoute = route; });
+        document.getElementById('app').innerHTML = '';
+        document.getElementById('app').appendChild(pageNewAfterSave);
+
+        const newSupplier2 = pageNewAfterSave.querySelector('#pur-supplier').value;
+        const newDate2 = pageNewAfterSave.querySelector('#pur-date').value;
+        const newNotes2 = pageNewAfterSave.querySelector('#pur-notes').value;
+        const newCards2 = pageNewAfterSave.querySelectorAll('.pur-accordion-card');
+        const newCard1 = newCards2[0];
+        const newSizes2 = newCard1 ? newCard1.querySelectorAll('.pur-size-row') : [];
+        const newDraftBtn2 = pageNewAfterSave.querySelector('#btn-save-draft-pur');
+
+        recordTest(
+          'Test 9: Starting a new purchase after saving has zero leaked values and shows 1 fresh empty product entry',
+          newSupplier2 === '' &&
+          newDate2 === '' &&
+          newNotes2 === '' &&
+          newCards2.length === 1 &&
+          newCard1.querySelector('.pur-name-input').value === '' &&
+          newCard1.querySelector('.pur-cat-select').value === '' &&
+          newSizes2.length === 1 &&
+          newSizes2[0].querySelector('.pur-qty-input').value === '' &&
+          newDraftBtn2.disabled === true,
+          `Supplier: "${newSupplier2}", Date: "${newDate2}", Cards: ${newCards2.length}, Sizes: ${newSizes2.length}`
+        );
+
+      } catch (err) {
+        recordTest('Acceptance Suite Exception', false, err.stack || err.message);
+      }
+
+      const passed = window.testResults.filter(r => r.passed).length;
+      const failed = window.testResults.filter(r => !r.passed).length;
+      console.log(`--- ACCEPTANCE TESTS FINISHED: ${passed} Passed, ${failed} Failed ---`);
+
+      document.getElementById('app').innerHTML = `
+        <div id="test-summary" data-passed="${passed}" data-failed="${failed}" data-total="${window.testResults.length}">
+          <h2>Acceptance Tests: ${passed} Passed, ${failed} Failed (Total ${window.testResults.length})</h2>
+          <ul>
+            ${window.testResults.map(r => `<li style="color: ${r.passed ? 'green' : 'red'};">[${r.passed ? 'PASS' : 'FAIL'}] ${r.name}: ${r.details}</li>`).join('\n')}
+          </ul>
+        </div>
+      `;
+      window.verificationDone = true;
+    }
+
+    window.addEventListener('DOMContentLoaded', runAcceptanceTests);
+  </script>
+</body>
+</html>

@@ -5,8 +5,8 @@
   "description": "Internal clothing store web admin management system MVP",
   "type": "module",
   "scripts": {
-    "start": "python -m http.server 3000",
-    "dev": "python -m http.server 3000"
+    "start": "node server.js",
+    "dev": "node server.js"
   },
   "keywords": [
     "clothing-store",

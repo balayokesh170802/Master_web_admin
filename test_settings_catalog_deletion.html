@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test Store & Catalog Configuration Deletion</title>
+  <link rel="stylesheet" href="./src/styles/typography.css">
+  <link rel="stylesheet" href="./src/styles/theme.css">
+  <link rel="stylesheet" href="./src/styles/main.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="./src/App.js"></script>
+  <script>
+    window.testResults = [];
+
+    function recordTest(name, passed, details = '') {
+      const res = { name, passed, details };
+      window.testResults.push(res);
+      if (passed) {
+        console.log(`[PASS] ${name}: ${details}`);
+      } else {
+        console.error(`[FAIL] ${name}: ${details}`);
+      }
+    }
+
+    async function runAcceptanceTests() {
+      console.log('--- STARTING CATALOG DELETION ACCEPTANCE TESTS ---');
+
+      try {
+        store.loadSampleData();
+
+        // Snapshot initial counts
+        const initialProducts = JSON.stringify(store.data.products);
+        const initialPurchases = JSON.stringify(store.data.purchases);
+        const initialSales = JSON.stringify(store.data.sales);
+        const initialStockMovements = JSON.stringify(store.data.stockMovements);
+        const initialMetrics = store.getMetrics();
+
+        // Render Settings Page
+        let page = renderSettings();
+        document.getElementById('app').innerHTML = '';
+        document.getElementById('app').appendChild(page);
+
+        // Auto-accept window.confirm for deletion tests
+        window.confirm = () => true;
+
+        // -------------------------------------------------------------
+        // Test 1: Add and delete an unused category
+        // -------------------------------------------------------------
+        const catInp = page.querySelector('#add-category-input');
+        const catAddBtn = page.querySelector('#btn-add-category');
+        catInp.value = 'Activewear';
+        catAddBtn.click();
+
+        const catsAfterAdd = store.getCategories();
+        const catLabelAfterAdd = page.querySelector('#settings-categories-label').textContent;
+        const activewearChip = Array.from(page.querySelectorAll('#settings-categories-list .settings-chip'))
+          .find(el => el.textContent.includes('Activewear'));
+
+        recordTest(
+          'Test 1a: Add unused category "Activewear" succeeds and updates UI and count',
+          catsAfterAdd.includes('Activewear') &&
+          catLabelAfterAdd.includes('Categories (6)') &&
+          activewearChip !== undefined,
+          `Categories: ${catsAfterAdd.length}, Label: "${catLabelAfterAdd}", Chip found: ${Boolean(activewearChip)}`
+        );
+
+        // Delete "Activewear"
+        const delCatBtn = activewearChip.querySelector('.btn-chip-delete');
+        delCatBtn.click();
+
+        const catsAfterDel = store.getCategories();
+        const catLabelAfterDel = page.querySelector('#settings-categories-label').textContent;
+        const activewearChipAfterDel = Array.from(page.querySelectorAll('#settings-categories-list .settings-chip'))
+          .find(el => el.textContent.includes('Activewear'));
+
+        recordTest(
+          'Test 1b: Delete unused category "Activewear" removes it from catalog and updates count immediately',
+          !catsAfterDel.includes('Activewear') &&
+          catsAfterDel.length === 5 &&
+          catLabelAfterDel.includes('Categories (5)') &&
+          activewearChipAfterDel === undefined,
+          `Categories: ${catsAfterDel.length}, Label: "${catLabelAfterDel}", Chip remaining: ${Boolean(activewearChipAfterDel)}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 2: Add and delete an unused brand
+        // -------------------------------------------------------------
+        const brandInp = page.querySelector('#add-brand-input');
+        const brandAddBtn = page.querySelector('#btn-add-brand');
+        brandInp.value = 'AeroSport';
+        brandAddBtn.click();
+
+        const brandsAfterAdd = store.getBrands();
+        const brandLabelAfterAdd = page.querySelector('#settings-brands-label').textContent;
+        const aeroChip = Array.from(page.querySelectorAll('#settings-brands-list .settings-chip'))
+          .find(el => el.textContent.includes('AeroSport'));
+
+        recordTest(
+          'Test 2a: Add unused brand "AeroSport" succeeds and updates UI and count',
+          brandsAfterAdd.includes('AeroSport') &&
+          brandLabelAfterAdd.includes('Brands (5)') &&
+          aeroChip !== undefined,
+          `Brands: ${brandsAfterAdd.length}, Label: "${brandLabelAfterAdd}", Chip found: ${Boolean(aeroChip)}`
+        );
+
+        // Delete "AeroSport"
+        const delBrandBtn = aeroChip.querySelector('.btn-chip-delete');
+        delBrandBtn.click();
+
+        const brandsAfterDel = store.getBrands();
+        const brandLabelAfterDel = page.querySelector('#settings-brands-label').textContent;
+        const aeroChipAfterDel = Array.from(page.querySelectorAll('#settings-brands-list .settings-chip'))
+          .find(el => el.textContent.includes('AeroSport'));
+
+        recordTest(
+          'Test 2b: Delete unused brand "AeroSport" removes it from catalog and updates count immediately',
+          !brandsAfterDel.includes('AeroSport') &&
+          brandsAfterDel.length === 4 &&
+          brandLabelAfterDel.includes('Brands (4)') &&
+          aeroChipAfterDel === undefined,
+          `Brands: ${brandsAfterDel.length}, Label: "${brandLabelAfterDel}", Chip remaining: ${Boolean(aeroChipAfterDel)}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 3: Add and delete an unused size
+        // -------------------------------------------------------------
+        const sizeInp = page.querySelector('#add-size-input');
+        const sizeAddBtn = page.querySelector('#btn-add-size');
+        sizeInp.value = 'XXL';
+        sizeAddBtn.click();
+
+        const sizesAfterAdd = store.getSizes();
+        const sizeLabelAfterAdd = page.querySelector('#settings-sizes-label').textContent;
+        const xxlChip = Array.from(page.querySelectorAll('#settings-sizes-list .settings-chip'))
+          .find(el => el.textContent.includes('XXL'));
+
+        recordTest(
+          'Test 3a: Add unused size "XXL" succeeds and updates UI and count',
+          sizesAfterAdd.includes('XXL') &&
+          sizeLabelAfterAdd.includes('Sizes (5)') &&
+          xxlChip !== undefined,
+          `Sizes: ${sizesAfterAdd.length}, Label: "${sizeLabelAfterAdd}", Chip found: ${Boolean(xxlChip)}`
+        );
+
+        // Delete "XXL"
+        const delSizeBtn = xxlChip.querySelector('.btn-chip-delete');
+        delSizeBtn.click();
+
+        const sizesAfterDel = store.getSizes();
+        const sizeLabelAfterDel = page.querySelector('#settings-sizes-label').textContent;
+        const xxlChipAfterDel = Array.from(page.querySelectorAll('#settings-sizes-list .settings-chip'))
+          .find(el => el.textContent.includes('XXL'));
+
+        recordTest(
+          'Test 3b: Delete unused size "XXL" removes it from catalog and updates count immediately',
+          !sizesAfterDel.includes('XXL') &&
+          sizesAfterDel.length === 4 &&
+          sizeLabelAfterDel.includes('Sizes (4)') &&
+          xxlChipAfterDel === undefined,
+          `Sizes: ${sizesAfterDel.length}, Label: "${sizeLabelAfterDel}", Chip remaining: ${Boolean(xxlChipAfterDel)}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 4: Attempt to delete category/brand/size in use -> blocked by safety check
+        // -------------------------------------------------------------
+        // Try deleting category "Shirts"
+        const shirtsChip = Array.from(page.querySelectorAll('#settings-categories-list .settings-chip'))
+          .find(el => el.textContent.includes('Shirts'));
+        const delShirtsBtn = shirtsChip.querySelector('.btn-chip-delete');
+        delShirtsBtn.click();
+
+        const catsAfterBlockedDel = store.getCategories();
+        const catUsage = store.checkCategoryUsage('Shirts');
+        const warningModal = document.querySelector('.modal-overlay');
+
+        recordTest(
+          'Test 4a: Attempting to delete in-use category "Shirts" is blocked and preserves category',
+          catUsage.inUse === true &&
+          catsAfterBlockedDel.includes('Shirts') &&
+          warningModal !== null,
+          `InUse: ${catUsage.inUse}, Details: "${catUsage.details}", Shirts retained: ${catsAfterBlockedDel.includes('Shirts')}`
+        );
+
+        if (warningModal) warningModal.remove();
+
+        // Try deleting brand "ClassicFit"
+        const classicFitChip = Array.from(page.querySelectorAll('#settings-brands-list .settings-chip'))
+          .find(el => el.textContent.includes('ClassicFit'));
+        const delBrandClassicBtn = classicFitChip.querySelector('.btn-chip-delete');
+        delBrandClassicBtn.click();
+
+        const brandsAfterBlockedDel = store.getBrands();
+        const brandUsage = store.checkBrandUsage('ClassicFit');
+
+        recordTest(
+          'Test 4b: Attempting to delete in-use brand "ClassicFit" is blocked and preserves brand',
+          brandUsage.inUse === true &&
+          brandsAfterBlockedDel.includes('ClassicFit'),
+          `InUse: ${brandUsage.inUse}, Details: "${brandUsage.details}", Brand retained: ${brandsAfterBlockedDel.includes('ClassicFit')}`
+        );
+
+        const warningModal2 = document.querySelector('.modal-overlay');
+        if (warningModal2) warningModal2.remove();
+
+        // Try deleting size "M"
+        const sizeMChip = Array.from(page.querySelectorAll('#settings-sizes-list .settings-chip'))
+          .find(el => el.textContent.trim() === 'M' || el.textContent.includes('M'));
+        const delSizeMBtn = sizeMChip.querySelector('.btn-chip-delete');
+        delSizeMBtn.click();
+
+        const sizesAfterBlockedDel = store.getSizes();
+        const sizeUsage = store.checkSizeUsage('M');
+
+        recordTest(
+          'Test 4c: Attempting to delete in-use size "M" is blocked and preserves size variant',
+          sizeUsage.inUse === true &&
+          sizesAfterBlockedDel.includes('M'),
+          `InUse: ${sizeUsage.inUse}, Details: "${sizeUsage.details}", Size M retained: ${sizesAfterBlockedDel.includes('M')}`
+        );
+
+        const warningModal3 = document.querySelector('.modal-overlay');
+        if (warningModal3) warningModal3.remove();
+
+        // -------------------------------------------------------------
+        // Test 5: Verify deleted options stay removed after refresh / persistence
+        // -------------------------------------------------------------
+        // Add "TemporaryCat" then delete it, then re-load store from storage
+        store.addCategory('TemporaryCat');
+        store.deleteCategory('TemporaryCat');
+
+        store.loadFromStorage();
+        const reloadedCats = store.getCategories();
+
+        recordTest(
+          'Test 5: Deleted options stay removed after reload/storage sync',
+          !reloadedCats.includes('TemporaryCat') &&
+          !reloadedCats.includes('Activewear'),
+          `Reloaded categories: ${JSON.stringify(reloadedCats)}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 6: Verify historical purchase, sales, and inventory records remain intact
+        // -------------------------------------------------------------
+        const currentProducts = JSON.stringify(store.data.products);
+        const currentPurchases = JSON.stringify(store.data.purchases);
+        const currentSales = JSON.stringify(store.data.sales);
+        const currentStockMovements = JSON.stringify(store.data.stockMovements);
+        const currentMetrics = store.getMetrics();
+
+        recordTest(
+          'Test 6: Products, purchases, sales, stock movements, and inventory are 100% intact',
+          currentProducts === initialProducts &&
+          currentPurchases === initialPurchases &&
+          currentSales === initialSales &&
+          currentStockMovements === initialStockMovements &&
+          currentMetrics.totalStock === initialMetrics.totalStock &&
+          currentMetrics.stockValue === initialMetrics.stockValue,
+          `Products match: ${currentProducts === initialProducts}, Stock: ${currentMetrics.totalStock}/${initialMetrics.totalStock}, Purchases: ${store.data.purchases.length}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 7: Prevent duplicate additions and handle errors clearly
+        // -------------------------------------------------------------
+        const addDupCatRes = store.addCategory('Shirts');
+        const addDupBrandRes = store.addBrand('ClassicFit');
+        const addDupSizeRes = store.addSize('M');
+        const addEmptyCatRes = store.addCategory('   ');
+
+        recordTest(
+          'Test 7: Adding duplicate or empty catalog items is rejected',
+          addDupCatRes === false &&
+          addDupBrandRes === false &&
+          addDupSizeRes === false &&
+          addEmptyCatRes === false,
+          `DupCat: ${addDupCatRes}, DupBrand: ${addDupBrandRes}, DupSize: ${addDupSizeRes}, EmptyCat: ${addEmptyCatRes}`
+        );
+
+      } catch (err) {
+        recordTest('Acceptance Suite Exception', false, err.stack || err.message);
+      }
+
+      const passed = window.testResults.filter(r => r.passed).length;
+      const failed = window.testResults.filter(r => !r.passed).length;
+      console.log(`--- CATALOG DELETION TESTS FINISHED: ${passed} Passed, ${failed} Failed ---`);
+
+      document.getElementById('app').innerHTML = `
+        <div id="test-summary" data-passed="${passed}" data-failed="${failed}" data-total="${window.testResults.length}">
+          <h2>Catalog Deletion Acceptance Tests: ${passed} Passed, ${failed} Failed (Total ${window.testResults.length})</h2>
+          <ul>
+            ${window.testResults.map(r => `<li style="color: ${r.passed ? 'green' : 'red'};">[${r.passed ? 'PASS' : 'FAIL'}] ${r.name}: ${r.details}</li>`).join('\n')}
+          </ul>
+        </div>
+      `;
+      window.verificationDone = true;
+    }
+
+    window.addEventListener('DOMContentLoaded', runAcceptanceTests);
+  </script>
+</body>
+</html>

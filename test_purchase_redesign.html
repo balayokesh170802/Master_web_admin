@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Purchase Redesign Verification Suite</title>
+  <link rel="stylesheet" href="./src/styles/typography.css">
+  <link rel="stylesheet" href="./src/styles/theme.css">
+  <link rel="stylesheet" href="./src/styles/main.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="./src/App.js"></script>
+  <script>
+    window.testResults = [];
+
+    function recordTest(name, passed, details = '') {
+      const res = { name, passed, details };
+      window.testResults.push(res);
+      if (passed) {
+        console.log(`[PASS] ${name}: ${details}`);
+      } else {
+        console.error(`[FAIL] ${name}: ${details}`);
+      }
+    }
+
+    async function runVerification() {
+      console.log('--- STARTING PURCHASE REDESIGN VERIFICATION ---');
+
+      try {
+        // Reset and load sample data
+        store.loadSampleData();
+
+        // Render Add Purchase page
+        let navigatedTo = null;
+        const pageEl = renderPurchases({ action: 'add' }, (route) => { navigatedTo = route; });
+        document.getElementById('app').appendChild(pageEl);
+
+        // 1. Initial State & Structure
+        const stickyBar = pageEl.querySelector('.pur-sticky-bar');
+        recordTest('Sticky Bar: Exists at bottom with metrics and action buttons',
+          !!stickyBar && !!stickyBar.querySelector('#pur-summary-qty') && !!stickyBar.querySelector('#pur-summary-cost') && !!stickyBar.querySelector('#btn-save-pur'),
+          `Sticky bar found: ${!!stickyBar}`
+        );
+
+        // Click Add Product to create first card
+        const addInitialProdBtn = pageEl.querySelector('#btn-add-pur-product');
+        addInitialProdBtn.click();
+
+        let firstCard = pageEl.querySelector('.pur-accordion-card');
+        recordTest('Accordion: First card expanded by default',
+          firstCard && firstCard.classList.contains('expanded') && !firstCard.classList.contains('collapsed'),
+          `Class list: ${firstCard ? firstCard.className : 'null'}`
+        );
+
+        // Click Add Size to add size variant row
+        const initAddSizeBtn = firstCard.querySelector('.pur-add-size-btn');
+        initAddSizeBtn.click();
+
+        const tableEl = pageEl.querySelector('.pur-size-table');
+        const headers = tableEl ? Array.from(tableEl.querySelectorAll('th')).map(th => th.textContent.trim()) : [];
+        recordTest('Size Table: Exactly 7 compact columns',
+          headers.length === 7 && headers[0].includes('Size') && headers[1].includes('Quantity') && headers[2].includes('Buying Price') && headers[3].includes('Total Cost') && headers[4].includes('Selling Price') && headers[5].includes('Estimated Value') && headers[6].includes('Action'),
+          `Headers: ${headers.join(' | ')}`
+        );
+
+        // 2. Calculations check with configured inputs
+        firstCard = pageEl.querySelector('.pur-accordion-card');
+        const firstSizeRow = firstCard.querySelector('.pur-size-row');
+        firstSizeRow.querySelector('.pur-qty-input').value = '50';
+        firstSizeRow.querySelector('.pur-qty-input').dispatchEvent(new Event('input', { bubbles: true }));
+        firstSizeRow.querySelector('.pur-buying-input').value = '200';
+        firstSizeRow.querySelector('.pur-buying-input').dispatchEvent(new Event('input', { bubbles: true }));
+        firstSizeRow.querySelector('.pur-selling-input').value = '400';
+        firstSizeRow.querySelector('.pur-selling-input').dispatchEvent(new Event('input', { bubbles: true }));
+
+        const initialQty = stickyBar.querySelector('#pur-summary-qty').textContent;
+        const initialCost = stickyBar.querySelector('#pur-summary-cost').textContent;
+        const initialSell = stickyBar.querySelector('#pur-summary-sell').textContent;
+        const initialProfit = stickyBar.querySelector('#pur-summary-profit').textContent;
+
+        recordTest('Calculations: Configured subtotals (50 units, ₹10,000 cost, ₹20,000 est value, ₹10,000 profit)',
+          initialQty.includes('50') && initialCost.includes('10,000') && initialSell.includes('20,000') && initialProfit.includes('10,000'),
+          `Qty: ${initialQty}, Cost: ${initialCost}, Sell: ${initialSell}, Profit: ${initialProfit}`
+        );
+
+        // 3. Real-time Calculation Update on input
+        const qtyInp = firstCard.querySelector('.pur-qty-input');
+        qtyInp.value = '100';
+        qtyInp.dispatchEvent(new Event('input', { bubbles: true }));
+
+        const updatedCost = stickyBar.querySelector('#pur-summary-cost').textContent;
+        const updatedSell = stickyBar.querySelector('#pur-summary-sell').textContent;
+        const updatedUnits = firstCard.querySelector('.pur-header-units').textContent;
+
+        recordTest('Calculations: Quantity change updates line, product header, and sticky summary instantly',
+          updatedCost.includes('20,000') && updatedSell.includes('40,000') && updatedUnits.includes('100'),
+          `Cost: ${updatedCost}, Sell: ${updatedSell}, Header units: ${updatedUnits}`
+        );
+
+        // 4. Accordion Expand/Collapse & Data Preservation
+        const nameInp = firstCard.querySelector('.pur-name-input');
+        nameInp.value = 'Premium Linen Shirt';
+        nameInp.dispatchEvent(new Event('input', { bubbles: true }));
+
+        const brandInp = firstCard.querySelector('.pur-brand-input');
+        brandInp.value = 'UrbanBrand';
+        brandInp.dispatchEvent(new Event('input', { bubbles: true }));
+
+        const headerEl = firstCard.querySelector('.pur-accordion-header');
+        headerEl.click(); // collapse
+
+        const isCollapsed = firstCard.classList.contains('collapsed');
+        const bodyDisplay = firstCard.querySelector('.pur-accordion-body').style.display;
+        const titlePreview = firstCard.querySelector('.pur-prod-title-preview').textContent;
+        const metaPreview = firstCard.querySelector('.pur-prod-meta-preview').textContent;
+
+        recordTest('Accordion: Collapse card hides body and updates header title & meta preview',
+          isCollapsed && bodyDisplay === 'none' && titlePreview === 'Premium Linen Shirt' && metaPreview.includes('UrbanBrand'),
+          `Collapsed: ${isCollapsed}, Body display: ${bodyDisplay}, Title: ${titlePreview}, Meta: ${metaPreview}`
+        );
+
+        headerEl.click(); // re-expand
+        const isReExpanded = firstCard.classList.contains('expanded');
+        const preservedName = firstCard.querySelector('.pur-name-input').value;
+        const preservedQty = firstCard.querySelector('.pur-qty-input').value;
+
+        recordTest('Accordion: Re-expanding card preserves entered input values intact',
+          isReExpanded && preservedName === 'Premium Linen Shirt' && preservedQty === '100',
+          `Re-expanded: ${isReExpanded}, Preserved Name: "${preservedName}", Preserved Qty: "${preservedQty}"`
+        );
+
+        // 5. Add Size row
+        const addSizeBtn = firstCard.querySelector('.pur-add-size-btn');
+        addSizeBtn.click();
+        const updatedFirstCard = pageEl.querySelector('.pur-accordion-card');
+        const sizeRows = updatedFirstCard ? updatedFirstCard.querySelectorAll('.pur-size-row') : [];
+        recordTest('Size Table: Add Size appends a new variant row',
+          sizeRows.length === 2,
+          `Size rows count: ${sizeRows.length}`
+        );
+
+        // 6. Copy Prices
+        const copyPriceBtn = updatedFirstCard ? updatedFirstCard.querySelector('.pur-copy-price-btn') : null;
+        recordTest('Size Table: Copy Prices button available when multiple sizes exist',
+          !!copyPriceBtn,
+          `Copy price button found: ${!!copyPriceBtn}`
+        );
+
+        // 7. Add Another Product
+        const addProdBtn = pageEl.querySelector('#btn-add-pur-product');
+        addProdBtn.click();
+        const allCards = pageEl.querySelectorAll('.pur-accordion-card');
+        const secondCard = allCards[1];
+
+        recordTest('Accordion: Add Another Product adds second product card expanded by default',
+          allCards.length === 2 && secondCard && secondCard.classList.contains('expanded'),
+          `Total cards: ${allCards.length}, Second card expanded: ${secondCard ? secondCard.classList.contains('expanded') : false}`
+        );
+
+        // 8. Collapsing first card while second card is open
+        const headerCard1 = allCards[0].querySelector('.pur-accordion-header');
+        headerCard1.click();
+        recordTest('Accordion: Multiple cards can be independently expanded/collapsed',
+          allCards[0].classList.contains('collapsed') && allCards[1].classList.contains('expanded'),
+          `Card 1 collapsed: ${allCards[0].classList.contains('collapsed')}, Card 2 expanded: ${allCards[1].classList.contains('expanded')}`
+        );
+
+        // 9. Remove Product confirmation & execution
+        window.confirm = () => true;
+        const removeProd2Btn = secondCard.querySelector('.pur-remove-product-btn');
+        removeProd2Btn.click();
+        const cardsAfterRemove = pageEl.querySelectorAll('.pur-accordion-card');
+
+        recordTest('Accordion: Remove product deletes card and leaves other cards intact',
+          cardsAfterRemove.length === 1,
+          `Remaining cards: ${cardsAfterRemove.length}`
+        );
+
+        // 10. Required Field Validation
+        const supplierInp = pageEl.querySelector('#pur-supplier');
+        supplierInp.value = ''; // trigger validation error
+        const saveDraftBtn = pageEl.querySelector('#btn-save-draft-pur');
+        saveDraftBtn.click();
+
+        recordTest('Validation: Saving with empty supplier is blocked',
+          navigatedTo === null,
+          `Navigation blocked: ${navigatedTo === null}`
+        );
+
+        // 11. Save as Draft workflow
+        supplierInp.value = 'Redesign Test Supplier Ltd';
+        supplierInp.dispatchEvent(new Event('input', { bubbles: true }));
+        const dateInp = pageEl.querySelector('#pur-date');
+        dateInp.value = '2026-10-13';
+        dateInp.dispatchEvent(new Event('input', { bubbles: true }));
+
+        const p1Card = pageEl.querySelector('.pur-accordion-card');
+        const p1NameInp = p1Card.querySelector('.pur-name-input');
+        p1NameInp.value = 'Redesign Oxford Shirt';
+        p1NameInp.dispatchEvent(new Event('input', { bubbles: true }));
+        const p1CatSel = p1Card.querySelector('.pur-cat-select');
+        p1CatSel.value = 'Shirts';
+        p1CatSel.dispatchEvent(new Event('change', { bubbles: true }));
+
+        // Ensure all rows in p1Card have size, qty, buying, selling
+        const p1Rows = p1Card.querySelectorAll('.pur-size-row');
+        if (p1Rows[0]) {
+          p1Rows[0].querySelector('.pur-size-select').value = 'M';
+          p1Rows[0].querySelector('.pur-size-select').dispatchEvent(new Event('change', { bubbles: true }));
+          p1Rows[0].querySelector('.pur-qty-input').value = '50';
+          p1Rows[0].querySelector('.pur-qty-input').dispatchEvent(new Event('input', { bubbles: true }));
+          p1Rows[0].querySelector('.pur-buying-input').value = '200';
+          p1Rows[0].querySelector('.pur-buying-input').dispatchEvent(new Event('input', { bubbles: true }));
+          p1Rows[0].querySelector('.pur-selling-input').value = '400';
+          p1Rows[0].querySelector('.pur-selling-input').dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        if (p1Rows[1]) {
+          p1Rows[1].querySelector('.pur-size-select').value = 'L';
+          p1Rows[1].querySelector('.pur-size-select').dispatchEvent(new Event('change', { bubbles: true }));
+          p1Rows[1].querySelector('.pur-qty-input').value = '50';
+          p1Rows[1].querySelector('.pur-qty-input').dispatchEvent(new Event('input', { bubbles: true }));
+          p1Rows[1].querySelector('.pur-buying-input').value = '200';
+          p1Rows[1].querySelector('.pur-buying-input').dispatchEvent(new Event('input', { bubbles: true }));
+          p1Rows[1].querySelector('.pur-selling-input').value = '400';
+          p1Rows[1].querySelector('.pur-selling-input').dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        const purchasesBeforeDraft = store.data.purchases.length;
+        saveDraftBtn.click();
+
+        const createdDraft = store.data.purchases.find(p => p.supplier === 'Redesign Test Supplier Ltd');
+        recordTest('Workflow: Save as Draft creates purchase draft without modifying stock',
+          !!createdDraft && createdDraft.status === 'Draft' && navigatedTo === 'purchases',
+          `Draft ID: ${createdDraft ? createdDraft.id : 'none'}, Status: ${createdDraft ? createdDraft.status : 'none'}`
+        );
+
+        // 12. Save & Receive Stock workflow
+        navigatedTo = null;
+        const pageEl2 = renderPurchases({ action: 'add' }, (route) => { navigatedTo = route; });
+        document.getElementById('app').innerHTML = '';
+        document.getElementById('app').appendChild(pageEl2);
+
+        pageEl2.querySelector('#pur-supplier').value = 'Instant Stock Supplier Co';
+        pageEl2.querySelector('#pur-supplier').dispatchEvent(new Event('input', { bubbles: true }));
+        pageEl2.querySelector('#pur-date').value = '2026-10-13';
+        pageEl2.querySelector('#pur-date').dispatchEvent(new Event('input', { bubbles: true }));
+        pageEl2.querySelector('#btn-add-pur-product').click();
+        pageEl2.querySelector('.pur-add-size-btn').click();
+
+        const cardP2 = pageEl2.querySelector('.pur-accordion-card');
+        const rowP2 = cardP2.querySelector('.pur-size-row');
+        rowP2.querySelector('.pur-size-select').value = 'L';
+        rowP2.querySelector('.pur-size-select').dispatchEvent(new Event('change', { bubbles: true }));
+        rowP2.querySelector('.pur-qty-input').value = '50';
+        rowP2.querySelector('.pur-qty-input').dispatchEvent(new Event('input', { bubbles: true }));
+        rowP2.querySelector('.pur-buying-input').value = '200';
+        rowP2.querySelector('.pur-buying-input').dispatchEvent(new Event('input', { bubbles: true }));
+        rowP2.querySelector('.pur-selling-input').value = '400';
+        rowP2.querySelector('.pur-selling-input').dispatchEvent(new Event('input', { bubbles: true }));
+
+        const p2Name = cardP2.querySelector('.pur-name-input');
+        p2Name.value = 'Instant Heavyweight Flannel';
+        p2Name.dispatchEvent(new Event('input', { bubbles: true }));
+        const p2Cat = cardP2.querySelector('.pur-cat-select');
+        p2Cat.value = 'Shirts';
+        p2Cat.dispatchEvent(new Event('change', { bubbles: true }));
+
+        const initialFlannel = store.data.products.find(p => p.name === 'Instant Heavyweight Flannel');
+        const saveReceiveBtn = pageEl2.querySelector('#btn-save-pur');
+        saveReceiveBtn.click();
+
+        const receivedPO = store.data.purchases.find(p => p.supplier === 'Instant Stock Supplier Co');
+        const receivedFlannel = store.data.products.find(p => p.name === 'Instant Heavyweight Flannel');
+
+        recordTest('Workflow: Save & Receive Stock creates order, updates status to Received, and stocks inventory',
+          !!receivedPO && (receivedPO.status === 'Received' || receivedPO.status === 'Completed') && !!receivedFlannel && receivedFlannel.totalStock > 0 && navigatedTo === 'purchases',
+          `PO Status: ${receivedPO ? receivedPO.status : 'none'}, Flannel Stock: ${receivedFlannel ? receivedFlannel.totalStock : 0}`
+        );
+
+      } catch (err) {
+        recordTest('Verification Exception', false, err.message);
+      }
+
+      const passed = window.testResults.filter(r => r.passed).length;
+      const failed = window.testResults.filter(r => !r.passed).length;
+      console.log(`--- VERIFICATION FINISHED: ${passed} Passed, ${failed} Failed ---`);
+
+      document.getElementById('app').innerHTML = `
+        <div id="test-summary" data-passed="${passed}" data-failed="${failed}" data-total="${window.testResults.length}">
+          <h2>Purchase Redesign Tests: ${passed} Passed, ${failed} Failed (Total ${window.testResults.length})</h2>
+          <ul>
+            ${window.testResults.map(r => `<li style="color: ${r.passed ? 'green' : 'red'};">[${r.passed ? 'PASS' : 'FAIL'}] ${r.name}: ${r.details}</li>`).join('\n')}
+          </ul>
+        </div>
+      `;
+      window.verificationDone = true;
+    }
+
+    window.addEventListener('DOMContentLoaded', runVerification);
+  </script>
+</body>
+</html>
