@@ -245,8 +245,8 @@
           ]
         });
 
-        recordTest('Purchases-CRUD', 'Create Purchase Draft succeeds with status Draft',
-          purDraft && purDraft.status === 'Draft' && purDraft.items.length === 2,
+        recordTest('Purchases-CRUD', 'Create Purchase succeeds with status Waiting for Receive',
+          purDraft && purDraft.status === 'Waiting for Receive' && purDraft.items.length === 2,
           `Status: ${purDraft ? purDraft.status : 'null'}, Items: ${purDraft ? purDraft.items.length : 0}`
         );
 
@@ -287,22 +287,28 @@
           `Items: ${updatedPurDraft ? updatedPurDraft.items.length : 0}, Item 0 Qty: ${updatedPurDraft && updatedPurDraft.items[0] ? updatedPurDraft.items[0].qty : 'null'}`
         );
 
-        // U2: Cannot receive stock while purchase is in Draft status
-        let receiveDraftThrew = false;
+        // U2: with approval removed, a purchase waiting for receipt can be
+        // received straight away. Checked on a throwaway order so the one
+        // under test keeps its full outstanding quantity for U4/U5 below.
+        let receiveWaitingThrew = false;
         try {
-          store.receivePurchaseStock(purDraft.id, { 0: 10 }, '2026-10-13');
+          const probePO = store.savePurchaseDraft({
+            supplier: 'QA Probe Supplier', date: '2026-10-13',
+            items: [{ product: 'QA Probe Shirt', category: 'Shirts', brand: 'QAB', size: 'M', qty: 4, buyingPrice: 50, sellingPrice: 120 }]
+          });
+          store.receivePurchaseStock(probePO.id, { 0: 4 }, '2026-10-13');
+          store.deletePurchase(probePO.id);
         } catch (e) {
-          receiveDraftThrew = true;
+          receiveWaitingThrew = true;
         }
-        recordTest('Purchases-CRUD', 'Receiving stock on unapproved Draft is blocked',
-          receiveDraftThrew,
-          `Blocked: ${receiveDraftThrew}`
+        recordTest('Purchases-CRUD', 'Receiving a waiting purchase is allowed (no approval step)',
+          !receiveWaitingThrew,
+          `Blocked: ${receiveWaitingThrew}`
         );
 
-        // U3: Approve Purchase
-        store.approvePurchase(purDraft.id);
-        recordTest('Purchases-CRUD', 'Approve Purchase transitions status to Approved',
-          purDraft.status === 'Approved',
+        // U3: status stays Waiting for Receive until stock is received
+        recordTest('Purchases-CRUD', 'Purchase stays Waiting for Receive until received',
+          purDraft.status === 'Waiting for Receive' || purDraft.status === 'Partially Received',
           `Status: ${purDraft.status}`
         );
 
@@ -349,7 +355,6 @@
           date: '2026-10-13',
           items: [{ product: 'QA Silk Shirt', category: 'Shirts', brand: 'ClassicFit', size: '38', qty: 10, buyingPrice: 400, sellingPrice: 900 }]
         });
-        store.approvePurchase(pur2.id);
         let negativeReceiveThrew = false;
         try {
           store.receivePurchaseStock(pur2.id, { 0: -5 }, '2026-10-13');
@@ -600,7 +605,6 @@
             { product: 'Scenario 1 Shirt', size: 'L', qty: 15, buyingPrice: 300, sellingPrice: 750 }
           ]
         });
-        store.approvePurchase(po1.id);
         store.receivePurchaseStock(po1.id, { 0: 20, 1: 15 }, '2026-10-13');
         const vM = p1Found.variants.find(v => v.size === 'M');
         const vL = p1Found.variants.find(v => v.size === 'L');
@@ -616,7 +620,6 @@
             { product: 'Scenario 1 Shirt', size: 'S', qty: 30, buyingPrice: 300, sellingPrice: 750 }
           ]
         });
-        store.approvePurchase(po2.id);
         const stockBeforePartial = p1Found.totalStock; // 35
         store.receivePurchaseStock(po2.id, { 0: 10 }, '2026-10-13');
         const vS = p1Found.variants.find(v => v.size === 'S');
@@ -815,7 +818,6 @@
           supplier: 'Apex Apparel Ltd',
           items: [{ product: 'Joggers Historical Test', size: 'Standard', qty: 150, buyingPrice: 400, sellingPrice: 900 }]
         });
-        store.approvePurchase(archPO.id);
         store.receivePurchaseStock(archPO.id, { 0: 150 }, '2026-10-13');
 
         // Sell 50 units
@@ -907,7 +909,7 @@
 
         // 1. Delete Purchase tests
         // 1.1 Deleting Draft purchase removes PO and does not change stock
-        const targetDraft = store.data.purchases.find(p => p.status === 'Draft');
+        const targetDraft = store.data.purchases.find(p => p.status === 'Waiting for Receive');
         if (targetDraft) {
           const initialProdsStock = store.getMetrics().totalStock;
           const initialPurchasesCount = store.data.purchases.length;
@@ -1035,12 +1037,20 @@
         );
 
         // 4. UI Actions verification
-        // 4.1 Purchases table action buttons include .action-delete-btn
+        // 4.1 A received purchase is view-only; a waiting one offers Receive,
+        //     View and Edit. Delete is no longer a row action on either.
+        // A received purchase is view-only now, so seed one that is still
+        // waiting for receipt before checking the row actions render.
+        store.savePurchaseDraft({
+          supplier: 'QA Waiting Supplier', date: '2026-10-14',
+          items: [{ product: 'QA Waiting Shirt', category: 'Shirts', brand: 'QAB', size: 'M', qty: 6, buyingPrice: 90, sellingPrice: 190 }]
+        });
         const purContainer = renderPurchases();
+        const purReceiveBtns = purContainer.querySelectorAll('.action-receive-btn');
         const purDeleteBtns = purContainer.querySelectorAll('.action-delete-btn');
-        recordTest('Delete-Actions', 'Purchases table renders action-delete-btn for table rows',
-          purDeleteBtns.length > 0,
-          `Found ${purDeleteBtns.length} delete buttons on purchases page`
+        recordTest('Delete-Actions', 'Purchases table renders Receive on waiting rows and no row-level delete',
+          purReceiveBtns.length > 0 && purDeleteBtns.length === 0,
+          `Receive buttons: ${purReceiveBtns.length}, delete buttons: ${purDeleteBtns.length}`
         );
 
         // 4.2 Sales table action buttons include .delete-sale-btn
@@ -1366,7 +1376,12 @@
         const purEditMissingEl = renderEditPurchasePage({ purchaseId: 'NON-EXISTENT-PO' });
         const hasPurMissingError = purEditMissingEl && purEditMissingEl.innerHTML.includes('Purchase Order Not Found');
 
-        const testPur = store.data.purchases[0];
+        // Only a purchase still waiting for receipt opens in the edit form.
+        const testPur = store.data.purchases.find(p => p.status === 'Waiting for Receive')
+          || store.savePurchaseDraft({
+            supplier: 'QA Edit Supplier', date: '2026-10-14',
+            items: [{ product: 'QA Edit Shirt', category: 'Shirts', brand: 'QAB', size: 'M', qty: 4, buyingPrice: 80, sellingPrice: 160 }]
+          });
         const purEditEl = renderEditPurchasePage({ purchaseId: testPur.id });
         const purSuppInput = purEditEl.querySelector('#edit-pur-supplier');
         const hasPurPreFilled = purSuppInput && purSuppInput.value === testPur.supplier;
@@ -1416,7 +1431,6 @@
 
         // 12.8 Purchase Edit on Received Order: Reconciles stock and rejects unsafe reductions
         // Receive draft to turn it into Received status
-        store.approvePurchase(draftPur.id);
         store.receivePurchaseStock(draftPur.id, { 0: 35 }, '2026-10-14', 'Received for edit testing');
         const stockAfterReceived = testVar.stock;
 
@@ -1453,6 +1467,12 @@
         store.deletePurchase(draftPur.id);
 
         // 12.9 Edit action buttons exist across all tables
+        // A received purchase is view-only now, so seed one that is still
+        // waiting for receipt before checking the row actions render.
+        store.savePurchaseDraft({
+          supplier: 'QA Waiting Supplier', date: '2026-10-14',
+          items: [{ product: 'QA Waiting Shirt', category: 'Shirts', brand: 'QAB', size: 'M', qty: 6, buyingPrice: 90, sellingPrice: 190 }]
+        });
         const purContainer = renderPurchases({}, () => {});
         const purEditBtns = purContainer.querySelectorAll('.action-edit-btn');
 
@@ -1523,7 +1543,6 @@
           );
 
           // 13.2 When draft is later received, confirmed quantities are applied exactly once
-          store.approvePurchase(s13Draft.id);
           store.receivePurchaseStock(s13Draft.id, { 0: 45 }, '2026-10-15', 'Full receipt');
           const stockAfterFirstReceipt = targetVar.stock;
           recordTest('Purchase-Sync-Views', '13.2 Approving and receiving draft applies confirmed stock exactly once',

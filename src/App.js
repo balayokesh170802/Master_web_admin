@@ -1444,6 +1444,38 @@ const emptyInitialData = {
 
 const initialData = emptyInitialData;
 
+// ==========================================
+// PURCHASE LIFECYCLE
+// ------------------------------------------
+// Waiting for Receive  ->  Received
+//
+// There is no approval step. 'Draft' and 'Approved' are legacy statuses from
+// the old approval workflow; both meant "ordered, no stock moved", which is
+// exactly what 'Waiting for Receive' means now. Existing records are migrated
+// on load, and every check below still accepts the legacy values so that a
+// record written by an older build behaves correctly either way.
+// 'Partially Received' is NOT a legacy status — it is a real state produced
+// when a delivery arrives short, and it keeps its own handling.
+// ==========================================
+const PURCHASE_STATUS_WAITING = 'Waiting for Receive';
+const PURCHASE_STATUS_RECEIVED = 'Received';
+const PURCHASE_LEGACY_PENDING = ['Draft', 'Approved'];
+
+/** True while a purchase is ordered but no stock has been moved for it. */
+function isPurchaseWaiting(status) {
+  return status === PURCHASE_STATUS_WAITING || PURCHASE_LEGACY_PENDING.includes(status);
+}
+
+/** True once a purchase is fully received and therefore view-only. */
+function isPurchaseReceived(status) {
+  return status === PURCHASE_STATUS_RECEIVED || status === 'Completed';
+}
+
+/** True while a purchase can still take stock in. */
+function isPurchaseReceivable(status) {
+  return isPurchaseWaiting(status) || status === 'Partially Received';
+}
+
 class StoreManager {
   constructor() {
     try {
@@ -1540,8 +1572,8 @@ class StoreManager {
     const productReceivedMap = {};
     const historicalCostMap = {};
     this.data.purchases.forEach(pur => {
-      const isCompletedOrReceived = pur.status === 'Completed' || pur.status === 'Received';
-      const isDraftOrApproved = pur.status === 'Draft' || pur.status === 'Approved';
+      const isCompletedOrReceived = isPurchaseReceived(pur.status);
+      const isDraftOrApproved = isPurchaseWaiting(pur.status);
 
       let purRecSum = 0;
       (pur.items || []).forEach(it => {
@@ -1727,6 +1759,19 @@ class StoreManager {
         }
       });
     }
+
+    // 5b. Retire the approval workflow on existing records.
+    //     Draft and Approved both meant "ordered, nothing received", so they
+    //     become 'Waiting for Receive'. Nothing else about the record is
+    //     touched: items, quantities, prices, receipt history and any
+    //     Received / Partially Received status are all left exactly as saved.
+    (this.data.purchases || []).forEach(pur => {
+      if (!pur) return;
+      if (PURCHASE_LEGACY_PENDING.includes(pur.status)) {
+        pur.legacyStatus = pur.status;
+        pur.status = PURCHASE_STATUS_WAITING;
+      }
+    });
 
     // 6. Build the payment ledger for sales saved before it existed.
     //    Monetary values are preserved; only payments[] is inferred.
@@ -2429,7 +2474,7 @@ class StoreManager {
         pOrdUnits += ord;
 
         let rec = 0;
-        if (p.status === 'Draft' || p.status === 'Approved') {
+        if (isPurchaseWaiting(p.status)) {
           rec = 0;
         } else if (it.receivedQty !== undefined && it.receivedQty !== null) {
           rec = Math.max(0, Number(it.receivedQty) || 0);
@@ -2441,7 +2486,7 @@ class StoreManager {
         pRecUnits += rec;
       });
 
-      if (p.status !== 'Draft' && p.status !== 'Approved') {
+      if (!isPurchaseWaiting(p.status)) {
         if (p.totalReceived !== undefined && Number(p.totalReceived) > 0) {
           pRecUnits = Math.max(pRecUnits, Number(p.totalReceived));
         } else if (p.receivedQuantity !== undefined && Number(p.receivedQuantity) > 0) {
@@ -2881,7 +2926,7 @@ class StoreManager {
         productCount: itemRecords.length,
         totalQuantity: totalQty,
         totalAmount: totalAmount,
-        status: 'Draft',
+        status: PURCHASE_STATUS_WAITING,
         totalReceived: 0,
         receivedQuantity: 0,
         items: itemRecords,
@@ -2895,25 +2940,39 @@ class StoreManager {
     return purchaseRecord;
   }
 
-  approvePurchase(purchaseId) {
-    const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
-    if (!purchase) throw new Error('Purchase not found');
-    if (purchase.status !== 'Draft') throw new Error('Only Draft purchases can be approved');
+  /**
+   * Save a purchase AND receive its full ordered quantity in one step.
+   * Used by the "Received Product" button on the Add Purchase page.
+   *
+   * Stock moves exactly once: receivePurchaseStock() is the only thing that
+   * touches inventory, and it refuses a purchase that is already received.
+   */
+  savePurchaseAndReceive(payload, existingId = null) {
+    const purchase = this.savePurchaseDraft(payload, existingId);
 
-    purchase.status = 'Approved';
-    purchase.approvedAt = new Date().toISOString();
-    this.save();
-    return purchase;
+    const receiveMap = {};
+    (purchase.items || []).forEach((item, idx) => {
+      receiveMap[item.id || idx] = Number(item.qty) || 0;
+    });
+
+    return this.receivePurchaseStock(
+      purchase.id,
+      receiveMap,
+      payload.date || purchase.date,
+      payload.notes || ''
+    );
   }
 
   receivePurchaseStock(purchaseId, receivedQuantitiesMap, receiptDate, notes = '') {
     const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
     if (!purchase) throw new Error('Purchase not found');
-    if (purchase.status !== 'Approved' && purchase.status !== 'Partially Received') {
-      if (purchase.status === 'Received' || purchase.status === 'Completed') {
+    // No approval step: a purchase waiting for receipt can be received
+    // directly. Receiving twice is still refused, so stock moves only once.
+    if (!isPurchaseReceivable(purchase.status)) {
+      if (isPurchaseReceived(purchase.status)) {
         throw new Error(`Purchase order ${purchaseId} has already been received.`);
       }
-      throw new Error(`Only Approved or Partially Received purchases can be received (current status: ${purchase.status})`);
+      throw new Error(`This purchase cannot be received (current status: ${purchase.status})`);
     }
 
     if (!this._receivingLocks) this._receivingLocks = new Set();
@@ -3121,7 +3180,7 @@ class StoreManager {
   deleteDraftPurchase(purchaseId) {
     const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
     if (!purchase) throw new Error('Purchase not found');
-    if (purchase.status !== 'Draft') throw new Error('Only Draft purchases can be deleted with deleteDraftPurchase');
+    if (!isPurchaseWaiting(purchase.status)) throw new Error('Only purchases waiting for receipt can be deleted this way');
     return this.deletePurchase(purchaseId);
   }
 
@@ -3205,7 +3264,7 @@ class StoreManager {
   }
 
 
-  normalizePurchaseItem(it, purchaseStatus = 'Draft') {
+  normalizePurchaseItem(it, purchaseStatus = PURCHASE_STATUS_WAITING) {
     if (!it) return null;
     const pName = (it.product || it.productName || '').trim();
     const productsList = this.data.products || [];
@@ -3293,7 +3352,7 @@ class StoreManager {
     const date = updatedPayload.date || purchase.date || new Date().toISOString().split('T')[0];
     const notes = updatedPayload.notes !== undefined ? updatedPayload.notes : (purchase.notes || '');
 
-    const oldStatus = purchase.status || 'Draft';
+    const oldStatus = purchase.status || PURCHASE_STATUS_WAITING;
     const oldItemsRaw = Array.isArray(purchase.items) ? purchase.items : [];
     const isReceivedOrPartial = oldStatus === 'Received' || oldStatus === 'Completed' || oldStatus === 'Partially Received';
 
@@ -3452,7 +3511,7 @@ class StoreManager {
     purchase.totalQuantity = totalQty;
     purchase.totalAmount = totalAmount;
     purchase.totalReceived = totalReceived;
-    if (updatedPayload.status && ['Draft', 'Approved', 'Partially Received', 'Received', 'Completed'].includes(updatedPayload.status)) {
+    if (updatedPayload.status && [PURCHASE_STATUS_WAITING, 'Draft', 'Approved', 'Partially Received', 'Received', 'Completed'].includes(updatedPayload.status)) {
       purchase.status = updatedPayload.status;
     }
 
@@ -8466,7 +8525,7 @@ function renderViewProductPage(params = {}, onNavigate = null) {
                     <tr>
                       <td style="font-weight: 600;">${escapeHtml(po.id)}</td>
                       <td>${escapeHtml(po.supplier || 'Supplier')}</td>
-                      <td>${createBadge({ label: po.status || 'Received', variant: po.status === 'Draft' ? 'warning' : 'success' }).outerHTML}</td>
+                      <td>${createBadge({ label: po.status || 'Received', variant: isPurchaseWaiting(po.status) ? 'info' : 'success' }).outerHTML}</td>
                       <td style="text-align: right;">
                         <button type="button" class="btn btn-sm btn-secondary view-rel-po-btn" data-po-id="${po.id}" title="View Purchase" style="padding: 0.2rem 0.5rem;">
                           <i data-lucide="eye" style="width: 13px; height: 13px;"></i>
@@ -9663,7 +9722,7 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
 
 
 // PURCHASES PAGE
-// PURCHASES PAGE (Draft -> Approved -> Received Workflow)
+// PURCHASES PAGE (Waiting for Receive -> Received Workflow)
 function renderPurchases(params = {}, onNavigate = null) {
   if (params && params.action === 'edit') {
     return renderEditPurchasePage(params, onNavigate);
@@ -9708,7 +9767,7 @@ function renderPurchases(params = {}, onNavigate = null) {
   mainCard.className = 'card';
   mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
 
-  let currentFilter = 'all'; // 'all', 'draft', 'approved', 'partially-received', 'received'
+  let currentFilter = 'all'; // 'all', 'waiting', 'partially-received', 'received'
   let searchQuery = '';
   let purCurrentPage = 1;
   let purPageSize = 5;
@@ -9718,8 +9777,7 @@ function renderPurchases(params = {}, onNavigate = null) {
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
       <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;" id="pur-status-filters">
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="all" style="font-weight: 600;">All Purchases</button>
-        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="draft" style="font-weight: 600;">Draft</button>
-        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="approved" style="font-weight: 600;">Approved</button>
+        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="waiting" style="font-weight: 600;">Waiting for Receive</button>
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="partially-received" style="font-weight: 600;">Partially Received</button>
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="received" style="font-weight: 600;">Received</button>
       </div>
@@ -9764,8 +9822,8 @@ function renderPurchases(params = {}, onNavigate = null) {
       const statusLower = (p.status || 'completed').toLowerCase();
       
       // Filter logic
-      if (currentFilter === 'draft' && statusLower !== 'draft') return false;
-      if (currentFilter === 'approved' && statusLower !== 'approved') return false;
+      // Legacy draft/approved records read as waiting for receipt.
+      if (currentFilter === 'waiting' && !isPurchaseWaiting(p.status)) return false;
       if (currentFilter === 'partially-received' && statusLower !== 'partially received' && statusLower !== 'partially-received') return false;
       if (currentFilter === 'received' && statusLower !== 'received' && statusLower !== 'completed') return false;
 
@@ -9804,99 +9862,52 @@ function renderPurchases(params = {}, onNavigate = null) {
 
       const status = p.status || 'Completed';
       let badgeVariant = 'secondary';
-      if (status === 'Draft') badgeVariant = 'warning';
-      else if (status === 'Approved') badgeVariant = 'info';
+      if (isPurchaseWaiting(status)) badgeVariant = 'info';
       else if (status === 'Partially Received') badgeVariant = 'warning';
-      else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+      else if (isPurchaseReceived(status)) badgeVariant = 'success';
 
       // Calculate total ordered and total received
       const totalOrdered = p.totalQuantity !== undefined ? Number(p.totalQuantity) : (p.items || []).reduce((s, i) => s + Number(i.qty || i.received || 0), 0);
       const totalReceived = p.totalReceived !== undefined ? Number(p.totalReceived) : (p.items || []).reduce((s, i) => s + Number(i.receivedQty !== undefined ? i.receivedQty : (i.received !== undefined ? i.received : (status === 'Completed' || status === 'Received' ? (i.qty || 0) : 0))), 0);
 
-      // Row Actions according to Status:
-      // Draft: Approve, Edit, Delete
-      // Approved: Receive
-      // Partially Received: Receive Remaining
-      // Received: View
-      let actionsHtml = '';
-      if (status === 'Draft') {
-        actionsHtml = `
-          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-primary table-action-btn action-approve-btn" title="Approve" aria-label="Approve">
-              <i data-lucide="check-circle"></i>
-              <span class="sr-only">Approve</span>
-            </button>
+      // Row actions by status:
+      //   Waiting for Receive  -> View, Edit, Receive
+      //   Partially Received   -> View, Edit, Receive Remaining
+      //   Received             -> View only (the order is final)
+      const actionView = `
             <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
               <i data-lucide="eye"></i>
               <span class="sr-only">View</span>
-            </button>
+            </button>`;
+      const actionEdit = `
             <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
               <i data-lucide="pencil"></i>
               <span class="sr-only">Edit</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
-              <i data-lucide="trash-2"></i>
-              <span class="sr-only">Delete</span>
-            </button>
-          </div>
-        `;
-      } else if (status === 'Approved') {
-        actionsHtml = `
-          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="Receive Purchase" aria-label="Receive Purchase">
+            </button>`;
+      const actionReceive = (label) => `
+            <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="${label}" aria-label="${label}">
               <i data-lucide="package-check"></i>
-              <span class="sr-only">Receive Purchase</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
-              <i data-lucide="eye"></i>
-              <span class="sr-only">View</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
-              <i data-lucide="pencil"></i>
-              <span class="sr-only">Edit</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
-              <i data-lucide="trash-2"></i>
-              <span class="sr-only">Delete</span>
-            </button>
+              <span class="sr-only">${label}</span>
+            </button>`;
+
+      let actionsHtml = '';
+      if (isPurchaseWaiting(status)) {
+        actionsHtml = `
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            ${actionReceive('Receive')}${actionView}${actionEdit}
           </div>
         `;
       } else if (status === 'Partially Received') {
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="Receive Remaining" aria-label="Receive Remaining">
-              <i data-lucide="package-check"></i>
-              <span class="sr-only">Receive Remaining</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
-              <i data-lucide="eye"></i>
-              <span class="sr-only">View</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
-              <i data-lucide="pencil"></i>
-              <span class="sr-only">Edit</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
-              <i data-lucide="trash-2"></i>
-              <span class="sr-only">Delete</span>
-            </button>
+            ${actionReceive('Receive Remaining')}${actionView}${actionEdit}
           </div>
         `;
       } else {
+        // Received: view-only.
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
-              <i data-lucide="eye"></i>
-              <span class="sr-only">View</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
-              <i data-lucide="pencil"></i>
-              <span class="sr-only">Edit</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
-              <i data-lucide="trash-2"></i>
-              <span class="sr-only">Delete</span>
-            </button>
+            ${actionView}
           </div>
         `;
       }
@@ -9915,26 +9926,7 @@ function renderPurchases(params = {}, onNavigate = null) {
 
 
 
-      // Draft Actions
-      const approveBtn = tr.querySelector('.action-approve-btn');
-      if (approveBtn) {
-        approveBtn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const confirmed = await uiConfirm({ title: 'Approve purchase order', message: `Approve purchase order ${p.id} from "${p.supplier}"?
-
-Status will change to Approved. Stock will remain unchanged until goods are received.`, confirmText: 'Approve', variant: 'primary' });
-          if (confirmed) {
-            try {
-              store.approvePurchase(p.id);
-              toast.show({ message: `Purchase ${p.id} approved! You can now receive stock.`, type: 'success' });
-              renderPurchasesTable();
-            } catch (err) {
-              toast.show({ message: err.message, type: 'danger' });
-            }
-          }
-        });
-      }
-
+      // Row actions (approval was removed from the workflow).
       const editBtn = tr.querySelector('.action-edit-btn');
       if (editBtn) {
         editBtn.addEventListener('click', (e) => {
@@ -10099,12 +10091,11 @@ function renderReceivePurchasePage(params = {}, onNavigate = null) {
     return container;
   }
 
-  const status = purchase.status || 'Draft';
-  const canReceive = status === 'Approved' || status === 'Partially Received';
+  const status = purchase.status || PURCHASE_STATUS_WAITING;
+  const canReceive = isPurchaseReceivable(status);
 
   let badgeVariant = 'secondary';
-  if (status === 'Draft') badgeVariant = 'warning';
-  else if (status === 'Approved') badgeVariant = 'info';
+  if (isPurchaseWaiting(status)) badgeVariant = 'info';
   else if (status === 'Partially Received') badgeVariant = 'warning';
   else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
 
@@ -10377,8 +10368,7 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
 
   const status = purchase.status || 'Completed';
   let badgeVariant = 'secondary';
-  if (status === 'Draft') badgeVariant = 'warning';
-  else if (status === 'Approved') badgeVariant = 'info';
+  if (isPurchaseWaiting(status)) badgeVariant = 'info';
   else if (status === 'Partially Received') badgeVariant = 'warning';
   else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
 
@@ -10480,15 +10470,8 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
 
     <!-- Modal Footer Actions -->
     <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-      ${status === 'Draft' ? `
-        <button type="button" class="btn btn-ghost modal-delete-btn" style="color: var(--status-danger);">Delete Draft</button>
-        <button type="button" class="btn btn-secondary modal-edit-btn">Edit Draft</button>
-        <button type="button" class="btn btn-primary modal-approve-btn">Approve Purchase</button>
-      ` : `
-        <button type="button" class="btn btn-ghost modal-delete-btn" style="color: var(--status-danger);">Delete Purchase</button>
-      `}
-
-      ${status === 'Approved' ? `
+      ${isPurchaseWaiting(status) ? `
+        <button type="button" class="btn btn-secondary modal-edit-btn">Edit Purchase</button>
         <button type="button" class="btn btn-primary modal-receive-btn">
           <i data-lucide="package-check" style="width: 16px; height: 16px;"></i> Receive Purchase Stock
         </button>
@@ -10511,21 +10494,6 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
   modalBox.querySelectorAll('.close-view-btn').forEach(b => b.addEventListener('click', closeModal));
 
   // Modal actions handlers
-  const modalApproveBtn = modalBox.querySelector('.modal-approve-btn');
-  if (modalApproveBtn) {
-    modalApproveBtn.addEventListener('click', async () => {
-      const confirmed = await uiConfirm({ title: 'Approve purchase order', message: `Approve purchase order ${purchase.id}?
-
-Stock will remain unchanged until goods are received.`, confirmText: 'Approve', variant: 'primary' });
-      if (confirmed) {
-        store.approvePurchase(purchase.id);
-        toast.show({ message: `Purchase ${purchase.id} approved!`, type: 'success' });
-        closeModal();
-        if (onRefresh) onRefresh();
-      }
-    });
-  }
-
   const modalEditBtn = modalBox.querySelector('.modal-edit-btn');
   if (modalEditBtn) {
     modalEditBtn.addEventListener('click', () => {
@@ -10569,7 +10537,7 @@ Stock will remain unchanged until goods are received.`, confirmText: 'Approve', 
   if (window.lucide) window.lucide.createIcons();
 }
 
-// ADD PURCHASE PAGE (Manual Product Entry, Save as Draft or Save & Receive Stock)
+// ADD PURCHASE PAGE (Manual Product Entry: Waiting for Receive or Received Product)
 
 // ==========================================
 // DEDICATED PURCHASE EDIT PAGE (Separate Page)
@@ -10617,10 +10585,9 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
     return container;
   }
 
-  const status = purchase.status || 'Draft';
+  const status = purchase.status || PURCHASE_STATUS_WAITING;
   let badgeVariant = 'secondary';
-  if (status === 'Draft') badgeVariant = 'warning';
-  else if (status === 'Approved') badgeVariant = 'info';
+  if (isPurchaseWaiting(status)) badgeVariant = 'info';
   else if (status === 'Partially Received') badgeVariant = 'warning';
   else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
 
@@ -10839,26 +10806,20 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
       <span>Back to Purchases</span>
     </button>
     <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-      ${status === 'Draft' ? `
-        <button type="button" class="btn btn-primary approve-pur-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
-          <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
-          <span>Approve Purchase</span>
-        </button>
-      ` : ''}
-      ${(status === 'Approved' || status === 'Partially Received') ? `
+      ${isPurchaseReceivable(status) ? `
         <button type="button" class="btn btn-primary receive-pur-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
           <i data-lucide="package-check" style="width: 16px; height: 16px;"></i>
           <span>${status === 'Partially Received' ? 'Receive Remaining Stock' : 'Receive Stock'}</span>
         </button>
+        <button type="button" class="btn btn-primary edit-pur-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+          <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
+          <span>Edit Purchase</span>
+        </button>
+        <button type="button" class="btn btn-ghost delete-pur-bottom-btn" style="color: var(--status-danger); display: inline-flex; align-items: center; gap: 0.4rem;">
+          <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+          <span>Delete Purchase</span>
+        </button>
       ` : ''}
-      <button type="button" class="btn btn-primary edit-pur-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
-        <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
-        <span>Edit Purchase</span>
-      </button>
-      <button type="button" class="btn btn-ghost delete-pur-bottom-btn" style="color: var(--status-danger); display: inline-flex; align-items: center; gap: 0.4rem;">
-        <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
-        <span>Delete Purchase</span>
-      </button>
     </div>
   `;
 
@@ -10866,9 +10827,12 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
     if (onNavigate) onNavigate('purchases');
   });
 
-  bottomBar.querySelector('.edit-pur-bottom-btn').addEventListener('click', () => {
-    if (onNavigate) onNavigate('purchases', { action: 'edit', purchaseId: purchase.id });
-  });
+  const editBottomBtn = bottomBar.querySelector('.edit-pur-bottom-btn');
+  if (editBottomBtn) {
+    editBottomBtn.addEventListener('click', () => {
+      if (onNavigate) onNavigate('purchases', { action: 'edit', purchaseId: purchase.id });
+    });
+  }
 
   const recvBtn = bottomBar.querySelector('.receive-pur-bottom-btn');
   if (recvBtn) {
@@ -10878,19 +10842,8 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
     });
   }
 
-  const appBtn = bottomBar.querySelector('.approve-pur-btn');
-  if (appBtn) {
-    appBtn.addEventListener('click', async () => {
-      const conf = await uiConfirm({ title: 'Approve purchase order', message: `Approve purchase order ${purchase.id}?`, confirmText: 'Approve', variant: 'primary' });
-      if (conf) {
-        store.approvePurchase(purchase.id);
-        toast.show({ message: `Purchase ${purchase.id} approved!`, type: 'success' });
-        if (onNavigate) onNavigate('purchases', { action: 'view', purchaseId: purchase.id });
-      }
-    });
-  }
-
-  bottomBar.querySelector('.delete-pur-bottom-btn').addEventListener('click', async () => {
+  const deleteBottomBtn = bottomBar.querySelector('.delete-pur-bottom-btn');
+  if (deleteBottomBtn) deleteBottomBtn.addEventListener('click', async () => {
     const hasReceived = (purchase.totalReceived > 0) || (status === 'Received' || status === 'Partially Received' || status === 'Completed');
     let confirmMsg = `Delete purchase order ${purchase.id}?`;
     if (hasReceived) {
@@ -10961,13 +10914,18 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
     return container;
   }
 
+  // A received purchase is final: stock has already moved against it, so it
+  // is view-only. An old link or a typed URL lands on the detail page.
+  if (isPurchaseReceived(purchase.status)) {
+    return renderViewPurchasePage({ ...params, purchaseId: purchase.id }, onNavigate);
+  }
+
   let hasUnsavedChanges = false;
   const markChanged = () => { hasUnsavedChanges = true; };
 
-  const status = purchase.status || 'Draft';
+  const status = purchase.status || PURCHASE_STATUS_WAITING;
   let badgeVariant = 'secondary';
-  if (status === 'Draft') badgeVariant = 'warning';
-  else if (status === 'Approved') badgeVariant = 'info';
+  if (isPurchaseWaiting(status)) badgeVariant = 'info';
   else if (status === 'Partially Received') badgeVariant = 'warning';
   else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
 
@@ -11441,7 +11399,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   headerDiv.appendChild(createBreadcrumb([
     { label: 'Purchases', target: 'purchases' },
-    { label: isEditing ? `Edit Draft (${editingPurchase ? editingPurchase.id : 'Purchase'})` : 'Add Purchase' }
+    { label: isEditing ? `Edit Purchase (${editingPurchase ? editingPurchase.id : 'Purchase'})` : 'Add Purchase' }
   ], onNavigate));
   container.appendChild(headerDiv);
 
@@ -11619,13 +11577,13 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
       <div class="pur-sticky-actions">
         <button type="button" id="btn-cancel-pur" class="btn btn-secondary">Cancel</button>
-        <button type="button" id="btn-save-draft-pur" class="btn btn-secondary" style="font-weight: 600; border: 1px solid var(--brand-primary); color: var(--brand-primary); display: inline-flex; align-items: center; gap: 0.35rem;">
-          <i data-lucide="save" style="width: 15px; height: 15px;"></i>
-          Save as Draft
+        <button type="button" id="btn-wait-receive-pur" class="btn btn-secondary" style="font-weight: 600; border: 1px solid var(--brand-primary); color: var(--brand-primary); display: inline-flex; align-items: center; gap: 0.35rem;">
+          <i data-lucide="clock" style="width: 15px; height: 15px;"></i>
+          Waiting for Receive
         </button>
         <button type="button" id="btn-save-pur" class="btn btn-primary" style="padding: 0.65rem 1.4rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem;">
-          <i data-lucide="check-circle" style="width: 17px; height: 17px;"></i>
-          Save & Receive Stock
+          <i data-lucide="package-check" style="width: 17px; height: 17px;"></i>
+          Received Product
         </button>
       </div>
     </div>
@@ -11711,7 +11669,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   function updateFormValidity() {
     const isValid = checkFormValidity();
-    const btnDraft = mainCard.querySelector('#btn-save-draft-pur');
+    const btnDraft = mainCard.querySelector('#btn-wait-receive-pur');
     const btnSave = mainCard.querySelector('#btn-save-pur');
     const shouldDisable = !isValid || isSubmitting;
 
@@ -11720,8 +11678,8 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       btnDraft.style.opacity = shouldDisable ? '0.5' : '1';
       btnDraft.style.cursor = shouldDisable ? 'not-allowed' : 'pointer';
       btnDraft.title = isSubmitting
-        ? 'Saving purchase draft...'
-        : (shouldDisable ? 'Fill all required fields to save draft' : 'Save purchase order as Draft');
+        ? 'Saving purchase order...'
+        : (shouldDisable ? 'Fill all required fields to save this purchase' : 'Save the purchase without moving stock yet');
     }
 
     if (btnSave) {
@@ -12568,8 +12526,8 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     return flattened;
   }
 
-  // 1. SAVE AS DRAFT (No Stock Change)
-  mainCard.querySelector('#btn-save-draft-pur').addEventListener('click', () => {
+  // 1. WAITING FOR RECEIVE (saved in full, no stock change, still editable)
+  mainCard.querySelector('#btn-wait-receive-pur').addEventListener('click', () => {
     if (isSubmitting) return;
 
     const validationErr = getFirstValidationError();
@@ -12598,16 +12556,16 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         items: flattenedItems
       }, editingPurchase ? editingPurchase.id : null);
 
-      toast.show({ message: `Purchase order saved as Draft! Inventory stock is unchanged.`, type: 'success' });
+      toast.show({ message: `Purchase saved and waiting for receipt. Inventory stock is unchanged.`, type: 'success' });
       if (onNavigate) onNavigate('purchases');
     } catch (err) {
       isSubmitting = false;
       updateFormValidity();
-      toast.show({ message: err.message || 'Error saving draft purchase.', type: 'danger' });
+      toast.show({ message: err.message || 'Error saving the purchase.', type: 'danger' });
     }
   });
 
-  // 2. SAVE & RECEIVE STOCK (Instant Receive)
+  // 2. RECEIVED PRODUCT (saves and takes the full quantity into stock at once)
   mainCard.querySelector('#btn-save-pur').addEventListener('click', () => {
     if (isSubmitting) return;
 
@@ -12630,23 +12588,17 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       isSubmitting = true;
       updateFormValidity();
 
-      // Save as draft first if editing or new, then receive
-      const draft = store.savePurchaseDraft({
+      // One call: saves the purchase, then takes its full ordered quantity
+      // into stock. Receiving is refused if the order was already received,
+      // so a repeated click cannot add the stock twice.
+      store.savePurchaseAndReceive({
         supplier,
         date,
         notes,
         items: flattenedItems
       }, editingPurchase ? editingPurchase.id : null);
 
-      // Auto approve and receive all
-      store.approvePurchase(draft.id);
-      const receiveMap = {};
-      (draft.items || []).forEach((item, idx) => {
-        receiveMap[idx] = item.qty;
-      });
-      store.receivePurchaseStock(draft.id, receiveMap, date, notes);
-
-      toast.show({ message: `Purchase confirmed and stock received into inventory!`, type: 'success' });
+      toast.show({ message: `Purchase received and stock added to inventory!`, type: 'success' });
       if (onNavigate) onNavigate('purchases');
     } catch (err) {
       isSubmitting = false;

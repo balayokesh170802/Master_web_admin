@@ -54,7 +54,7 @@
         const sz1Sell = card1SizeRow1 ? card1SizeRow1.querySelector('.pur-selling-input') : null;
         const sz1Cost = card1SizeRow1 ? card1SizeRow1.querySelector('.pur-cost-display') : null;
         const sz1Val = card1SizeRow1 ? card1SizeRow1.querySelector('.pur-value-display') : null;
-        const saveDraftBtn1 = page1.querySelector('#btn-save-draft-pur');
+        const saveDraftBtn1 = page1.querySelector('#btn-wait-receive-pur');
         const savePurBtn1 = page1.querySelector('#btn-save-pur');
 
         recordTest(
@@ -258,7 +258,7 @@
 
         recordTest(
           'Test 7c: Valid purchase is successfully saved as draft',
-          savedDraftPO && savedDraftPO.status === 'Draft' && navigatedRoute === 'purchases',
+          savedDraftPO && savedDraftPO.status === 'Waiting for Receive' && navigatedRoute === 'purchases',
           `Draft ID: ${savedDraftPO ? savedDraftPO.id : 'null'}, Status: ${savedDraftPO ? savedDraftPO.status : 'null'}`
         );
 
@@ -304,7 +304,7 @@
         const newCards2 = pageNewAfterSave.querySelectorAll('.pur-accordion-card');
         const newCard1 = newCards2[0];
         const newSizes2 = newCard1 ? newCard1.querySelectorAll('.pur-size-row') : [];
-        const newDraftBtn2 = pageNewAfterSave.querySelector('#btn-save-draft-pur');
+        const newDraftBtn2 = pageNewAfterSave.querySelector('#btn-wait-receive-pur');
 
         recordTest(
           'Test 9: Starting a new purchase after saving has zero leaked values and shows 1 fresh empty product entry',
