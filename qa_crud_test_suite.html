@@ -10,7 +10,7 @@
 </head>
 <body>
   <div id="app"></div>
-  <script src="./src/App.js"></script>
+  <script src="./src/App.js?v=v89"></script>
   <script>
     window.testResults = [];
 
@@ -1227,6 +1227,814 @@
       } catch (regErr) {
         recordTest('Regression-Integrity', 'Regression Suite Exception', false, regErr.message, 'Blocker');
       }
+
+
+        // ========================================================
+        // SUITE 12: INDIVIDUAL EDIT PAGES & CROSS-MODULE RECONCILIATION
+        // ========================================================
+        console.log('--- STARTING SUITE 12: INDIVIDUAL EDIT PAGES ---');
+        try {
+
+        // Setup test data
+        store.loadSampleData();
+        const testProd = store.data.products[0];
+        const testVar = testProd.variants[0];
+        const initialVarStock = testVar.stock;
+
+        // 12.1 Customer Edit Page Rendering & Missing Record Error Handling
+        const custEditMissingEl = renderEditCustomerPage({ customerId: 'NON-EXISTENT-CUST' });
+        const hasCustMissingError = custEditMissingEl && custEditMissingEl.innerHTML.includes('Customer Not Found');
+
+        const testCust = store.data.customers[0];
+        const custEditEl = renderEditCustomerPage({ customerId: testCust.id });
+        const custNameInput = custEditEl.querySelector('#cust-edit-name');
+        const custPhoneInput = custEditEl.querySelector('#cust-edit-phone');
+        const hasCustPreFilled = custNameInput && custNameInput.value === testCust.name && custPhoneInput && custPhoneInput.value === (testCust.phone !== '-' ? testCust.phone : '');
+
+        recordTest('Edit-Pages', 'Customer Edit Page renders pre-filled data and handles missing records',
+          hasCustMissingError && hasCustPreFilled,
+          `Missing error displayed: ${hasCustMissingError}, Pre-filled values: ${hasCustPreFilled}`
+        );
+
+        // 12.2 Customer Edit Data Layer & Sales Synchronization
+        const origCustName = testCust.name;
+        const updatedCustName = 'Renamed VIP Customer';
+        const updatedCustPhone = '+91 99999 88888';
+        const initialTotalRevenue = store.data.sales.reduce((s, x) => s + (Number(x.totalAmount) || 0), 0);
+
+        store.updateCustomer(testCust.id, {
+          name: updatedCustName,
+          phone: updatedCustPhone,
+          email: 'vip@test.com',
+          city: 'Metropolis',
+          address: '42 Plaza Road'
+        });
+
+        const storedCust = store.data.customers.find(c => c.id === testCust.id);
+        const nameSyncedInSales = store.data.sales.filter(s => s.customerId === testCust.id).every(s => s.customer === updatedCustName);
+        const revenueAfterCustUpdate = store.data.sales.reduce((s, x) => s + (Number(x.totalAmount) || 0), 0);
+
+        recordTest('Edit-Pages', 'store.updateCustomer persists updates, syncs sales names, and preserves store revenue',
+          storedCust.name === updatedCustName && storedCust.phone === updatedCustPhone && nameSyncedInSales && revenueAfterCustUpdate === initialTotalRevenue,
+          `Stored name: "${storedCust.name}", Revenue before/after: ${initialTotalRevenue}/${revenueAfterCustUpdate}`
+        );
+
+        // 12.3 Sales Edit Page Rendering & Missing Record Handling
+        const saleEditMissingEl = renderEditSalePage({ saleId: 'NON-EXISTENT-SALE' });
+        const hasSaleMissingError = saleEditMissingEl && saleEditMissingEl.innerHTML.includes('Sale Record Not Found');
+
+        const testSale = store.data.sales[0];
+        const saleEditEl = renderEditSalePage({ saleId: testSale.id });
+        const saleCustInput = saleEditEl.querySelector('#edit-sale-cust-name');
+        const hasSalePreFilled = saleCustInput && saleCustInput.value === (testSale.customer || testSale.customerName);
+
+        recordTest('Edit-Pages', 'Sales Edit Page renders pre-filled data and handles missing records',
+          hasSaleMissingError && hasSalePreFilled,
+          `Sale missing error: ${hasSaleMissingError}, Sale pre-filled: ${hasSalePreFilled}`
+        );
+
+        // 12.4 Sales Edit Stock Reconciliation & Overselling Prevention
+        const origSaleItem = testSale.items[0];
+        const saleItemProd = store.data.products.find(p => p.id === origSaleItem.productId || (p.name && origSaleItem.product && p.name.trim().toLowerCase() === origSaleItem.product.trim().toLowerCase())) || store.data.products[0];
+        let origSize = origSaleItem.size || '';
+        if (!origSize && origSaleItem.sku) {
+          const parts = String(origSaleItem.sku).split('-');
+          if (parts.length > 1) origSize = parts[parts.length - 1];
+        }
+        if (!origSize) origSize = 'Standard';
+        const saleItemVar = (saleItemProd.variants || []).find(v => (v.size || 'Standard').toUpperCase() === origSize.toUpperCase()) || (saleItemProd.variants || [])[0];
+        const stockBeforeSaleEdit = saleItemVar.stock;
+        const origQty = origSaleItem.qty;
+
+        // Try to update sale requesting an impossible quantity (available + 9999)
+        let oversellError = null;
+        try {
+          store.updateSale(testSale.id, {
+            customerName: testSale.customer,
+            paymentStatus: 'Paid',
+            items: [{
+              productId: saleItemProd.id,
+              size: saleItemVar.size,
+              qty: stockBeforeSaleEdit + origQty + 9999,
+              sellingPrice: origSaleItem.price || 500
+            }]
+          });
+        } catch (err) {
+          oversellError = err;
+        }
+
+        // Now perform a valid safe edit: increase quantity by 1
+        const newValidQty = origQty + 1;
+        let validSaleUpdateSuccess = false;
+        if (stockBeforeSaleEdit >= 1) {
+          store.updateSale(testSale.id, {
+            customerName: testSale.customer,
+            paymentStatus: 'Paid',
+            items: [{
+              productId: saleItemProd.id,
+              size: saleItemVar.size,
+              qty: newValidQty,
+              sellingPrice: origSaleItem.price || 500
+            }]
+          });
+          validSaleUpdateSuccess = (saleItemVar.stock === stockBeforeSaleEdit - 1);
+        } else {
+          validSaleUpdateSuccess = true;
+        }
+
+        recordTest('Edit-Pages', 'store.updateSale enforces stock limits and reconciles variant inventory stock accurately',
+          !!oversellError && oversellError.message.includes('Insufficient stock') && validSaleUpdateSuccess,
+          `Oversell error caught: ${oversellError ? oversellError.message : 'none'}, Stock adjusted correctly: ${validSaleUpdateSuccess}`
+        );
+
+        // 12.5 Repeated Sales Edit Saves Do Not Duplicate Stock Movements
+        const movementsCountBefore = store.data.stockMovements.length;
+        const varStockBeforeRepeat = saleItemVar.stock;
+        store.updateSale(testSale.id, {
+          customerName: testSale.customer,
+          paymentStatus: 'Paid',
+          items: testSale.items
+        });
+        const varStockAfterRepeat = saleItemVar.stock;
+
+        recordTest('Edit-Pages', 'Repeated store.updateSale saves preserve stock without duplicate deductions',
+          varStockBeforeRepeat === varStockAfterRepeat,
+          `Stock before/after repeated save: ${varStockBeforeRepeat}/${varStockAfterRepeat}`
+        );
+
+        // 12.6 Purchases Edit Page Rendering & Missing Record Handling
+        const purEditMissingEl = renderEditPurchasePage({ purchaseId: 'NON-EXISTENT-PO' });
+        const hasPurMissingError = purEditMissingEl && purEditMissingEl.innerHTML.includes('Purchase Order Not Found');
+
+        const testPur = store.data.purchases[0];
+        const purEditEl = renderEditPurchasePage({ purchaseId: testPur.id });
+        const purSuppInput = purEditEl.querySelector('#edit-pur-supplier');
+        const hasPurPreFilled = purSuppInput && purSuppInput.value === testPur.supplier;
+
+        recordTest('Edit-Pages', 'Purchase Edit Page renders pre-filled data and handles missing records',
+          hasPurMissingError && hasPurPreFilled,
+          `Purchase missing error: ${hasPurMissingError}, Purchase pre-filled: ${hasPurPreFilled}`
+        );
+
+        // 12.7 Purchase Edit on Draft: Updates fields with ZERO stock change
+        const draftPur = store.savePurchaseDraft({
+          supplier: 'Draft Supplier Test',
+          date: '2026-10-14',
+          items: [{
+            productId: testProd.id,
+            product: testProd.name,
+            size: testVar.size,
+            qty: 15,
+            buyingPrice: 200,
+            sellingPrice: 500
+          }]
+        });
+
+        const stockBeforeDraftEdit = testVar.stock;
+        const moveCountBeforeDraftEdit = store.data.stockMovements.length;
+
+        store.updatePurchase(draftPur.id, {
+          supplier: 'Updated Draft Supplier',
+          items: [{
+            productId: testProd.id,
+            product: testProd.name,
+            size: testVar.size,
+            qty: 35,
+            buyingPrice: 220,
+            sellingPrice: 550
+          }]
+        });
+
+        const stockAfterDraftEdit = testVar.stock;
+        const moveCountAfterDraftEdit = store.data.stockMovements.length;
+        const updatedDraft = store.data.purchases.find(p => p.id === draftPur.id);
+
+        recordTest('Edit-Pages', 'store.updatePurchase on Draft purchase changes zero inventory stock and creates no movements',
+          stockBeforeDraftEdit === stockAfterDraftEdit && moveCountBeforeDraftEdit === moveCountAfterDraftEdit && updatedDraft.supplier === 'Updated Draft Supplier' && updatedDraft.totalQuantity === 35,
+          `Stock before/after: ${stockBeforeDraftEdit}/${stockAfterDraftEdit}, Total qty: ${updatedDraft.totalQuantity}`
+        );
+
+        // 12.8 Purchase Edit on Received Order: Reconciles stock and rejects unsafe reductions
+        // Receive draft to turn it into Received status
+        store.approvePurchase(draftPur.id);
+        store.receivePurchaseStock(draftPur.id, { 0: 35 }, '2026-10-14', 'Received for edit testing');
+        const stockAfterReceived = testVar.stock;
+
+        // Try to reduce purchase quantity below available stock
+        // Simulate stock being consumed by adjusting stock down to 5 units
+        testVar.stock = 5;
+        testProd.totalStock = testProd.variants.reduce((s, v) => s + (v.stock || 0), 0);
+        testProd.stock = testProd.totalStock;
+
+        // Trying to reduce purchase from 35 down to 10 requires reversing 25 units, but only 5 exist!
+        let unsafePurReductionError = null;
+        try {
+          store.updatePurchase(draftPur.id, {
+            supplier: 'Updated Draft Supplier',
+            items: [{
+              productId: testProd.id,
+              product: testProd.name,
+              size: testVar.size,
+              qty: 10,
+              buyingPrice: 220,
+              sellingPrice: 550
+            }]
+          });
+        } catch (err) {
+          unsafePurReductionError = err;
+        }
+
+        recordTest('Edit-Pages', 'store.updatePurchase blocks unsafe quantity reduction when physical stock is insufficient',
+          !!unsafePurReductionError && unsafePurReductionError.message.includes('insufficient to reverse'),
+          `Error caught: ${unsafePurReductionError ? unsafePurReductionError.message : 'none'}`
+        );
+
+        // Clean up test purchase
+        store.deletePurchase(draftPur.id);
+
+        // 12.9 Edit action buttons exist across all tables
+        const purContainer = renderPurchases({}, () => {});
+        const purEditBtns = purContainer.querySelectorAll('.action-edit-btn');
+
+        const salesContainer = renderSales({}, () => {});
+        const saleEditBtns = salesContainer.querySelectorAll('.edit-sale-btn');
+
+        const custsContainer = renderCustomers({}, () => {});
+        const custEditBtns = custsContainer.querySelectorAll('.edit-cust-btn');
+
+        recordTest('Edit-Pages', 'Action edit buttons are present in Purchases, Sales, and Customers tables',
+          purEditBtns.length > 0 && saleEditBtns.length > 0 && custEditBtns.length > 0,
+          `Pur edit btns: ${purEditBtns.length}, Sales edit btns: ${saleEditBtns.length}, Cust edit btns: ${custEditBtns.length}`
+        );
+
+        } catch (s12Err) {
+          recordTest('Edit-Pages', 'Suite 12 Exception', false, s12Err.stack || s12Err.message, 'Blocker');
+        }
+      
+        // ========================================================
+        // SUITE 13: PURCHASE-TO-INVENTORY SYNCHRONIZATION & DEDICATED VIEW PAGES
+        // ========================================================
+        console.log('--- STARTING SUITE 13: PURCHASE SYNC & DEDICATED VIEW PAGES ---');
+        try {
+          store.loadSampleData();
+          const targetProd = store.data.products[0];
+          const targetVar = targetProd.variants[0];
+          const targetVarStock = targetVar.stock;
+
+          // 13.1 Draft Purchase Edit: modifying items, quantities, and prices causes ZERO stock change
+          const s13Draft = store.savePurchaseDraft({
+            supplier: 'Alpha Textile Mills',
+            date: '2026-10-14',
+            notes: 'Draft order for testing',
+            items: [{
+              productId: targetProd.id,
+              product: targetProd.name,
+              size: targetVar.size,
+              qty: 20,
+              buyingPrice: 300,
+              sellingPrice: 700
+            }]
+          });
+
+          const varStockBeforeDraft = targetVar.stock;
+          const movesBeforeDraft = store.data.stockMovements.length;
+
+          store.updatePurchase(s13Draft.id, {
+            supplier: 'Alpha Textile Mills Ltd (Renamed)',
+            date: '2026-10-15',
+            notes: 'Updated draft order notes',
+            items: [{
+              productId: targetProd.id,
+              product: targetProd.name,
+              size: targetVar.size,
+              qty: 45,
+              buyingPrice: 320,
+              sellingPrice: 750
+            }]
+          });
+
+          const varStockAfterDraft = targetVar.stock;
+          const movesAfterDraft = store.data.stockMovements.length;
+          const updatedDraftPO = store.data.purchases.find(p => p.id === s13Draft.id);
+
+          recordTest('Purchase-Sync-Views', '13.1 Editing draft purchase updates purchase data with ZERO physical stock change',
+            varStockBeforeDraft === varStockAfterDraft && movesBeforeDraft === movesAfterDraft && updatedDraftPO.totalQuantity === 45 && updatedDraftPO.supplier === 'Alpha Textile Mills Ltd (Renamed)',
+            `Stock unchanged: ${varStockBeforeDraft} === ${varStockAfterDraft}, Movements unchanged: ${movesBeforeDraft} === ${movesAfterDraft}, Total qty: ${updatedDraftPO.totalQuantity}`
+          );
+
+          // 13.2 When draft is later received, confirmed quantities are applied exactly once
+          store.approvePurchase(s13Draft.id);
+          store.receivePurchaseStock(s13Draft.id, { 0: 45 }, '2026-10-15', 'Full receipt');
+          const stockAfterFirstReceipt = targetVar.stock;
+          recordTest('Purchase-Sync-Views', '13.2 Approving and receiving draft applies confirmed stock exactly once',
+            stockAfterFirstReceipt === varStockBeforeDraft + 45,
+            `Expected ${varStockBeforeDraft + 45}, actual variant stock: ${stockAfterFirstReceipt}`
+          );
+
+          // 13.3 Received Purchase Edit: Increase quantity (45 -> 50) adds exactly 5 units to inventory
+          const movesBeforeInc = store.data.stockMovements.length;
+          store.updatePurchase(s13Draft.id, {
+            supplier: 'Alpha Textile Mills Ltd (Renamed)',
+            date: '2026-10-15',
+            items: [{
+              productId: targetProd.id,
+              product: targetProd.name,
+              size: targetVar.size,
+              qty: 50,
+              buyingPrice: 320,
+              sellingPrice: 750
+            }]
+          });
+
+          const stockAfterInc = targetVar.stock;
+          const movesAfterInc = store.data.stockMovements.length;
+          const latestMoveInc = store.data.stockMovements[0];
+
+          recordTest('Purchase-Sync-Views', '13.3 Editing received purchase with increased quantity (+5) reconciles inventory stock and logs movement',
+            stockAfterInc === stockAfterFirstReceipt + 5 && movesAfterInc === movesBeforeInc + 1 && latestMoveInc.quantity === 5,
+            `Expected ${stockAfterFirstReceipt + 5}, actual ${stockAfterInc}, movement delta: ${latestMoveInc.quantity}`
+          );
+
+          // 13.4 Received Purchase Edit: Decrease quantity (50 -> 42) reverses exactly 8 units
+          const movesBeforeDec = store.data.stockMovements.length;
+          store.updatePurchase(s13Draft.id, {
+            supplier: 'Alpha Textile Mills Ltd (Renamed)',
+            date: '2026-10-15',
+            items: [{
+              productId: targetProd.id,
+              product: targetProd.name,
+              size: targetVar.size,
+              qty: 42,
+              buyingPrice: 320,
+              sellingPrice: 750
+            }]
+          });
+
+          const stockAfterDec = targetVar.stock;
+          const movesAfterDec = store.data.stockMovements.length;
+          const latestMoveDec = store.data.stockMovements[0];
+
+          recordTest('Purchase-Sync-Views', '13.4 Editing received purchase with decreased quantity (-8) reduces inventory stock and logs reversal',
+            stockAfterDec === stockAfterInc - 8 && movesAfterDec === movesBeforeDec + 1 && latestMoveDec.quantity === -8,
+            `Expected ${stockAfterInc - 8}, actual ${stockAfterDec}, movement delta: ${latestMoveDec.quantity}`
+          );
+
+          // 13.5 Received Purchase Edit: Unsafe reduction exceeding physical stock is rejected atomically
+          // Reduce physical stock to 3 units (simulating goods being sold)
+          targetVar.stock = 3;
+          targetProd.totalStock = targetProd.variants.reduce((s, v) => s + (v.stock || 0), 0);
+          targetProd.stock = targetProd.totalStock;
+
+          let unsafeStockError = null;
+          try {
+            // Trying to reduce from 42 to 20 requires reversing 22 units, but only 3 exist!
+            store.updatePurchase(s13Draft.id, {
+              supplier: 'Alpha Textile Mills Ltd (Renamed)',
+              items: [{
+                productId: targetProd.id,
+                product: targetProd.name,
+                size: targetVar.size,
+                qty: 20,
+                buyingPrice: 320,
+                sellingPrice: 750
+              }]
+            });
+          } catch (err) {
+            unsafeStockError = err;
+          }
+
+          recordTest('Purchase-Sync-Views', '13.5 Atomic verification blocks unsafe quantity reduction exceeding available stock',
+            !!unsafeStockError && unsafeStockError.message.includes('insufficient to reverse') && targetVar.stock === 3,
+            `Caught error: "${unsafeStockError ? unsafeStockError.message : 'none'}", stock kept at ${targetVar.stock}`
+          );
+
+          // Restore adequate stock
+          targetVar.stock = 50;
+          targetProd.totalStock = targetProd.variants.reduce((s, v) => s + (v.stock || 0), 0);
+          targetProd.stock = targetProd.totalStock;
+
+          // 13.6 Received Purchase Edit: Change buying price updates variant/product cost reference for valuation
+          store.updatePurchase(s13Draft.id, {
+            supplier: 'Alpha Textile Mills Ltd (Renamed)',
+            items: [{
+              productId: targetProd.id,
+              product: targetProd.name,
+              size: targetVar.size,
+              qty: 42,
+              buyingPrice: 385,
+              sellingPrice: 850
+            }]
+          });
+
+          recordTest('Purchase-Sync-Views', '13.6 Editing buying price updates variant cost reference for authoritative valuation',
+            targetVar.purchasePrice === 385 && targetProd.purchasePrice === 385,
+            `Variant cost: ${targetVar.purchasePrice}, Product cost: ${targetProd.purchasePrice}`
+          );
+
+          // 13.7 Repeated saves with identical quantities do NOT duplicate stock adjustments
+          const stockBeforeRepeated = targetVar.stock;
+          const movesBeforeRepeated = store.data.stockMovements.length;
+
+          store.updatePurchase(s13Draft.id, {
+            supplier: 'Alpha Textile Mills Ltd (Renamed)',
+            notes: 'Repeated save with unchanged items',
+            items: [{
+              productId: targetProd.id,
+              product: targetProd.name,
+              size: targetVar.size,
+              qty: 42,
+              buyingPrice: 385,
+              sellingPrice: 850
+            }]
+          });
+
+          const stockAfterRepeated = targetVar.stock;
+          const movesAfterRepeated = store.data.stockMovements.length;
+
+          recordTest('Purchase-Sync-Views', '13.7 Repeated saves without quantity modifications preserve stock and generate zero redundant movements',
+            stockBeforeRepeated === stockAfterRepeated && movesBeforeRepeated === movesAfterRepeated,
+            `Stock: ${stockBeforeRepeated} === ${stockAfterRepeated}, Movements: ${movesBeforeRepeated} === ${movesAfterRepeated}`
+          );
+
+          // Clean up s13Draft
+          store.deletePurchase(s13Draft.id);
+
+          // 13.8 Dedicated Purchase View Page renders full page layout, handles missing PO, displays breadcrumb, KPI cards, and items
+          const purMissingView = renderViewPurchasePage({ purchaseId: 'NON-EXISTENT-PO' });
+          const hasPurMissingCard = purMissingView && purMissingView.innerHTML.includes('Purchase Order Not Found');
+
+          const testPurPO = store.data.purchases[0];
+          let purNavTgt = null, purNavParams = null;
+          const mockPurNav = (tgt, p) => { purNavTgt = tgt; purNavParams = p; };
+          const purViewEl = renderViewPurchasePage({ purchaseId: testPurPO.id }, mockPurNav);
+          const hasPurPOHeader = purViewEl && purViewEl.innerHTML.includes(testPurPO.id);
+          const hasPurSupplier = purViewEl && purViewEl.innerHTML.includes(testPurPO.supplier);
+          const hasPurEditBtn = purViewEl && !!purViewEl.querySelector('.edit-pur-page-btn');
+          const hasPurBackBtn = purViewEl && !!purViewEl.querySelector('.back-to-list-btn');
+          const isNotPurModal = !purViewEl.classList.contains('modal-overlay');
+
+          recordTest('Purchase-Sync-Views', '13.8 Dedicated Purchase View Page renders as full page layout with breadcrumb, KPIs, items, and action buttons',
+            hasPurMissingCard && hasPurPOHeader && hasPurSupplier && hasPurEditBtn && hasPurBackBtn && isNotPurModal,
+            `Missing error handled: ${hasPurMissingCard}, Header: ${hasPurPOHeader}, Edit btn: ${hasPurEditBtn}, Full page: ${isNotPurModal}`
+          );
+
+          // 13.9 Dedicated Sale View Page renders full page layout, handles missing sale, displays items, calculations, and customer profile link
+          const saleMissingView = renderViewSalePage({ saleId: 'NON-EXISTENT-SALE' });
+          const hasSaleMissingCard = saleMissingView && saleMissingView.innerHTML.includes('Sale Record Not Found');
+
+          const testSaleRecord = store.data.sales[0];
+          let saleNavTgt = null, saleNavParams = null;
+          const mockSaleNav = (tgt, p) => { saleNavTgt = tgt; saleNavParams = p; };
+          const saleViewEl = renderViewSalePage({ saleId: testSaleRecord.id }, mockSaleNav);
+          const hasSaleRef = saleViewEl && saleViewEl.innerHTML.includes(testSaleRecord.id);
+          const hasSaleCust = saleViewEl && saleViewEl.innerHTML.includes(testSaleRecord.customer || testSaleRecord.customerName);
+          const hasSaleEditBtn = saleViewEl && !!saleViewEl.querySelector('.edit-sale-page-btn');
+          const hasSaleBackBtn = saleViewEl && !!saleViewEl.querySelector('.back-to-list-btn');
+          const isNotSaleModal = !saleViewEl.classList.contains('modal-overlay');
+
+          recordTest('Purchase-Sync-Views', '13.9 Dedicated Sale View Page renders as full page layout with items, financial summary, and edit navigation',
+            hasSaleMissingCard && hasSaleRef && hasSaleCust && hasSaleEditBtn && hasSaleBackBtn && isNotSaleModal,
+            `Missing error handled: ${hasSaleMissingCard}, Ref: ${hasSaleRef}, Customer: ${hasSaleCust}, Edit btn: ${hasSaleEditBtn}`
+          );
+
+          // 13.10 Dedicated Customer View Page renders full page layout, handles missing customer, displays lifetime metrics and purchase history table
+          const custMissingView = renderViewCustomerPage({ customerId: 'NON-EXISTENT-CUST' });
+          const hasCustMissingCard = custMissingView && custMissingView.innerHTML.includes('Customer Not Found');
+
+          const testCustRecord = store.data.customers[0];
+          let custNavTgt = null, custNavParams = null;
+          const mockCustNav = (tgt, p) => { custNavTgt = tgt; custNavParams = p; };
+          const custViewEl = renderViewCustomerPage({ customerId: testCustRecord.id }, mockCustNav);
+          const hasCustName = custViewEl && custViewEl.innerHTML.includes(testCustRecord.name);
+          const hasCustPhone = custViewEl && custViewEl.innerHTML.includes(testCustRecord.phone || '');
+          const hasCustEditBtn = custViewEl && !!custViewEl.querySelector('.edit-cust-page-btn');
+          const hasCustBackBtn = custViewEl && !!custViewEl.querySelector('.back-to-list-btn');
+          const hasCustPurchasesTable = custViewEl && custViewEl.innerHTML.includes('Customer Purchase History');
+          const isNotCustModal = !custViewEl.classList.contains('modal-overlay');
+
+          recordTest('Purchase-Sync-Views', '13.10 Dedicated Customer View Page renders as full page layout with KPI cards, profile, and sales history table',
+            hasCustMissingCard && hasCustName && hasCustPhone && hasCustEditBtn && hasCustBackBtn && hasCustPurchasesTable && isNotCustModal,
+            `Missing error handled: ${hasCustMissingCard}, Name: ${hasCustName}, Purchases table: ${hasCustPurchasesTable}`
+          );
+
+          // 13.11 View action buttons and router integration in Purchases, Sales, and Customers
+          let navigatedTarget = null;
+          let navigatedParams = null;
+          const mockNavigate = (tgt, p) => { navigatedTarget = tgt; navigatedParams = p; };
+
+          // Purchases table View action
+          const purPageEl = renderPurchases({}, mockNavigate);
+          const purViewBtns = purPageEl.querySelectorAll('.action-view-btn');
+          if (purViewBtns.length > 0) {
+            purViewBtns[0].click();
+          }
+          const purNavSuccess = navigatedTarget === 'purchases' && navigatedParams && navigatedParams.action === 'view';
+
+          // Sales table View action
+          navigatedTarget = null; navigatedParams = null;
+          const salesPageEl = renderSales({}, mockNavigate);
+          const salesViewBtns = salesPageEl.querySelectorAll('.view-sale-btn');
+          if (salesViewBtns.length > 0) {
+            salesViewBtns[0].click();
+          }
+          const salesNavSuccess = navigatedTarget === 'sales' && navigatedParams && navigatedParams.action === 'view';
+
+          // Customers table View action
+          navigatedTarget = null; navigatedParams = null;
+          const custPageEl = renderCustomers({}, mockNavigate);
+          const custViewBtns = custPageEl.querySelectorAll('.view-cust-btn');
+          if (custViewBtns.length > 0) {
+            custViewBtns[0].click();
+          }
+          const custNavSuccess = navigatedTarget === 'customers' && navigatedParams && navigatedParams.action === 'view';
+
+          recordTest('Purchase-Sync-Views', '13.11 Table View action buttons route to dedicated View pages with action: "view"',
+            purNavSuccess && salesNavSuccess && custNavSuccess,
+            `Pur view nav: ${purNavSuccess}, Sales view nav: ${salesNavSuccess}, Cust view nav: ${custNavSuccess}`
+          );
+
+          // 13.12 Cross-Module Navigation: View Page Edit buttons route to respective Edit pages
+          purViewEl.querySelector('.edit-pur-page-btn').click();
+          const purEditNavSuccess = purNavTgt === 'purchases' && purNavParams && purNavParams.action === 'edit' && purNavParams.purchaseId === testPurPO.id;
+
+          saleViewEl.querySelector('.edit-sale-page-btn').click();
+          const saleEditNavSuccess = saleNavTgt === 'sales' && saleNavParams && saleNavParams.action === 'edit' && saleNavParams.saleId === testSaleRecord.id;
+
+          custViewEl.querySelector('.edit-cust-page-btn').click();
+          const custEditNavSuccess = custNavTgt === 'customers' && custNavParams && custNavParams.action === 'edit' && custNavParams.customerId === testCustRecord.id;
+
+          recordTest('Purchase-Sync-Views', '13.12 View page Edit buttons navigate directly to respective Edit pages with record IDs',
+            purEditNavSuccess && saleEditNavSuccess && custEditNavSuccess,
+            `Pur edit nav: ${purEditNavSuccess}, Sale edit nav: ${saleEditNavSuccess}, Cust edit nav: ${custEditNavSuccess}`
+          );
+
+          // 13.13 Page router handles action: 'view' across Purchases, Sales, and Customers
+          const purRoutedView = renderPurchases({ action: 'view', purchaseId: testPurPO.id });
+          const salesRoutedView = renderSales({ action: 'view', saleId: testSaleRecord.id });
+          const custRoutedView = renderCustomers({ action: 'view', customerId: testCustRecord.id });
+
+          const purRoutedOk = purRoutedView && purRoutedView.innerHTML.includes(testPurPO.id);
+          const salesRoutedOk = salesRoutedView && salesRoutedView.innerHTML.includes(testSaleRecord.id);
+          const custRoutedOk = custRoutedView && custRoutedView.innerHTML.includes(testCustRecord.name);
+
+          recordTest('Purchase-Sync-Views', '13.13 Module entry functions render dedicated View pages when params.action === "view"',
+            purRoutedOk && salesRoutedOk && custRoutedOk,
+            `Pur routed: ${purRoutedOk}, Sales routed: ${salesRoutedOk}, Cust routed: ${custRoutedOk}`
+          );
+
+          // 13.14 Authoritative metrics consistency: Inventory and Overview reflect changes accurately
+          const overviewEl = renderOverview(() => {});
+          const hasOverviewMetrics = overviewEl && !overviewEl.innerHTML.includes('NaN');
+          const inventoryEl = renderInventory({}, () => {});
+          const hasInventoryMetrics = inventoryEl && !inventoryEl.innerHTML.includes('NaN');
+
+          recordTest('Purchase-Sync-Views', '13.14 Cross-module metrics in Overview and Inventory remain authoritative and mathematically sound',
+            hasOverviewMetrics && hasInventoryMetrics,
+            `Overview valid: ${hasOverviewMetrics}, Inventory valid: ${hasInventoryMetrics}`
+          );
+
+        } catch (s13Err) {
+          recordTest('Purchase-Sync-Views', 'Suite 13 Exception', false, s13Err.stack || s13Err.message, 'Blocker');
+        }
+
+
+        // ========================================================
+        // SUITE 14: INVENTORY VIEW PAGE & ROW CLICK NAVIGATION REMOVAL
+        // ========================================================
+        console.log('--- STARTING SUITE 14: INVENTORY VIEW PAGE & ROW CLICKS ---');
+        try {
+          store.loadSampleData();
+          const targetProd = store.data.products[0];
+
+          // 14.1 Dedicated Product View Page renders as full page layout
+          let invNavTgt = null, invNavParams = null;
+          const mockInvNav = (tgt, p) => { invNavTgt = tgt; invNavParams = p; };
+          const prodViewEl = renderViewProductPage({ productId: targetProd.id }, mockInvNav);
+
+          const isNotProdModal = !prodViewEl.classList.contains('modal-overlay');
+          const isPageContainer = prodViewEl.classList.contains('page-container');
+          const hasProdTitle = prodViewEl.innerHTML.includes(targetProd.name);
+
+          recordTest('Inventory-View-And-RowClicks', '14.1 Dedicated Product View Page renders as full page layout inside page-container',
+            isNotProdModal && isPageContainer && hasProdTitle,
+            `Not modal: ${isNotProdModal}, Page container: ${isPageContainer}, Has title: ${hasProdTitle}`
+          );
+
+          // 14.2 Handles missing product ID gracefully
+          const missingProdEl = renderViewProductPage({ productId: 'NON-EXISTENT-PROD-ID' }, mockInvNav);
+          const hasMissingError = missingProdEl && missingProdEl.innerHTML.includes('Product Not Found');
+          const hasBackToInvBtn = missingProdEl && !!missingProdEl.querySelector('.back-to-list-btn');
+
+          recordTest('Inventory-View-And-RowClicks', '14.2 Missing product ID displays graceful error card with Return to Inventory button',
+            hasMissingError && hasBackToInvBtn,
+            `Missing error: ${hasMissingError}, Return button: ${hasBackToInvBtn}`
+          );
+
+          // 14.3 Displays product name, category, brand, and status badges
+          const hasCategory = prodViewEl.innerHTML.includes(targetProd.category || 'General');
+          const hasBrand = prodViewEl.innerHTML.includes(targetProd.brand || 'Unbranded');
+          const hasStockBadge = prodViewEl.innerHTML.includes('In Stock') || prodViewEl.innerHTML.includes('Stock');
+
+          recordTest('Inventory-View-And-RowClicks', '14.3 Product View Page displays core catalog attributes (name, category, brand, status)',
+            hasCategory && hasBrand && hasStockBadge,
+            `Category: ${hasCategory}, Brand: ${hasBrand}, Status badge: ${hasStockBadge}`
+          );
+
+          // 14.4 Displays KPI cards (Available Stock, Selling Price, Unit Cost, Valuation, Status)
+          const kpiGridEl = prodViewEl.querySelector('.kpi-grid');
+          const hasStockKpi = kpiGridEl && kpiGridEl.innerHTML.includes('Available Stock');
+          const hasSellingKpi = kpiGridEl && kpiGridEl.innerHTML.includes('Selling Price');
+          const hasCostKpi = kpiGridEl && kpiGridEl.innerHTML.includes('Unit Cost');
+          const hasValuationKpi = kpiGridEl && kpiGridEl.innerHTML.includes('Inventory Valuation');
+
+          recordTest('Inventory-View-And-RowClicks', '14.4 Product View Page displays financial and physical stock KPI cards',
+            hasStockKpi && hasSellingKpi && hasCostKpi && hasValuationKpi,
+            `Stock: ${hasStockKpi}, Selling: ${hasSellingKpi}, Cost: ${hasCostKpi}, Valuation: ${hasValuationKpi}`
+          );
+
+          // 14.5 Displays Size-Wise Inventory & Stock Breakdown table
+          const sizeTable = prodViewEl.querySelector('.admin-table');
+          const hasSizeHeader = prodViewEl.innerHTML.includes('Size / Variant') || prodViewEl.innerHTML.includes('Size-Wise Inventory');
+          const hasVariantSkus = (targetProd.variants || []).every(v => !v.sku || prodViewEl.innerHTML.includes(v.sku));
+
+          recordTest('Inventory-View-And-RowClicks', '14.5 Product View Page displays size-wise variants table with SKUs and stock quantities',
+            !!sizeTable && hasSizeHeader && hasVariantSkus,
+            `Table exists: ${!!sizeTable}, Header: ${hasSizeHeader}, SKUs present: ${hasVariantSkus}`
+          );
+
+          // 14.6 Displays Stock Movement & Ledger History
+          const hasMovementSection = prodViewEl.textContent.includes('Stock Movement & Ledger History') || prodViewEl.innerHTML.includes('Stock Movement');
+
+          recordTest('Inventory-View-And-RowClicks', '14.6 Product View Page includes stock movement and ledger history audit log',
+            hasMovementSection,
+            `Movement section: ${hasMovementSection}`
+          );
+
+          // 14.7 Displays Related Purchase Orders and Sales Orders
+          const hasTxSection = prodViewEl.textContent.includes('Related Purchase Orders & Sales Transactions') || prodViewEl.innerHTML.includes('Related Purchase Orders');
+
+          recordTest('Inventory-View-And-RowClicks', '14.7 Product View Page cross-references related purchase orders and sales transactions',
+            hasTxSection,
+            `Cross-references section: ${hasTxSection}`
+          );
+
+          // 14.8 Handles Archived products gracefully (warning banner and omits edit action)
+          const archivedProd = {
+            id: 'PROD-ARCHIVED-TEST',
+            name: 'Archived Vintage Joggers',
+            category: 'Bottoms',
+            brand: 'UrbanFit',
+            status: 'Archived',
+            purchasePrice: 400,
+            sellingPrice: 800,
+            stock: 25,
+            variants: [{ size: 'M', stock: 25, purchasePrice: 400, sellingPrice: 800 }]
+          };
+          store.data.products.push(archivedProd);
+
+          const archivedViewEl = renderViewProductPage({ productId: archivedProd.id }, mockInvNav);
+          const hasArchivedBanner = archivedViewEl && archivedViewEl.innerHTML.includes('Archived Product:');
+          const hasNoEditBtnOnArchived = archivedViewEl && !archivedViewEl.querySelector('.edit-inv-page-btn');
+
+          recordTest('Inventory-View-And-RowClicks', '14.8 Archived products display prominent archive banner and omit edit action',
+            hasArchivedBanner && hasNoEditBtnOnArchived,
+            `Archive banner: ${hasArchivedBanner}, Edit button omitted: ${hasNoEditBtnOnArchived}`
+          );
+
+          // Clean up test archived product
+          store.data.products = store.data.products.filter(p => p.id !== archivedProd.id);
+
+          // 14.9 Edit Product button on active products routes to manage-product
+          invNavTgt = null; invNavParams = null;
+          const editBtn = prodViewEl.querySelector('.edit-inv-page-btn');
+          if (editBtn) editBtn.click();
+          const editNavOk = invNavTgt === 'inventory' && invNavParams && invNavParams.action === 'manage-product' && invNavParams.id === targetProd.id;
+
+          recordTest('Inventory-View-And-RowClicks', '14.9 Edit Product button navigates to existing product edit workflow',
+            editNavOk,
+            `Nav target: ${invNavTgt}, Params: ${JSON.stringify(invNavParams)}`
+          );
+
+          // 14.10 Back button returns to inventory listing
+          invNavTgt = null; invNavParams = null;
+          prodViewEl.querySelector('.back-to-list-btn').click();
+          const backNavOk = invNavTgt === 'inventory';
+
+          recordTest('Inventory-View-And-RowClicks', '14.10 Back button navigates back to inventory listing page',
+            backNavOk,
+            `Nav target: ${invNavTgt}`
+          );
+
+          // 14.11 Inventory Table: Row click disabled, Name click disabled, View button routes to view page
+          let tableNavTgt = null, tableNavParams = null;
+          const mockTableNav = (tgt, p) => { tableNavTgt = tgt; tableNavParams = p; };
+
+          const invPageEl = renderInventory({}, mockTableNav);
+          const firstInvRow = invPageEl.querySelector('#inventory-table-body tr');
+
+          // Simulate clicking row background
+          tableNavTgt = null; tableNavParams = null;
+          firstInvRow.click();
+          const invRowClickDidNothing = (tableNavTgt === null);
+
+          // Simulate clicking product name cell
+          const prodNameCell = firstInvRow.querySelector('td:nth-child(2)');
+          tableNavTgt = null; tableNavParams = null;
+          if (prodNameCell) prodNameCell.click();
+          const invNameClickDidNothing = (tableNavTgt === null);
+
+          // Simulate clicking View button
+          const invViewBtn = firstInvRow.querySelector('.view-inv-btn');
+          tableNavTgt = null; tableNavParams = null;
+          if (invViewBtn) invViewBtn.click();
+          const invViewBtnNavigated = (tableNavTgt === 'inventory' && tableNavParams && tableNavParams.action === 'view');
+
+          recordTest('Inventory-View-And-RowClicks', '14.11 Inventory Table: row background and name clicks do nothing; View button navigates to View page',
+            invRowClickDidNothing && invNameClickDidNothing && invViewBtnNavigated,
+            `Row click no-op: ${invRowClickDidNothing}, Name click no-op: ${invNameClickDidNothing}, View btn nav: ${invViewBtnNavigated}`
+          );
+
+          // 14.12 Purchases Table: Row click disabled, Supplier click disabled, View button routes to view page
+          const purPageEl = renderPurchases({}, mockTableNav);
+          const firstPurRow = purPageEl.querySelector('#pur-table-tbody tr');
+
+          tableNavTgt = null; tableNavParams = null;
+          firstPurRow.click();
+          const purRowClickDidNothing = (tableNavTgt === null);
+
+          const purSupplierCell = firstPurRow.querySelector('td:nth-child(2)');
+          tableNavTgt = null; tableNavParams = null;
+          if (purSupplierCell) purSupplierCell.click();
+          const purSupplierClickDidNothing = (tableNavTgt === null);
+
+          const purViewBtn = firstPurRow.querySelector('.action-view-btn');
+          tableNavTgt = null; tableNavParams = null;
+          if (purViewBtn) purViewBtn.click();
+          const purViewBtnNavigated = (tableNavTgt === 'purchases' && tableNavParams && tableNavParams.action === 'view');
+
+          recordTest('Inventory-View-And-RowClicks', '14.12 Purchases Table: row background and supplier clicks do nothing; View button navigates to View page',
+            purRowClickDidNothing && purSupplierClickDidNothing && purViewBtnNavigated,
+            `Row click no-op: ${purRowClickDidNothing}, Supplier click no-op: ${purSupplierClickDidNothing}, View btn nav: ${purViewBtnNavigated}`
+          );
+
+          // 14.13 Sales Table: Row click disabled, Customer click disabled, View button routes to view page
+          const salesPageEl = renderSales({}, mockTableNav);
+          const firstSaleRow = salesPageEl.querySelector('#sales-table-tbody tr');
+
+          tableNavTgt = null; tableNavParams = null;
+          firstSaleRow.click();
+          const saleRowClickDidNothing = (tableNavTgt === null);
+
+          const saleCustomerCell = firstSaleRow.querySelector('td:nth-child(3)');
+          tableNavTgt = null; tableNavParams = null;
+          if (saleCustomerCell) saleCustomerCell.click();
+          const saleCustomerClickDidNothing = (tableNavTgt === null);
+
+          const saleViewBtn = firstSaleRow.querySelector('.view-sale-btn');
+          tableNavTgt = null; tableNavParams = null;
+          if (saleViewBtn) saleViewBtn.click();
+          const saleViewBtnNavigated = (tableNavTgt === 'sales' && tableNavParams && tableNavParams.action === 'view');
+
+          recordTest('Inventory-View-And-RowClicks', '14.13 Sales Table: row background and customer clicks do nothing; View button navigates to View page',
+            saleRowClickDidNothing && saleCustomerClickDidNothing && saleViewBtnNavigated,
+            `Row click no-op: ${saleRowClickDidNothing}, Cust click no-op: ${saleCustomerClickDidNothing}, View btn nav: ${saleViewBtnNavigated}`
+          );
+
+          // 14.14 Customers Table: Row click disabled, Name click disabled, View button routes to view page
+          const custPageEl = renderCustomers({}, mockTableNav);
+          const firstCustRow = custPageEl.querySelector('#cust-table-tbody tr');
+
+          tableNavTgt = null; tableNavParams = null;
+          firstCustRow.click();
+          const custRowClickDidNothing = (tableNavTgt === null);
+
+          const custNameCell = firstCustRow.querySelector('td:nth-child(2)');
+          tableNavTgt = null; tableNavParams = null;
+          if (custNameCell) custNameCell.click();
+          const custNameClickDidNothing = (tableNavTgt === null);
+
+          const custViewBtn = firstCustRow.querySelector('.view-cust-btn');
+          tableNavTgt = null; tableNavParams = null;
+          if (custViewBtn) custViewBtn.click();
+          const custViewBtnNavigated = (tableNavTgt === 'customers' && tableNavParams && tableNavParams.action === 'view');
+
+          recordTest('Inventory-View-And-RowClicks', '14.14 Customers Table: row background and name clicks do nothing; View button navigates to View page',
+            custRowClickDidNothing && custNameClickDidNothing && custViewBtnNavigated,
+            `Row click no-op: ${custRowClickDidNothing}, Name click no-op: ${custNameClickDidNothing}, View btn nav: ${custViewBtnNavigated}`
+          );
+
+          // 14.15 Router Integration: renderInventory renders View page when params.action === 'view'
+          const invRoutedView = renderInventory({ action: 'view', productId: targetProd.id });
+          const invRoutedOk = invRoutedView && invRoutedView.innerHTML.includes(targetProd.name) && invRoutedView.classList.contains('product-view-page');
+
+          recordTest('Inventory-View-And-RowClicks', '14.15 renderInventory renders dedicated View page when params.action === "view"',
+            invRoutedOk,
+            `Inventory routed: ${invRoutedOk}`
+          );
+
+        } catch (s14Err) {
+          recordTest('Inventory-View-And-RowClicks', 'Suite 14 Exception', false, s14Err.stack || s14Err.message, 'Blocker');
+        }
 
       // Leave clean database
       store.clearDatabase();

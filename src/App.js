@@ -3079,6 +3079,262 @@ class StoreManager {
     return true;
   }
 
+
+  normalizePurchaseItem(it, purchaseStatus = 'Draft') {
+    if (!it) return null;
+    const pName = (it.product || it.productName || '').trim();
+    const productsList = this.data.products || [];
+
+    // Authoritative product lookup
+    let matchedProd = null;
+    if (it.productId) {
+      matchedProd = productsList.find(p => p.id === it.productId);
+    }
+    if (!matchedProd && pName) {
+      matchedProd = productsList.find(p => p.name && p.name.trim().toLowerCase() === pName.toLowerCase());
+    }
+    if (!matchedProd && it.sku) {
+      matchedProd = productsList.find(p => (p.variants || []).some(v => v.sku && v.sku.toUpperCase() === it.sku.toUpperCase()));
+    }
+
+    // Authoritative size extraction
+    let resolvedSize = (it.size || '').trim();
+    if (!resolvedSize && it.sku) {
+      const parts = String(it.sku).split('-');
+      if (parts.length > 1) resolvedSize = parts[parts.length - 1];
+    }
+    if (!resolvedSize && matchedProd && Array.isArray(matchedProd.variants) && matchedProd.variants.length > 0) {
+      resolvedSize = matchedProd.variants[0].size || 'Standard';
+    }
+    if (!resolvedSize) resolvedSize = 'Standard';
+
+    // Quantity resolution
+    const qty = Number(it.qty !== undefined ? it.qty : (it.received !== undefined ? it.received : (it.good || 1))) || 0;
+
+    // Received quantity resolution
+    const isReceived = purchaseStatus === 'Received' || purchaseStatus === 'Completed';
+    let receivedQty = 0;
+    if (it.receivedQty !== undefined && it.receivedQty !== null) {
+      receivedQty = Number(it.receivedQty) || 0;
+    } else if (it.received !== undefined && it.received !== null) {
+      receivedQty = Number(it.received) || 0;
+    } else if (isReceived) {
+      receivedQty = qty;
+    }
+
+    // Buying price resolution
+    const buyingPrice = Number(it.buyingPrice !== undefined ? it.buyingPrice : (it.price !== undefined ? it.price : (matchedProd ? matchedProd.purchasePrice : 0))) || 0;
+
+    // Selling price resolution
+    let sellingPrice = Number(it.sellingPrice !== undefined ? it.sellingPrice : 0) || 0;
+    if (!sellingPrice && matchedProd) {
+      const v = (matchedProd.variants || []).find(v => (v.size || 'Standard').toUpperCase() === resolvedSize.toUpperCase());
+      sellingPrice = (v && v.sellingPrice) ? v.sellingPrice : (matchedProd.sellingPrice || 0);
+    }
+
+    const prodId = matchedProd ? matchedProd.id : (it.productId || '');
+    const finalProdName = matchedProd ? matchedProd.name : pName;
+    const brand = (it.brand || (matchedProd ? matchedProd.brand : 'ClassicFit')).trim();
+    const category = (it.category || (matchedProd ? matchedProd.category : 'Shirts')).trim();
+    const sku = it.sku || (matchedProd ? `${(finalProdName || 'PRD').slice(0, 3).toUpperCase()}-${resolvedSize}` : '');
+
+    return {
+      productId: prodId,
+      product: finalProdName,
+      productName: finalProdName,
+      category,
+      brand,
+      size: resolvedSize,
+      sku,
+      qty,
+      receivedQty,
+      buyingPrice,
+      sellingPrice,
+      totalCost: qty * buyingPrice
+    };
+  }
+
+
+  updatePurchase(purchaseId, updatedPayload) {
+    const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
+    if (!purchase) throw new Error('Purchase order not found.');
+
+    if (!updatedPayload || !Array.isArray(updatedPayload.items) || updatedPayload.items.length === 0) {
+      throw new Error('Purchase must contain at least one product item.');
+    }
+
+    const supplier = (updatedPayload.supplier || purchase.supplier || '').trim();
+    if (!supplier) throw new Error('Supplier name is required.');
+    const date = updatedPayload.date || purchase.date || new Date().toISOString().split('T')[0];
+    const notes = updatedPayload.notes !== undefined ? updatedPayload.notes : (purchase.notes || '');
+
+    const oldStatus = purchase.status || 'Draft';
+    const oldItemsRaw = Array.isArray(purchase.items) ? purchase.items : [];
+    const isReceivedOrPartial = oldStatus === 'Received' || oldStatus === 'Completed' || oldStatus === 'Partially Received';
+
+    // Authoritative normalization of old items
+    const oldItems = oldItemsRaw.map(it => this.normalizePurchaseItem(it, oldStatus));
+
+    // Authoritative normalization of new items
+    const newItems = updatedPayload.items.map(it => {
+      const norm = this.normalizePurchaseItem(it, oldStatus);
+      if (isNaN(norm.qty) || norm.qty <= 0) {
+        throw new Error(`Quantity must be a positive number for "${norm.product || 'item'}".`);
+      }
+      if (isNaN(norm.buyingPrice) || norm.buyingPrice < 0) {
+        throw new Error(`Buying price must be 0 or greater for "${norm.product || 'item'}".`);
+      }
+      return norm;
+    });
+
+    // If purchase was Received or Partially Received, reconcile physical inventory stock!
+    if (isReceivedOrPartial) {
+      if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+
+      // Map old received quantities by canonical key: `${productId || productName}:::${size}`
+      const oldRecMap = new Map();
+      oldItems.forEach(it => {
+        const prodIdent = it.productId || it.product.toLowerCase();
+        const sizeIdent = (it.size || 'Standard').toUpperCase();
+        const key = `${prodIdent}:::${sizeIdent}`;
+        oldRecMap.set(key, (oldRecMap.get(key) || 0) + it.receivedQty);
+      });
+
+      // Map new received quantities by canonical key
+      const newRecMap = new Map();
+      newItems.forEach(it => {
+        const prodIdent = it.productId || it.product.toLowerCase();
+        const sizeIdent = (it.size || 'Standard').toUpperCase();
+        const key = `${prodIdent}:::${sizeIdent}`;
+        const rec = (oldStatus === 'Received' || oldStatus === 'Completed') ? it.qty : Math.min(it.qty, Number(it.receivedQty || 0));
+        it.receivedQty = rec;
+        newRecMap.set(key, (newRecMap.get(key) || 0) + rec);
+      });
+
+      const allKeys = new Set([...oldRecMap.keys(), ...newRecMap.keys()]);
+
+      // Phase 1: Pre-validation - ensure no negative stock would be created (Atomic verification)
+      for (const key of allKeys) {
+        const oldRec = oldRecMap.get(key) || 0;
+        const newRec = newRecMap.get(key) || 0;
+        const delta = newRec - oldRec;
+
+        if (delta < 0) {
+          const reduction = Math.abs(delta);
+          const [prodIdent, sizeIdent] = key.split(':::');
+          const product = (this.data.products || []).find(p => p.id === prodIdent || (p.name && p.name.trim().toLowerCase() === prodIdent.toLowerCase()));
+          if (product) {
+            const variant = (product.variants || []).find(v => (v.size || 'Standard').toUpperCase() === sizeIdent) || (product.variants || [])[0];
+            const currentStock = variant ? Number(variant.stock || 0) : Number(product.totalStock || 0);
+            if (currentStock < reduction) {
+              throw new Error(`Cannot reduce received quantity for "${product.name} (${sizeIdent})": current available stock (${currentStock}) is insufficient to reverse ${reduction} units (goods may have already been sold or consumed).`);
+            }
+          }
+        }
+      }
+
+      // Phase 2: Atomic Execution - Apply stock adjustments, update costs, log movements
+      for (const key of allKeys) {
+        const oldRec = oldRecMap.get(key) || 0;
+        const newRec = newRecMap.get(key) || 0;
+        const delta = newRec - oldRec;
+
+        const [prodIdent, sizeIdent] = key.split(':::');
+        let product = (this.data.products || []).find(p => p.id === prodIdent || (p.name && p.name.trim().toLowerCase() === prodIdent.toLowerCase()));
+
+        if (!product && delta > 0) {
+          const refItem = newItems.find(it => (it.productId || it.product.toLowerCase()) === prodIdent);
+          if (refItem) {
+            const newProdId = `PROD-${Date.now().toString().slice(-4)}`;
+            product = {
+              id: newProdId,
+              name: refItem.product,
+              category: refItem.category || 'General',
+              brand: refItem.brand || 'Generic',
+              purchasePrice: refItem.buyingPrice,
+              sellingPrice: refItem.sellingPrice,
+              totalStock: 0,
+              status: 'Active',
+              variants: []
+            };
+            this.data.products.push(product);
+          }
+        }
+
+        if (product) {
+          if (!Array.isArray(product.variants) || product.variants.length === 0) {
+            product.variants = [{ size: sizeIdent, stock: 0, purchasePrice: product.purchasePrice || 0, sellingPrice: product.sellingPrice || 0 }];
+          }
+          let variant = product.variants.find(v => (v.size || 'Standard').toUpperCase() === sizeIdent);
+          if (!variant) {
+            variant = {
+              id: `VAR-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 900 + 100)}`,
+              size: sizeIdent,
+              sku: `${(product.name || 'PRD').slice(0, 3).toUpperCase()}-${sizeIdent.replace(/\s+/g, '')}`,
+              stock: 0,
+              purchasePrice: product.purchasePrice || 0,
+              sellingPrice: product.sellingPrice || 0
+            };
+            product.variants.push(variant);
+          }
+
+          if (delta !== 0) {
+            variant.stock = Math.max(0, (variant.stock || 0) + delta);
+            product.totalStock = product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+            product.stock = product.totalStock;
+
+            this.data.stockMovements.unshift({
+              id: `MOV-PUR-EDIT-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 100)}`,
+              date: new Date().toLocaleString(),
+              product: product.name,
+              productId: product.id,
+              size: sizeIdent,
+              sku: variant.sku || `${(product.name || 'PRD').slice(0, 3).toUpperCase()}-${sizeIdent}`,
+              type: delta > 0 ? 'Purchase Edit (+)' : 'Purchase Edit (−)',
+              quantity: delta,
+              reference: purchase.id,
+              user: 'Admin',
+              notes: delta > 0
+                ? `Added ${delta} units upon editing purchase order ${purchase.id}.`
+                : `Reversed ${Math.abs(delta)} units upon editing purchase order ${purchase.id}.`
+            });
+          }
+
+          // Update buying price and inventory valuation reference on variant & product
+          const matchingNewItem = newItems.find(it => (it.productId === product.id || it.product.toLowerCase() === product.name.toLowerCase()) && (it.size || 'Standard').toUpperCase() === sizeIdent);
+          if (matchingNewItem && matchingNewItem.buyingPrice > 0) {
+            variant.purchasePrice = matchingNewItem.buyingPrice;
+            product.purchasePrice = matchingNewItem.buyingPrice;
+          }
+          if (matchingNewItem && matchingNewItem.sellingPrice > 0) {
+            variant.sellingPrice = matchingNewItem.sellingPrice;
+            if (!product.sellingPrice || product.sellingPrice === 0) product.sellingPrice = matchingNewItem.sellingPrice;
+          }
+        }
+      }
+    }
+
+    const totalQty = newItems.reduce((s, it) => s + it.qty, 0);
+    const totalAmount = newItems.reduce((s, it) => s + it.totalCost, 0);
+    const totalReceived = isReceivedOrPartial
+      ? (oldStatus === 'Received' || oldStatus === 'Completed' ? totalQty : newItems.reduce((s, it) => s + (it.receivedQty || 0), 0))
+      : 0;
+
+    purchase.supplier = supplier;
+    purchase.date = date;
+    purchase.notes = notes;
+    purchase.items = newItems;
+    purchase.totalQuantity = totalQty;
+    purchase.totalAmount = totalAmount;
+    purchase.totalReceived = totalReceived;
+    if (updatedPayload.status && ['Draft', 'Approved', 'Partially Received', 'Received', 'Completed'].includes(updatedPayload.status)) {
+      purchase.status = updatedPayload.status;
+    }
+
+    this.save();
+    return purchase;
+  }
+
   addStockIn(purchasePayload) {
     // purchasePayload: { supplier, date, notes, items: [ { productId, size, qty, buyingPrice, sellingPrice }, ... ] }
     let totalQty = 0;
@@ -3445,6 +3701,208 @@ class StoreManager {
     return true;
   }
 
+  updateSale(saleId, updatedPayload) {
+    const sale = (this.data.sales || []).find(s => s.id === saleId || s.reference === saleId);
+    if (!sale) throw new Error('Sale not found.');
+
+    if (!updatedPayload || !Array.isArray(updatedPayload.items) || updatedPayload.items.length === 0) {
+      throw new Error('Sale must contain at least one item.');
+    }
+
+    const wasActiveSale = sale.status !== 'Cancelled' && sale.status !== 'Failed' && sale.status !== 'Draft';
+    const newStatus = updatedPayload.paymentStatus || sale.status || 'Paid';
+    const isActiveSale = newStatus !== 'Cancelled' && newStatus !== 'Failed' && newStatus !== 'Draft';
+
+    // 1. Group original items to know what stock was deducted by this sale
+    const oldDeductedMap = new Map();
+    if (wasActiveSale) {
+      (sale.items || []).forEach(it => {
+        const prod = (this.data.products || []).find(p => p.id === it.productId || (p.name && it.product && p.name.trim().toLowerCase() === it.product.trim().toLowerCase()));
+        const prodId = prod ? prod.id : (it.productId || '');
+        let extractedSize = it.size || '';
+        if (!extractedSize && it.sku) {
+          const parts = String(it.sku).split('-');
+          if (parts.length > 1) extractedSize = parts[parts.length - 1];
+        }
+        const size = (extractedSize || 'Standard').toUpperCase();
+        const key = `${prodId}:::${size}`;
+        const q = Number(it.qty !== undefined ? it.qty : (it.quantity || 1)) || 0;
+        oldDeductedMap.set(key, (oldDeductedMap.get(key) || 0) + q);
+      });
+    }
+
+    // 2. Validate updated items and required stock
+    const newRequestedMap = new Map();
+    (updatedPayload.items || []).forEach(it => {
+      const q = parseInt(it.qty, 10);
+      if (isNaN(q) || q <= 0) throw new Error('Quantity must be a positive whole number greater than 0.');
+      const prodId = it.productId;
+      const size = (it.size || 'Standard').toUpperCase();
+      const key = `${prodId}:::${size}`;
+      newRequestedMap.set(key, (newRequestedMap.get(key) || 0) + q);
+    });
+
+    // Check inventory stock availability if active sale
+    if (isActiveSale) {
+      for (const [key, reqQty] of newRequestedMap.entries()) {
+        const [prodId, size] = key.split(':::');
+        const prod = (this.data.products || []).find(p => p.id === prodId);
+        if (!prod) throw new Error('Product not found in inventory.');
+        if (prod.status === 'Archived') {
+          throw new Error(`Product "${prod.name}" is archived and cannot be sold.`);
+        }
+        const variant = (prod.variants || []).find(v => (v.size || 'Standard').toUpperCase() === size) || (prod.variants || [])[0];
+        const currentStock = variant ? (variant.stock || 0) : (prod.totalStock || 0);
+        const previouslyDeducted = oldDeductedMap.get(key) || 0;
+        const effectiveAvailable = currentStock + previouslyDeducted;
+        if (reqQty > effectiveAvailable) {
+          throw new Error(`Insufficient stock for "${prod.name}" (${size}). Available: ${effectiveAvailable}, Requested: ${reqQty}.`);
+        }
+      }
+    }
+
+    // 3. Reconcile stock
+    // A) Restore original deducted quantities if wasActiveSale
+    if (wasActiveSale) {
+      (sale.items || []).forEach(it => {
+        const prod = (this.data.products || []).find(p => p.id === it.productId || (p.name && it.product && p.name.trim().toLowerCase() === it.product.trim().toLowerCase()));
+        if (prod) {
+          let extractedSize = it.size || '';
+          if (!extractedSize && it.sku) {
+            const parts = String(it.sku).split('-');
+            if (parts.length > 1) extractedSize = parts[parts.length - 1];
+          }
+          const targetSize = (extractedSize || 'Standard').toUpperCase();
+          const variant = (prod.variants || []).find(v => (v.size || 'Standard').toUpperCase() === targetSize) || (prod.variants || [])[0];
+          const q = Number(it.qty !== undefined ? it.qty : (it.quantity || 1)) || 0;
+          if (variant) {
+            variant.stock = Math.max(0, (variant.stock || 0) + q);
+          } else {
+            prod.totalStock = Math.max(0, (prod.totalStock || 0) + q);
+          }
+          if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+            prod.totalStock = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+          }
+          prod.stock = prod.totalStock;
+        }
+      });
+    }
+
+    // B) Deduct new quantities if isActiveSale
+    let totalAmt = 0;
+    let totalItemCount = 0;
+    const saleItems = [];
+
+    (updatedPayload.items || []).forEach(it => {
+      const prod = (this.data.products || []).find(p => p.id === it.productId);
+      if (prod) {
+        const itemQty = parseInt(it.qty, 10) || 1;
+        const targetSize = (it.size || 'Standard').toUpperCase();
+        const variant = (prod.variants || []).find(v => (v.size || 'Standard').toUpperCase() === targetSize) || (prod.variants || [])[0];
+
+        if (isActiveSale) {
+          if (variant) {
+            variant.stock = Math.max(0, (variant.stock || 0) - itemQty);
+          } else {
+            prod.totalStock = Math.max(0, (prod.totalStock || 0) - itemQty);
+          }
+          if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+            prod.totalStock = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+          }
+          prod.stock = prod.totalStock;
+        }
+
+        const priceToUse = (it.sellingPrice !== undefined && it.sellingPrice !== null && Number(it.sellingPrice) >= 0)
+          ? Number(it.sellingPrice)
+          : (variant && variant.sellingPrice > 0 ? variant.sellingPrice : (prod.sellingPrice || 0));
+        const lineTotal = priceToUse * itemQty;
+        totalAmt += lineTotal;
+        totalItemCount += itemQty;
+
+        const unitCost = this.getItemUnitCost({ ...it, productId: prod.id, size: it.size }, prod);
+
+        saleItems.push({
+          product: prod.name,
+          productId: prod.id,
+          size: it.size || 'Standard',
+          qty: itemQty,
+          price: priceToUse,
+          purchasePrice: unitCost,
+          buyingPrice: unitCost,
+          amount: lineTotal
+        });
+      }
+    });
+
+    const discountVal = Math.max(0, parseFloat(updatedPayload.discount) || 0);
+    const finalTotal = Math.max(0, totalAmt - discountVal);
+
+    const custName = (updatedPayload.customerName || updatedPayload.customer || sale.customer || 'Walk-in Customer').trim();
+    const custPhone = (updatedPayload.customerPhone || updatedPayload.phone || sale.phone || '-').trim();
+    let custId = updatedPayload.customerId || sale.customerId || '';
+
+    if (custName && custName.toLowerCase() !== 'walk-in customer') {
+      let customer = (this.data.customers || []).find(c =>
+        (custId && c.id === custId) ||
+        (c.name && c.name.toLowerCase() === custName.toLowerCase()) ||
+        (custPhone && custPhone !== '-' && c.phone === custPhone)
+      );
+      if (!customer) {
+        custId = custId || `CUST-${String((this.data.customers || []).length + 1).padStart(2, '0')}`;
+        customer = {
+          id: custId,
+          name: custName,
+          phone: custPhone,
+          ordersCount: 0,
+          lastPurchase: new Date().toISOString().split('T')[0],
+          totalSpend: 0
+        };
+        if (!Array.isArray(this.data.customers)) this.data.customers = [];
+        this.data.customers.unshift(customer);
+      } else {
+        custId = customer.id;
+        if (custPhone && custPhone !== '-' && (!customer.phone || customer.phone === '-')) {
+          customer.phone = custPhone;
+        }
+      }
+    } else {
+      custId = '';
+    }
+
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+    this.data.stockMovements.unshift({
+      id: `MOV-SALE-EDIT-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 100)}`,
+      date: new Date().toLocaleString(),
+      product: saleItems.map(si => si.product).join(', '),
+      productId: saleItems.length === 1 ? saleItems[0].productId : 'MULTI',
+      size: saleItems.length === 1 ? saleItems[0].size : 'MULTI',
+      sku: `${sale.id}-EDIT`,
+      type: 'Sale Update Adjustment',
+      quantity: -totalItemCount,
+      reference: sale.id,
+      user: 'Cashier',
+      notes: `Sale ${sale.id} items updated. Total units: ${totalItemCount}, Final Amount: ₹${finalTotal}.`
+    });
+
+    sale.customer = custName;
+    sale.customerName = custName;
+    sale.customerId = custId;
+    sale.phone = custPhone;
+    if (updatedPayload.date) sale.date = updatedPayload.date;
+    sale.itemCount = totalItemCount;
+    sale.subtotal = totalAmt;
+    sale.totalAmount = finalTotal;
+    sale.paymentMethod = updatedPayload.paymentMethod || sale.paymentMethod || 'Cash';
+    sale.status = newStatus;
+    sale.discount = discountVal;
+    sale.items = saleItems;
+
+    this.recalculateCustomerMetrics();
+    this.save();
+    return sale;
+  }
+
+
   deleteCustomer(customerId) {
     const customer = (this.data.customers || []).find(c => c.id === customerId);
     if (!customer) throw new Error('Customer not found.');
@@ -3460,6 +3918,41 @@ class StoreManager {
     this.save();
     return true;
   }
+
+  updateCustomer(customerId, updatedData) {
+    const customer = (this.data.customers || []).find(c => c.id === customerId);
+    if (!customer) throw new Error('Customer not found.');
+
+    const name = (updatedData.name || '').trim();
+    if (!name) throw new Error('Customer name is required.');
+    const phone = updatedData.phone ? updatedData.phone.trim() : '-';
+    const email = updatedData.email !== undefined ? updatedData.email.trim() : (customer.email || '');
+    const address = updatedData.address !== undefined ? updatedData.address.trim() : (customer.address || '');
+    const city = updatedData.city !== undefined ? updatedData.city.trim() : (customer.city || '');
+    const notes = updatedData.notes !== undefined ? updatedData.notes.trim() : (customer.notes || '');
+
+    const oldName = customer.name;
+    customer.name = name;
+    customer.phone = phone;
+    customer.email = email;
+    customer.address = address;
+    customer.city = city;
+    customer.notes = notes;
+
+    (this.data.sales || []).forEach(s => {
+      if (s.customerId === customer.id || (!s.customerId && (s.customer || s.customerName || '').toLowerCase() === oldName.toLowerCase())) {
+        s.customerId = customer.id;
+        s.customer = customer.name;
+        s.customerName = customer.name;
+        if (customer.phone && customer.phone !== '-') s.phone = customer.phone;
+      }
+    });
+
+    this.recalculateCustomerMetrics();
+    this.save();
+    return customer;
+  }
+
 
   adjustProductStock({ productId, size, adjustmentType, quantity, reason }) {
     const product = this.data.products.find(p => p.id === productId);
@@ -3664,6 +4157,16 @@ window.loadSampleData = function() {
 // ==========================================
 // 2. UI HELPER COMPONENTS
 // ==========================================
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function createButton({ text, icon = null, variant = 'primary', size = 'md', onClick = null, type = 'button', extraClass = '' }) {
   const btn = document.createElement('button');
   btn.type = type;
@@ -7056,7 +7559,483 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
 }
 
 // INVENTORY PAGE (GROUPED PRODUCTS + EXPANDABLE SIZE DETAILS)
+
+// ==========================================
+// DEDICATED VIEW PRODUCT / INVENTORY PAGE
+// ==========================================
+function renderViewProductPage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+  const container = document.createElement('div');
+  container.className = 'page-container product-view-page';
+
+  const productId = params.productId || params.id;
+  const productsList = store.data.products || [];
+  let product = productsList.find(p => p.id === productId);
+
+  // If not found by exact ID, fallback search by name if provided
+  if (!product && params.name) {
+    product = productsList.find(p => p.name && p.name.trim().toLowerCase() === String(params.name).trim().toLowerCase());
+  }
+
+  // Missing product error state
+  if (!product) {
+    const errorCard = document.createElement('div');
+    errorCard.className = 'card';
+    errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
+    errorCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+        <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Product Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem; max-width: 440px;">
+          The inventory product with identifier "<strong>${escapeHtml(productId || 'unknown')}</strong>" could not be located in records or may have been deleted.
+        </p>
+      </div>
+      <button type="button" class="btn btn-secondary back-to-list-btn" style="margin-top: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+        <span>Return to Inventory</span>
+      </button>
+    `;
+    errorCard.querySelector('.back-to-list-btn').addEventListener('click', () => {
+      if (onNavigate) onNavigate('inventory');
+    });
+    container.appendChild(errorCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  const isArchived = product.status === 'Archived';
+  const isInactive = product.status === 'Inactive';
+  const stockInfo = getProductStockStatus(product);
+
+  const variants = (Array.isArray(product.variants) && product.variants.length > 0)
+    ? product.variants
+    : [{ size: 'Standard', stock: Number(product.stock || product.totalStock) || 0, sellingPrice: product.sellingPrice, purchasePrice: product.purchasePrice }];
+
+  const totalStock = variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+
+  // Price calculations
+  let minSelling = Infinity, maxSelling = 0;
+  let minBuying = Infinity, maxBuying = 0;
+  variants.forEach(v => {
+    const sp = Number(v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== '' ? v.sellingPrice : (product.sellingPrice || 0));
+    const bp = Number(v.purchasePrice !== undefined && v.purchasePrice !== null && v.purchasePrice !== '' ? v.purchasePrice : (product.purchasePrice || 0));
+    if (sp < minSelling) minSelling = sp;
+    if (sp > maxSelling) maxSelling = sp;
+    if (bp < minBuying) minBuying = bp;
+    if (bp > maxBuying) maxBuying = bp;
+  });
+  if (minSelling === Infinity) minSelling = 0;
+  if (minBuying === Infinity) minBuying = 0;
+
+  const sellingDisplay = minSelling === maxSelling
+    ? `₹${minSelling.toLocaleString('en-IN')}`
+    : `₹${minSelling.toLocaleString('en-IN')} – ₹${maxSelling.toLocaleString('en-IN')}`;
+
+  const buyingDisplay = minBuying === maxBuying
+    ? (minBuying > 0 ? `₹${minBuying.toLocaleString('en-IN')}` : '—')
+    : `₹${minBuying.toLocaleString('en-IN')} – ₹${maxBuying.toLocaleString('en-IN')}`;
+
+  const totalValuation = variants.reduce((sum, v) => {
+    const cost = Number(v.purchasePrice || product.purchasePrice || 0);
+    return sum + ((Number(v.stock) || 0) * cost);
+  }, 0);
+
+  const totalRetailValue = variants.reduce((sum, v) => {
+    const price = Number(v.sellingPrice || product.sellingPrice || 0);
+    return sum + ((Number(v.stock) || 0) * price);
+  }, 0);
+
+  // Status badges
+  let statusBadgeVariant = 'success';
+  if (isArchived) statusBadgeVariant = 'warning';
+  else if (isInactive) statusBadgeVariant = 'secondary';
+
+  // 1. Header (Breadcrumb, Badges, & Action Buttons)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+
+  const breadcrumbWrap = document.createElement('div');
+  breadcrumbWrap.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;';
+  breadcrumbWrap.appendChild(createBreadcrumb([
+    { label: 'Inventory', target: 'inventory' },
+    { label: product.name }
+  ], onNavigate));
+  breadcrumbWrap.appendChild(createBadge({ label: product.status || 'Active', variant: statusBadgeVariant }));
+  breadcrumbWrap.appendChild(createBadge({ label: stockInfo.label, variant: stockInfo.variant }));
+  headerDiv.appendChild(breadcrumbWrap);
+
+  const headerActions = document.createElement('div');
+  headerActions.style.cssText = 'display: flex; gap: 0.5rem; align-items: center;';
+
+  const btnBack = document.createElement('button');
+  btnBack.type = 'button';
+  btnBack.className = 'btn btn-secondary btn-sm back-to-list-btn';
+  btnBack.innerHTML = `<i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i> <span>Back to Inventory</span>`;
+  btnBack.addEventListener('click', () => {
+    if (onNavigate) onNavigate('inventory');
+  });
+  headerActions.appendChild(btnBack);
+
+  // Edit Action only if supported and not archived
+  if (!isArchived) {
+    const btnEdit = document.createElement('button');
+    btnEdit.type = 'button';
+    btnEdit.className = 'btn btn-primary btn-sm edit-inv-page-btn';
+    btnEdit.innerHTML = `<i data-lucide="pencil" style="width: 14px; height: 14px;"></i> <span>Edit Product</span>`;
+    btnEdit.addEventListener('click', () => {
+      if (onNavigate) onNavigate('inventory', { action: 'manage-product', id: product.id });
+    });
+    headerActions.appendChild(btnEdit);
+  }
+
+  headerDiv.appendChild(headerActions);
+  container.appendChild(headerDiv);
+
+  // Archived Notice Banner
+  if (isArchived) {
+    const archiveBanner = document.createElement('div');
+    archiveBanner.style.cssText = 'background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 0.85rem 1.15rem; margin-bottom: 1.25rem; display: flex; align-items: flex-start; gap: 0.75rem;';
+    archiveBanner.innerHTML = `
+      <i data-lucide="archive" style="width: 20px; height: 20px; color: var(--status-warning); flex-shrink: 0; margin-top: 2px;"></i>
+      <div style="font-size: 0.85rem; color: var(--text-primary); line-height: 1.5;">
+        <strong>Archived Product:</strong> This product is currently archived. Historical purchase, sales, and stock reconciliation records are preserved, but it is not available for new sales unless reactivated.
+      </div>
+    `;
+    container.appendChild(archiveBanner);
+  }
+
+  // 2. Overview KPI Cards
+  const kpiGrid = document.createElement('div');
+  kpiGrid.className = 'kpi-grid';
+  kpiGrid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;';
+  kpiGrid.innerHTML = `
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Available Stock</div>
+      <div style="font-size: 1.2rem; font-weight: 700; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--brand-primary)'}; margin-top: 0.25rem;">
+        ${totalStock} <span style="font-size: 0.8rem; font-weight: 500; color: var(--text-secondary);">units</span>
+      </div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Selling Price</div>
+      <div style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${sellingDisplay}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Unit Cost (Buying)</div>
+      <div style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${buyingDisplay}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Inventory Valuation</div>
+      <div style="font-size: 1.2rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;">₹${Math.round(totalValuation).toLocaleString('en-IN')}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Stock Status</div>
+      <div style="margin-top: 0.4rem;">${createBadge({ label: stockInfo.label, variant: stockInfo.variant }).outerHTML}</div>
+    </div>
+  `;
+  container.appendChild(kpiGrid);
+
+  // 3. Product General Information Card
+  const detailsCard = document.createElement('div');
+  detailsCard.className = 'card';
+  detailsCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 1.25rem;';
+  detailsCard.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="tag" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        General Information & Catalog Specification
+      </h3>
+      <span style="font-size: 0.8rem; color: var(--text-secondary); font-family: monospace;">Product ID: <strong>${escapeHtml(product.id)}</strong></span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem; font-size: 0.875rem;">
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Product Name</div>
+        <div style="font-weight: 700; color: var(--text-primary); margin-top: 0.25rem; font-size: 1rem;">${escapeHtml(product.name)}</div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Category</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(product.category || 'General')}</div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Brand</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(product.brand || 'Unbranded')}</div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Est. Total Retail Value</div>
+        <div style="font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">₹${Math.round(totalRetailValue).toLocaleString('en-IN')}</div>
+      </div>
+    </div>
+
+    ${product.description ? `
+      <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+        <div style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-transform: uppercase; margin-bottom: 0.25rem;">Product Description</div>
+        <div style="color: var(--text-primary); font-size: 0.85rem; line-height: 1.5;">${escapeHtml(product.description)}</div>
+      </div>
+    ` : ''}
+  `;
+  container.appendChild(detailsCard);
+
+  // 4. Size-wise Stock Breakdown Table
+  const sizeCard = document.createElement('div');
+  sizeCard.className = 'card';
+  sizeCard.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem;';
+  sizeCard.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="layers" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Size-Wise Inventory & Stock Breakdown (${variants.length} variant${variants.length > 1 ? 's' : ''})
+      </h3>
+    </div>
+
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+      <table class="admin-table" style="font-size: 0.85rem;">
+        <thead>
+          <tr>
+            <th style="width: 6%; text-align: center;">S.No</th>
+            <th style="width: 16%;">Size / Variant</th>
+            <th style="width: 18%;">SKU Code</th>
+            <th style="width: 14%; text-align: center;">Physical Stock</th>
+            <th style="width: 14%;">Stock Status</th>
+            <th style="width: 16%; text-align: right;">Unit Cost</th>
+            <th style="width: 16%; text-align: right;">Selling Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${variants.map((v, idx) => {
+            const vStock = Number(v.stock) || 0;
+            const vStatus = getSizeStockStatus(vStock);
+            const vBadge = createBadge({ label: vStatus.label, variant: vStatus.variant }).outerHTML;
+            const vBuy = Number(v.purchasePrice !== undefined && v.purchasePrice !== null && v.purchasePrice !== '' ? v.purchasePrice : (product.purchasePrice || 0));
+            const vSell = Number(v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== '' ? v.sellingPrice : (product.sellingPrice || 0));
+
+            return `
+              <tr>
+                <td style="text-align: center; color: var(--text-secondary); font-weight: 600;">${idx + 1}</td>
+                <td>
+                  <span class="badge badge-secondary" style="font-size: 0.8rem; font-weight: 700;">Size ${escapeHtml(v.size || 'Standard')}</span>
+                </td>
+                <td style="font-family: monospace; font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(v.sku || `${(product.name || 'PRD').slice(0,3).toUpperCase()}-${v.size || 'STD'}`)}</td>
+                <td style="text-align: center; font-weight: 700; color: ${vStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${vStock} units</td>
+                <td>${vBadge}</td>
+                <td style="text-align: right; color: var(--text-primary);">${vBuy > 0 ? `₹${vBuy.toLocaleString('en-IN')}` : '—'}</td>
+                <td style="text-align: right; font-weight: 600; color: var(--brand-primary);">${vSell > 0 ? `₹${vSell.toLocaleString('en-IN')}` : '—'}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  container.appendChild(sizeCard);
+
+  // 5. Stock Movement & Ledger Audit Log
+  const pNameLower = product.name.trim().toLowerCase();
+  const relMovements = (store.data.stockMovements || []).filter(m =>
+    m.productId === product.id || (m.product && m.product.trim().toLowerCase() === pNameLower)
+  );
+
+  const historyCard = document.createElement('div');
+  historyCard.className = 'card';
+  historyCard.style.cssText = 'display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem;';
+  historyCard.innerHTML = `
+    <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="history" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Stock Movement & Ledger History (${relMovements.length} log${relMovements.length !== 1 ? 's' : ''})
+      </h3>
+    </div>
+  `;
+
+  if (relMovements.length === 0) {
+    historyCard.innerHTML += `
+      <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary); font-size: 0.85rem;">
+        No physical stock movement events recorded for this product.
+      </div>
+    `;
+  } else {
+    historyCard.innerHTML += `
+      <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); max-height: 280px; overflow-y: auto;">
+        <table class="admin-table" style="font-size: 0.825rem;">
+          <thead>
+            <tr>
+              <th>Date & Time</th>
+              <th>Movement Type</th>
+              <th>Size</th>
+              <th>Quantity Adjusted</th>
+              <th>Reference</th>
+              <th>Reason & Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${relMovements.map(m => `
+              <tr>
+                <td style="color: var(--text-secondary);">${escapeHtml(m.date || '')}</td>
+                <td><span class="badge ${m.quantity > 0 ? 'badge-success' : 'badge-warning'}">${escapeHtml(m.type || 'Adjustment')}</span></td>
+                <td><span class="badge badge-secondary">${escapeHtml(m.size || 'Standard')}</span></td>
+                <td style="font-weight: 700; color: ${m.quantity > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${m.quantity > 0 ? `+${m.quantity}` : m.quantity} units</td>
+                <td style="color: var(--text-secondary); font-family: monospace;">${escapeHtml(m.reference || '—')}</td>
+                <td style="color: var(--text-secondary);">${escapeHtml(m.notes || '—')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+  container.appendChild(historyCard);
+
+  // 6. Related Purchases and Sales
+  const relPurchases = (store.data.purchases || []).filter(po =>
+    (po.items || []).some(it => it.productId === product.id || (it.product && it.product.trim().toLowerCase() === pNameLower))
+  );
+
+  const relSales = (store.data.sales || []).filter(s =>
+    (s.items || []).some(it => it.productId === product.id || (it.product && it.product.trim().toLowerCase() === pNameLower))
+  );
+
+  if (relPurchases.length > 0 || relSales.length > 0) {
+    const txCard = document.createElement('div');
+    txCard.className = 'card';
+    txCard.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem;';
+    txCard.innerHTML = `
+      <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="arrow-left-right" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+          Related Purchase Orders & Sales Transactions
+        </h3>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem;">
+        <!-- Related Purchases -->
+        <div>
+          <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">Purchases / Stock In (${relPurchases.length})</h4>
+          <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); max-height: 220px; overflow-y: auto;">
+            <table class="admin-table" style="font-size: 0.8rem;">
+              <thead>
+                <tr>
+                  <th>PO ID</th>
+                  <th>Supplier</th>
+                  <th>Status</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${relPurchases.length === 0 ? `<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1rem;">No related purchases.</td></tr>` :
+                  relPurchases.map(po => `
+                    <tr>
+                      <td style="font-weight: 600;">${escapeHtml(po.id)}</td>
+                      <td>${escapeHtml(po.supplier || 'Supplier')}</td>
+                      <td>${createBadge({ label: po.status || 'Received', variant: po.status === 'Draft' ? 'warning' : 'success' }).outerHTML}</td>
+                      <td style="text-align: right;">
+                        <button type="button" class="btn btn-sm btn-secondary view-rel-po-btn" data-po-id="${po.id}" title="View Purchase" style="padding: 0.2rem 0.5rem;">
+                          <i data-lucide="eye" style="width: 13px; height: 13px;"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Related Sales -->
+        <div>
+          <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">Sales Orders (${relSales.length})</h4>
+          <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm); max-height: 220px; overflow-y: auto;">
+            <table class="admin-table" style="font-size: 0.8rem;">
+              <thead>
+                <tr>
+                  <th>Sale Ref</th>
+                  <th>Customer</th>
+                  <th>Status</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${relSales.length === 0 ? `<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1rem;">No related sales.</td></tr>` :
+                  relSales.map(s => `
+                    <tr>
+                      <td style="font-weight: 600;">${escapeHtml(s.id || s.reference || 'SAL')}</td>
+                      <td>${escapeHtml(s.customer || s.customerName || 'Walk-in')}</td>
+                      <td>${createBadge({ label: s.status || 'Paid', variant: 'success' }).outerHTML}</td>
+                      <td style="text-align: right;">
+                        <button type="button" class="btn btn-sm btn-secondary view-rel-sale-btn" data-sale-id="${s.id}" title="View Sale" style="padding: 0.2rem 0.5rem;">
+                          <i data-lucide="eye" style="width: 13px; height: 13px;"></i>
+                        </button>
+                      </td>
+                    </tr>
+                  `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+
+    txCard.querySelectorAll('.view-rel-po-btn').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const poId = b.getAttribute('data-po-id');
+        if (onNavigate) onNavigate('purchases', { action: 'view', purchaseId: poId });
+      });
+    });
+
+    txCard.querySelectorAll('.view-rel-sale-btn').forEach(b => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sId = b.getAttribute('data-sale-id');
+        if (onNavigate) onNavigate('sales', { action: 'view', saleId: sId });
+      });
+    });
+
+    container.appendChild(txCard);
+  }
+
+  // 7. Bottom Sticky Actions Bar
+  const bottomBar = document.createElement('div');
+  bottomBar.className = 'card';
+  bottomBar.style.cssText = 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding: 1rem 1.25rem;';
+  bottomBar.innerHTML = `
+    <button type="button" class="btn btn-secondary back-to-list-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600;">
+      <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+      <span>Back to Inventory</span>
+    </button>
+    <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+      ${!isArchived ? `
+        <button type="button" class="btn btn-primary edit-inv-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+          <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
+          <span>Edit Product</span>
+        </button>
+      ` : ''}
+    </div>
+  `;
+
+  bottomBar.querySelector('.back-to-list-bottom-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('inventory');
+  });
+
+  const editBottomBtn = bottomBar.querySelector('.edit-inv-bottom-btn');
+  if (editBottomBtn) {
+    editBottomBtn.addEventListener('click', () => {
+      if (onNavigate) onNavigate('inventory', { action: 'manage-product', id: product.id });
+    });
+  }
+
+  container.appendChild(bottomBar);
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
 function renderInventory(params = {}, onNavigate = null) {
+  if (params && params.action === 'view') {
+    return renderViewProductPage(params, onNavigate);
+  }
   if (params && (params.action === 'manage-product' || params.action === 'edit' || params.view === 'manage-product' || params.action === 'manage')) {
     return renderProductManagementPage(params, onNavigate);
   }
@@ -7397,7 +8376,7 @@ function renderInventory(params = {}, onNavigate = null) {
 
       // Main Product Row
       const tr = document.createElement('tr');
-      tr.style.cssText = hasSizes ? 'cursor: pointer; transition: background-color 0.15s ease;' : 'transition: background-color 0.15s ease;';
+      tr.style.cssText = 'transition: background-color 0.15s ease;';
 
       const chevronIcon = hasSizes
         ? `<button type="button" class="expand-toggle-btn" title="${isExpanded ? 'Collapse sizes' : 'Expand sizes'}" style="background: none; border: none; padding: 2px 4px; color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; border-radius: 4px; transition: color 0.15s ease;">
@@ -7449,16 +8428,8 @@ function renderInventory(params = {}, onNavigate = null) {
         renderInventoryTable();
       };
 
-      // Expand/collapse when clicking anywhere on parent product row
+      // Expand/collapse ONLY via chevron toggle button (row background click does nothing)
       if (hasSizes) {
-        tr.addEventListener('click', (e) => {
-          // Do not toggle if click originated on an action button or inside action controls
-          if (e.target.closest('.table-action-btn') || e.target.closest('.row-actions-box')) {
-            return;
-          }
-          toggleExpand();
-        });
-
         const toggleBtn = tr.querySelector('.expand-toggle-btn');
         if (toggleBtn) {
           toggleBtn.addEventListener('click', (e) => {
@@ -7470,7 +8441,11 @@ function renderInventory(params = {}, onNavigate = null) {
 
       tr.querySelector('.view-inv-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        openProductDetailsModal(p);
+        if (onNavigate) {
+          onNavigate('inventory', { action: 'view', productId: p.id });
+        } else {
+          openProductDetailsModal(p);
+        }
       });
 
       tr.querySelector('.edit-inv-btn').addEventListener('click', (e) => {
@@ -8128,7 +9103,13 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
 // PURCHASES PAGE
 // PURCHASES PAGE (Draft -> Approved -> Received Workflow)
 function renderPurchases(params = {}, onNavigate = null) {
-  if (params && (params.action === 'add' || params.view === 'add' || params.action === 'edit' || params.action === 'add-product' || params.view === 'add-product')) {
+  if (params && params.action === 'edit') {
+    return renderEditPurchasePage(params, onNavigate);
+  }
+  if (params && params.action === 'view') {
+    return renderViewPurchasePage(params, onNavigate);
+  }
+  if (params && (params.action === 'add' || params.view === 'add' || params.action === 'add-product' || params.view === 'add-product')) {
     return renderAddPurchasePage(params, onNavigate);
   }
 
@@ -8254,7 +9235,7 @@ function renderPurchases(params = {}, onNavigate = null) {
 
     pagePurchases.forEach((p, index) => {
       const tr = document.createElement('tr');
-      tr.style.cursor = 'pointer';
+      tr.style.cursor = 'default';
 
       const status = p.status || 'Completed';
       let badgeVariant = 'secondary';
@@ -8280,6 +9261,10 @@ function renderPurchases(params = {}, onNavigate = null) {
               <i data-lucide="check-circle"></i>
               <span class="sr-only">Approve</span>
             </button>
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
+              <i data-lucide="eye"></i>
+              <span class="sr-only">View</span>
+            </button>
             <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
               <i data-lucide="pencil"></i>
               <span class="sr-only">Edit</span>
@@ -8296,6 +9281,14 @@ function renderPurchases(params = {}, onNavigate = null) {
             <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="Receive Purchase" aria-label="Receive Purchase">
               <i data-lucide="package-check"></i>
               <span class="sr-only">Receive Purchase</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
+              <i data-lucide="eye"></i>
+              <span class="sr-only">View</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
+              <i data-lucide="pencil"></i>
+              <span class="sr-only">Edit</span>
             </button>
             <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
               <i data-lucide="trash-2"></i>
@@ -8314,6 +9307,10 @@ function renderPurchases(params = {}, onNavigate = null) {
               <i data-lucide="eye"></i>
               <span class="sr-only">View</span>
             </button>
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
+              <i data-lucide="pencil"></i>
+              <span class="sr-only">Edit</span>
+            </button>
             <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
               <i data-lucide="trash-2"></i>
               <span class="sr-only">Delete</span>
@@ -8326,6 +9323,10 @@ function renderPurchases(params = {}, onNavigate = null) {
             <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
               <i data-lucide="eye"></i>
               <span class="sr-only">View</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
+              <i data-lucide="pencil"></i>
+              <span class="sr-only">Edit</span>
             </button>
             <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
               <i data-lucide="trash-2"></i>
@@ -8347,11 +9348,7 @@ function renderPurchases(params = {}, onNavigate = null) {
         <td>${actionsHtml}</td>
       `;
 
-      // Row Click -> Open View Details Modal
-      tr.addEventListener('click', (e) => {
-        if (e.target.closest('.row-actions-box')) return; // do not trigger if button clicked
-        openViewPurchaseModal(p, onNavigate, () => renderPurchasesTable());
-      });
+
 
       // Draft Actions
       const approveBtn = tr.querySelector('.action-approve-btn');
@@ -8419,7 +9416,8 @@ Status will change to Approved. Stock will remain unchanged until goods are rece
       if (viewBtn) {
         viewBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          openViewPurchaseModal(p, onNavigate, () => renderPurchasesTable());
+          if (onNavigate) onNavigate('purchases', { action: 'view', purchaseId: p.id });
+          else openViewPurchaseModal(p, onNavigate, () => renderPurchasesTable());
         });
       }
 
@@ -8891,6 +9889,844 @@ Stock will remain unchanged until goods are received.`);
 }
 
 // ADD PURCHASE PAGE (Manual Product Entry, Save as Draft or Save & Receive Stock)
+
+// ==========================================
+// DEDICATED PURCHASE EDIT PAGE (Separate Page)
+// ==========================================
+
+// ==========================================
+// DEDICATED VIEW PURCHASE PAGE
+// ==========================================
+function renderViewPurchasePage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  const purchaseId = params.purchaseId || params.id;
+  const purchase = (store.data.purchases || []).find(p => p.id === purchaseId);
+
+  // Missing purchase error state
+  if (!purchase) {
+    const errorCard = document.createElement('div');
+    errorCard.className = 'card';
+    errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
+    errorCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+        <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Purchase Order Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem; max-width: 440px;">
+          The purchase order with identifier "<strong>${escapeHtml(purchaseId || 'unknown')}</strong>" could not be located or may have been deleted.
+        </p>
+      </div>
+      <button type="button" class="btn btn-secondary back-to-list-btn" style="margin-top: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+        <span>Return to Purchases</span>
+      </button>
+    `;
+    errorCard.querySelector('.back-to-list-btn').addEventListener('click', () => {
+      if (onNavigate) onNavigate('purchases');
+    });
+    container.appendChild(errorCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  const status = purchase.status || 'Draft';
+  let badgeVariant = 'secondary';
+  if (status === 'Draft') badgeVariant = 'warning';
+  else if (status === 'Approved') badgeVariant = 'info';
+  else if (status === 'Partially Received') badgeVariant = 'warning';
+  else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+
+  // Normalize items
+  const items = (purchase.items || []).map(it => store.normalizePurchaseItem ? store.normalizePurchaseItem(it, status) : it);
+
+  const totalOrdered = purchase.totalQuantity !== undefined ? Number(purchase.totalQuantity) : items.reduce((s, i) => s + (Number(i.qty) || 0), 0);
+  const totalReceived = purchase.totalReceived !== undefined ? Number(purchase.totalReceived) : items.reduce((s, i) => s + (Number(i.receivedQty !== undefined ? i.receivedQty : (status === 'Completed' || status === 'Received' ? i.qty : 0)) || 0), 0);
+  const totalCost = purchase.totalAmount !== undefined ? Number(purchase.totalAmount) : items.reduce((s, i) => s + ((Number(i.qty) || 0) * (Number(i.buyingPrice) || 0)), 0);
+  const totalSellingEst = items.reduce((s, i) => s + ((Number(i.qty) || 0) * (Number(i.sellingPrice) || 0)), 0);
+
+  // 1. Header (Breadcrumb, Badge, & Top Action Buttons)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+
+  const breadcrumbWrap = document.createElement('div');
+  breadcrumbWrap.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;';
+  breadcrumbWrap.appendChild(createBreadcrumb([
+    { label: 'Purchases', target: 'purchases' },
+    { label: `Purchase Details (${purchase.id})` }
+  ], onNavigate));
+  breadcrumbWrap.appendChild(createBadge({ label: status, variant: badgeVariant }));
+  headerDiv.appendChild(breadcrumbWrap);
+
+  const headerActions = document.createElement('div');
+  headerActions.style.cssText = 'display: flex; gap: 0.5rem; align-items: center;';
+
+  const btnBack = document.createElement('button');
+  btnBack.type = 'button';
+  btnBack.className = 'btn btn-secondary btn-sm back-to-list-btn';
+  btnBack.innerHTML = `<i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i> <span>Back</span>`;
+  btnBack.addEventListener('click', () => {
+    if (onNavigate) onNavigate('purchases');
+  });
+  headerActions.appendChild(btnBack);
+
+  const btnEdit = document.createElement('button');
+  btnEdit.type = 'button';
+  btnEdit.className = 'btn btn-primary btn-sm edit-pur-page-btn';
+  btnEdit.innerHTML = `<i data-lucide="pencil" style="width: 14px; height: 14px;"></i> <span>Edit Purchase</span>`;
+  btnEdit.addEventListener('click', () => {
+    if (onNavigate) onNavigate('purchases', { action: 'edit', purchaseId: purchase.id });
+  });
+  headerActions.appendChild(btnEdit);
+
+  headerDiv.appendChild(headerActions);
+  container.appendChild(headerDiv);
+
+  // 2. Overview KPI Cards
+  const kpiGrid = document.createElement('div');
+  kpiGrid.className = 'kpi-grid';
+  kpiGrid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;';
+  kpiGrid.innerHTML = `
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Supplier</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(purchase.supplier || 'N/A')}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Order Date</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(purchase.date || '—')}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Units (Rec / Ord)</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">${totalReceived} / ${totalOrdered}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Purchase Cost</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;">₹${Math.round(totalCost).toLocaleString()}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Est. Selling Value</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">₹${Math.round(totalSellingEst).toLocaleString()}</div>
+    </div>
+  `;
+  container.appendChild(kpiGrid);
+
+  // 3. Purchase Details Card
+  const detailsCard = document.createElement('div');
+  detailsCard.className = 'card';
+  detailsCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 1.25rem;';
+  detailsCard.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="file-text" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Purchase Order Information
+      </h3>
+      <span style="font-size: 0.8rem; color: var(--text-secondary);">PO Ref: <strong>${escapeHtml(purchase.id)}</strong></span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; font-size: 0.875rem;">
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Supplier Name</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(purchase.supplier || 'N/A')}</div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Order Date</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(purchase.date || '—')}</div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Lifecycle Status</div>
+        <div style="margin-top: 0.25rem;">${createBadge({ label: status, variant: badgeVariant }).outerHTML}</div>
+      </div>
+      <div>
+        <div style="color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-transform: uppercase;">Notes & Comments</div>
+        <div style="color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(purchase.notes || 'No special notes recorded.')}</div>
+      </div>
+    </div>
+  `;
+  container.appendChild(detailsCard);
+
+  // 4. Products Table Card
+  const itemsCard = document.createElement('div');
+  itemsCard.className = 'card';
+  itemsCard.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem;';
+  itemsCard.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="package" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Ordered Products & Variant Breakdown (${items.length} items)
+      </h3>
+    </div>
+
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+      <table class="admin-table" style="font-size: 0.85rem;">
+        <thead>
+          <tr>
+            <th style="width: 5%; text-align: center;">S.No</th>
+            <th style="width: 25%;">Product Name</th>
+            <th style="width: 12%;">SKU / Code</th>
+            <th style="width: 10%; text-align: center;">Size</th>
+            <th style="width: 10%; text-align: center;">Ordered</th>
+            <th style="width: 10%; text-align: center;">Received</th>
+            <th style="width: 10%; text-align: center;">Outstanding</th>
+            <th style="width: 14%; text-align: right;">Unit Cost</th>
+            <th style="width: 14%; text-align: right;">Total Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map((it, idx) => {
+            const ord = Number(it.qty) || 0;
+            const rec = Number(it.receivedQty !== undefined ? it.receivedQty : (status === 'Completed' || status === 'Received' ? ord : 0));
+            const out = Math.max(0, ord - rec);
+            const bp = Number(it.buyingPrice) || 0;
+            const lineTot = ord * bp;
+            return `
+              <tr>
+                <td style="text-align: center; color: var(--text-secondary); font-weight: 600;">${idx + 1}</td>
+                <td>
+                  <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(it.product || it.productName || 'Product')}</div>
+                  <div style="font-size: 0.75rem; color: var(--text-secondary);">${escapeHtml(it.brand || '')} • ${escapeHtml(it.category || '')}</div>
+                </td>
+                <td style="font-family: monospace; font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(it.sku || '—')}</td>
+                <td style="text-align: center;"><span class="badge badge-secondary">${escapeHtml(it.size || 'Standard')}</span></td>
+                <td style="text-align: center; font-weight: 600; color: var(--text-primary);">${ord}</td>
+                <td style="text-align: center; font-weight: 600; color: var(--status-success);">${rec}</td>
+                <td style="text-align: center; font-weight: 700; color: ${out > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)'};">${out}</td>
+                <td style="text-align: right; color: var(--text-primary);">₹${bp.toLocaleString()}</td>
+                <td style="text-align: right; font-weight: 700; color: var(--brand-primary);">₹${Math.round(lineTot).toLocaleString()}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  container.appendChild(itemsCard);
+
+  // 5. Stock Movements / Receipt History (if any)
+  const relMovements = (store.data.stockMovements || []).filter(m => m.reference === purchase.id);
+  if (relMovements.length > 0) {
+    const historyCard = document.createElement('div');
+    historyCard.className = 'card';
+    historyCard.style.cssText = 'display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem;';
+    historyCard.innerHTML = `
+      <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="history" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+          Stock Movement & Audit History (${relMovements.length} records)
+        </h3>
+      </div>
+      <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+        <table class="admin-table" style="font-size: 0.825rem;">
+          <thead>
+            <tr>
+              <th>Date & Time</th>
+              <th>Type</th>
+              <th>Product & Size</th>
+              <th>Quantity</th>
+              <th>Notes / Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${relMovements.map(m => `
+              <tr>
+                <td style="color: var(--text-secondary);">${escapeHtml(m.date || '')}</td>
+                <td><span class="badge ${m.quantity > 0 ? 'badge-success' : 'badge-warning'}">${escapeHtml(m.type || 'Stock Movement')}</span></td>
+                <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(m.product || '')} (${escapeHtml(m.size || 'Standard')})</td>
+                <td style="font-weight: 700; color: ${m.quantity > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">${m.quantity > 0 ? `+${m.quantity}` : m.quantity} units</td>
+                <td style="color: var(--text-secondary);">${escapeHtml(m.notes || '—')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+    container.appendChild(historyCard);
+  }
+
+  // 6. Bottom Sticky Actions Bar
+  const bottomBar = document.createElement('div');
+  bottomBar.className = 'card';
+  bottomBar.style.cssText = 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding: 1rem 1.25rem;';
+  bottomBar.innerHTML = `
+    <button type="button" class="btn btn-secondary back-to-list-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600;">
+      <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+      <span>Back to Purchases</span>
+    </button>
+    <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+      ${status === 'Draft' ? `
+        <button type="button" class="btn btn-primary approve-pur-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+          <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+          <span>Approve Purchase</span>
+        </button>
+      ` : ''}
+      <button type="button" class="btn btn-primary edit-pur-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
+        <span>Edit Purchase</span>
+      </button>
+      <button type="button" class="btn btn-ghost delete-pur-bottom-btn" style="color: var(--status-danger); display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+        <span>Delete Purchase</span>
+      </button>
+    </div>
+  `;
+
+  bottomBar.querySelector('.back-to-list-bottom-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('purchases');
+  });
+
+  bottomBar.querySelector('.edit-pur-bottom-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('purchases', { action: 'edit', purchaseId: purchase.id });
+  });
+
+  const appBtn = bottomBar.querySelector('.approve-pur-btn');
+  if (appBtn) {
+    appBtn.addEventListener('click', () => {
+      const conf = confirm(`Approve purchase order ${purchase.id}?`);
+      if (conf) {
+        store.approvePurchase(purchase.id);
+        toast.show({ message: `Purchase ${purchase.id} approved!`, type: 'success' });
+        if (onNavigate) onNavigate('purchases', { action: 'view', purchaseId: purchase.id });
+      }
+    });
+  }
+
+  bottomBar.querySelector('.delete-pur-bottom-btn').addEventListener('click', () => {
+    const hasReceived = (purchase.totalReceived > 0) || (status === 'Received' || status === 'Partially Received' || status === 'Completed');
+    let confirmMsg = `Delete purchase order ${purchase.id}?`;
+    if (hasReceived) {
+      confirmMsg = `Are you sure you want to delete purchase order ${purchase.id} from "${purchase.supplier || 'Supplier'}"?
+
+This order has received stock. Deleting it will reverse the received quantities from inventory and log stock reversal movements.
+
+This action cannot be undone.`;
+    } else {
+      confirmMsg = `Are you sure you want to delete purchase order ${purchase.id}?
+
+This action cannot be undone.`;
+    }
+    const confirmed = confirm(confirmMsg);
+    if (confirmed) {
+      try {
+        store.deletePurchase(purchase.id);
+        toast.show({ message: `Purchase order ${purchase.id} deleted.`, type: 'info' });
+        if (onNavigate) onNavigate('purchases');
+      } catch (err) {
+        toast.show({ message: err.message, type: 'danger' });
+      }
+    }
+  });
+
+  container.appendChild(bottomBar);
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
+function renderEditPurchasePage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  const purchaseId = params.purchaseId || params.id;
+  const purchase = (store.data.purchases || []).find(p => p.id === purchaseId);
+
+  // Missing purchase error state
+  if (!purchase) {
+    const errorCard = document.createElement('div');
+    errorCard.className = 'card';
+    errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
+    errorCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+        <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Purchase Order Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem; max-width: 440px;">
+          The purchase order with identifier "<strong>${escapeHtml(purchaseId || 'unknown')}</strong>" could not be located or may have been deleted.
+        </p>
+      </div>
+      <button type="button" class="btn btn-secondary back-to-list-btn" style="margin-top: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+        <span>Return to Purchases</span>
+      </button>
+    `;
+    errorCard.querySelector('.back-to-list-btn').addEventListener('click', () => {
+      if (onNavigate) onNavigate('purchases');
+    });
+    container.appendChild(errorCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  let hasUnsavedChanges = false;
+  const markChanged = () => { hasUnsavedChanges = true; };
+
+  const status = purchase.status || 'Draft';
+  let badgeVariant = 'secondary';
+  if (status === 'Draft') badgeVariant = 'warning';
+  else if (status === 'Approved') badgeVariant = 'info';
+  else if (status === 'Partially Received') badgeVariant = 'warning';
+  else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+
+  // 1. Header (Breadcrumb & Status Badge)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+  
+  const breadcrumbWrap = document.createElement('div');
+  breadcrumbWrap.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;';
+  breadcrumbWrap.appendChild(createBreadcrumb([
+    { label: 'Purchases', target: 'purchases' },
+    { label: `Edit Purchase (${purchase.id})` }
+  ], onNavigate));
+  breadcrumbWrap.appendChild(createBadge({ label: status, variant: badgeVariant }));
+  headerDiv.appendChild(breadcrumbWrap);
+  container.appendChild(headerDiv);
+
+  // Stock notice for Received / Partially Received orders
+  const isReceivedStatus = status === 'Received' || status === 'Completed' || status === 'Partially Received';
+  if (isReceivedStatus) {
+    const noticeDiv = document.createElement('div');
+    noticeDiv.style.cssText = 'background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-md); padding: 0.85rem 1.15rem; margin-bottom: 1.25rem; display: flex; align-items: flex-start; gap: 0.75rem;';
+    noticeDiv.innerHTML = `
+      <i data-lucide="info" style="width: 20px; height: 20px; color: var(--brand-primary); flex-shrink: 0; margin-top: 2px;"></i>
+      <div style="font-size: 0.85rem; color: var(--text-primary); line-height: 1.5;">
+        <strong>Stock Reconciliation Notice:</strong> This purchase order has confirmed received stock in inventory. When saving changes, physical inventory stock will be reconciled automatically against updated quantities. Any reductions will be verified against current physical stock to prevent negative inventory.
+      </div>
+    `;
+    container.appendChild(noticeDiv);
+  }
+
+  // 2. Main Form Card
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
+
+  const suppliersList = store.data.suppliers || [];
+  const categoriesList = store.getCategories();
+  const brandsList = store.getBrands();
+  const standardSizes = (store.getSizes && store.getSizes().length > 0)
+    ? store.getSizes()
+    : ['S', 'M', 'L', 'XL', 'Free Size', 'Standard'];
+  const productsList = store.data.products || [];
+
+  // Initialize items array from purchase using authoritative normalization
+  let editItems = [];
+  if (Array.isArray(purchase.items) && purchase.items.length > 0) {
+    editItems = purchase.items.map((it, idx) => {
+      const norm = store.normalizePurchaseItem ? store.normalizePurchaseItem(it, purchase.status) : it;
+      return {
+        id: 'pitem_' + Date.now() + '_' + idx,
+        productId: norm.productId || it.productId || '',
+        productName: norm.product || norm.productName || it.product || it.productName || '',
+        brand: norm.brand || it.brand || '',
+        category: norm.category || it.category || '',
+        size: norm.size || it.size || 'Standard',
+        qty: norm.qty !== undefined ? norm.qty : (norm.received !== undefined ? norm.received : 1),
+        buyingPrice: norm.buyingPrice !== undefined ? norm.buyingPrice : (it.price || 0),
+        sellingPrice: norm.sellingPrice !== undefined ? norm.sellingPrice : 0,
+        receivedQty: norm.receivedQty !== undefined ? norm.receivedQty : (isReceivedStatus ? (norm.qty || 0) : 0)
+      };
+    });
+  }
+
+  if (editItems.length === 0) {
+    editItems.push({
+      id: 'pitem_' + Date.now() + '_0',
+      productId: '',
+      productName: '',
+      brand: brandsList[0] || 'ClassicFit',
+      category: categoriesList[0] || 'Shirts',
+      size: standardSizes[0] || 'M',
+      qty: 1,
+      buyingPrice: 0,
+      sellingPrice: 0,
+      receivedQty: 0
+    });
+  }
+
+  mainCard.innerHTML = `
+    <datalist id="edit-pur-suppliers-list">
+      ${suppliersList.map(s => `<option value="${escapeHtml(s.name)}">`).join('')}
+    </datalist>
+    <datalist id="edit-pur-products-list">
+      ${productsList.map(p => `<option value="${escapeHtml(p.name)}">`).join('')}
+    </datalist>
+    <datalist id="edit-pur-brands-list">
+      ${brandsList.map(b => `<option value="${escapeHtml(b)}">`).join('')}
+    </datalist>
+
+    <!-- SECTION A: PURCHASE DETAILS -->
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="file-text" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Purchase Order Information
+      </h3>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Supplier <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="edit-pur-supplier" class="form-input" list="edit-pur-suppliers-list" value="${escapeHtml(purchase.supplier || '')}" placeholder="Select or enter supplier">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Purchase Date <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="edit-pur-date" class="form-input" value="${escapeHtml(purchase.date || new Date().toISOString().split('T')[0])}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Order Status</label>
+          <input type="text" class="form-input" value="${escapeHtml(status)}" disabled style="background: var(--bg-secondary); cursor: not-allowed; opacity: 0.85;">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 600;">Notes & Reference</label>
+        <textarea id="edit-pur-notes" class="form-input" rows="2" placeholder="Optional purchase notes, shipping terms, invoice number...">${escapeHtml(purchase.notes || '')}</textarea>
+      </div>
+    </div>
+
+    <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="package" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+            Purchased Products & Sizes
+          </h3>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
+            Update product details, ordered quantities, buying prices, and selling prices.
+          </p>
+        </div>
+      </div>
+
+      <div id="edit-pur-items-container" style="display: flex; flex-direction: column; gap: 0.75rem;"></div>
+
+      <div style="display: flex; justify-content: flex-start; padding-top: 0.5rem;">
+        <button type="button" id="btn-edit-pur-add-item" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
+          <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+          <span>Add Another Product Item</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- SECTION C: FINANCIAL SUMMARY -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; background: var(--bg-secondary); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Units</div>
+        <div id="edit-pur-sum-units" style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">0 units</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Purchase Cost</div>
+        <div id="edit-pur-sum-cost" style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">₹0</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Est. Selling Value</div>
+        <div id="edit-pur-sum-selling" style="font-size: 1.25rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">₹0</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Est. Gross Profit</div>
+        <div id="edit-pur-sum-profit" style="font-size: 1.25rem; font-weight: 700; color: #10b981; margin-top: 0.25rem;">₹0</div>
+      </div>
+    </div>
+
+    <!-- SECTION D: STICKY ACTIONS BAR -->
+    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+      <button type="button" id="btn-edit-pur-cancel" class="btn btn-secondary" style="font-weight: 600;">
+        Back / Cancel
+      </button>
+
+      <button type="button" id="btn-edit-pur-save" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.65rem 1.5rem; font-weight: 600;">
+        <i data-lucide="save" style="width: 16px; height: 16px;"></i>
+        <span>Save Changes</span>
+      </button>
+    </div>
+  `;
+
+  container.appendChild(mainCard);
+
+  const itemsContainer = mainCard.querySelector('#edit-pur-items-container');
+
+  function updateSummary() {
+    let totalUnits = 0;
+    let totalCost = 0;
+    let totalSelling = 0;
+
+    editItems.forEach(it => {
+      const q = parseInt(it.qty, 10) || 0;
+      const bp = parseFloat(it.buyingPrice) || 0;
+      const sp = parseFloat(it.sellingPrice) || 0;
+      totalUnits += q;
+      totalCost += (q * bp);
+      totalSelling += (q * sp);
+    });
+
+    const grossProfit = totalSelling - totalCost;
+
+    mainCard.querySelector('#edit-pur-sum-units').textContent = `${totalUnits} units`;
+    mainCard.querySelector('#edit-pur-sum-cost').textContent = `₹${Math.round(totalCost).toLocaleString()}`;
+    mainCard.querySelector('#edit-pur-sum-selling').textContent = `₹${Math.round(totalSelling).toLocaleString()}`;
+    mainCard.querySelector('#edit-pur-sum-profit').textContent = `₹${Math.round(grossProfit).toLocaleString()}`;
+  }
+
+  function renderItemsList() {
+    itemsContainer.innerHTML = '';
+
+    editItems.forEach((it, idx) => {
+      const itemRow = document.createElement('div');
+      itemRow.className = 'card';
+      itemRow.style.cssText = 'padding: 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 0.75rem;';
+
+      const lineTotal = (parseInt(it.qty, 10) || 0) * (parseFloat(it.buyingPrice) || 0);
+
+      itemRow.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-weight: 700; color: var(--brand-primary); font-size: 0.85rem;">#${idx + 1}</span>
+            <span style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem;">${escapeHtml(it.productName || 'New Product Item')}</span>
+            ${isReceivedStatus ? `<span class="badge badge-success" style="font-size: 0.7rem; padding: 0.1rem 0.4rem;">${it.receivedQty || 0} units received</span>` : ''}
+          </div>
+
+          ${editItems.length > 1 ? `
+            <button type="button" class="btn btn-ghost btn-sm remove-item-btn" style="color: var(--status-danger); padding: 0.2rem 0.5rem;" title="Remove Item">
+              <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+            </button>
+          ` : ''}
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem;">
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product Name <span style="color: #ef4444;">*</span></label>
+            <input type="text" class="form-input item-name-input" list="edit-pur-products-list" value="${escapeHtml(it.productName || '')}" placeholder="e.g. Classic Oxford Shirt">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Category</label>
+            <select class="form-select item-cat-select">
+              ${categoriesList.map(cat => `<option value="${escapeHtml(cat)}" ${cat === it.category ? 'selected' : ''}>${escapeHtml(cat)}</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Brand</label>
+            <select class="form-select item-brand-select">
+              ${brandsList.map(b => `<option value="${escapeHtml(b)}" ${b === it.brand ? 'selected' : ''}>${escapeHtml(b)}</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size</label>
+            <select class="form-select item-size-select">
+              ${standardSizes.map(sz => `<option value="${escapeHtml(sz)}" ${sz === it.size ? 'selected' : ''}>${escapeHtml(sz)}</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity <span style="color: #ef4444;">*</span></label>
+            <input type="number" class="form-input item-qty-input" min="1" step="1" value="${it.qty !== undefined ? it.qty : 1}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Buying Price (₹) <span style="color: #ef4444;">*</span></label>
+            <input type="number" class="form-input item-bp-input" min="0" step="any" value="${it.buyingPrice !== undefined ? it.buyingPrice : 0}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Selling Price (₹)</label>
+            <input type="number" class="form-input item-sp-input" min="0" step="any" value="${it.sellingPrice !== undefined ? it.sellingPrice : 0}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Line Total</label>
+            <input type="text" class="form-input item-total-input" value="₹${Math.round(lineTotal).toLocaleString()}" disabled style="background: var(--bg-surface); font-weight: 700; color: var(--text-primary);">
+          </div>
+        </div>
+      `;
+
+      // Inputs event bindings
+      const nameInp = itemRow.querySelector('.item-name-input');
+      nameInp.addEventListener('input', (e) => {
+        const val = e.target.value;
+        it.productName = val;
+        const matched = productsList.find(p => p.name && p.name.trim().toLowerCase() === val.trim().toLowerCase());
+        if (matched) {
+          it.productId = matched.id;
+          if (matched.category) {
+            it.category = matched.category;
+            itemRow.querySelector('.item-cat-select').value = matched.category;
+          }
+          if (matched.brand) {
+            it.brand = matched.brand;
+            itemRow.querySelector('.item-brand-select').value = matched.brand;
+          }
+          if (matched.purchasePrice && (!it.buyingPrice || it.buyingPrice === 0)) {
+            it.buyingPrice = matched.purchasePrice;
+            itemRow.querySelector('.item-bp-input').value = matched.purchasePrice;
+          }
+          if (matched.sellingPrice && (!it.sellingPrice || it.sellingPrice === 0)) {
+            it.sellingPrice = matched.sellingPrice;
+            itemRow.querySelector('.item-sp-input').value = matched.sellingPrice;
+          }
+        }
+        markChanged();
+        recomputeRow();
+      });
+
+      const catSelect = itemRow.querySelector('.item-cat-select');
+      catSelect.addEventListener('change', (e) => {
+        it.category = e.target.value;
+        markChanged();
+      });
+
+      const brandSelect = itemRow.querySelector('.item-brand-select');
+      brandSelect.addEventListener('change', (e) => {
+        it.brand = e.target.value;
+        markChanged();
+      });
+
+      const sizeSelect = itemRow.querySelector('.item-size-select');
+      sizeSelect.addEventListener('change', (e) => {
+        it.size = e.target.value;
+        markChanged();
+      });
+
+      const qtyInp = itemRow.querySelector('.item-qty-input');
+      const bpInp = itemRow.querySelector('.item-bp-input');
+      const spInp = itemRow.querySelector('.item-sp-input');
+      const totInp = itemRow.querySelector('.item-total-input');
+
+      const recomputeRow = () => {
+        it.qty = parseInt(qtyInp.value, 10) || 0;
+        it.buyingPrice = parseFloat(bpInp.value) || 0;
+        it.sellingPrice = parseFloat(spInp.value) || 0;
+        const curLine = (it.qty * it.buyingPrice);
+        totInp.value = `₹${Math.round(curLine).toLocaleString()}`;
+        markChanged();
+        updateSummary();
+      };
+
+      qtyInp.addEventListener('input', recomputeRow);
+      bpInp.addEventListener('input', recomputeRow);
+      spInp.addEventListener('input', recomputeRow);
+
+      const removeBtn = itemRow.querySelector('.remove-item-btn');
+      if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+          editItems.splice(idx, 1);
+          markChanged();
+          renderItemsList();
+          updateSummary();
+        });
+      }
+
+      itemsContainer.appendChild(itemRow);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  mainCard.querySelector('#btn-edit-pur-add-item').addEventListener('click', () => {
+    editItems.push({
+      id: 'pitem_' + Date.now() + '_' + editItems.length,
+      productId: '',
+      productName: '',
+      brand: brandsList[0] || 'ClassicFit',
+      category: categoriesList[0] || 'Shirts',
+      size: standardSizes[0] || 'M',
+      qty: 1,
+      buyingPrice: 0,
+      sellingPrice: 0,
+      receivedQty: 0
+    });
+    markChanged();
+    renderItemsList();
+    updateSummary();
+  });
+
+  mainCard.querySelectorAll('#edit-pur-supplier, #edit-pur-date, #edit-pur-notes').forEach(el => {
+    el.addEventListener('input', markChanged);
+  });
+
+  mainCard.querySelector('#btn-edit-pur-cancel').addEventListener('click', () => {
+    if (hasUnsavedChanges) {
+      const leave = confirm('You have unsaved changes. Are you sure you want to discard them and return to Purchases?');
+      if (!leave) return;
+    }
+    if (onNavigate) onNavigate('purchases');
+  });
+
+  mainCard.querySelector('#btn-edit-pur-save').addEventListener('click', () => {
+    const supplier = mainCard.querySelector('#edit-pur-supplier').value.trim();
+    const date = mainCard.querySelector('#edit-pur-date').value;
+    const notes = mainCard.querySelector('#edit-pur-notes').value.trim();
+
+    if (!supplier) {
+      toast.show({ message: 'Supplier is required.', type: 'danger' });
+      mainCard.querySelector('#edit-pur-supplier').focus();
+      return;
+    }
+
+    if (editItems.length === 0) {
+      toast.show({ message: 'Purchase order must have at least one product item.', type: 'danger' });
+      return;
+    }
+
+    for (let i = 0; i < editItems.length; i++) {
+      const it = editItems[i];
+      if (!it.productName || !it.productName.trim()) {
+        toast.show({ message: `Please enter a product name for item #${i + 1}.`, type: 'danger' });
+        return;
+      }
+      if (isNaN(it.qty) || it.qty <= 0) {
+        toast.show({ message: `Quantity must be greater than 0 for item #${i + 1}.`, type: 'danger' });
+        return;
+      }
+      if (isNaN(it.buyingPrice) || it.buyingPrice < 0) {
+        toast.show({ message: `Buying price cannot be negative for item #${i + 1}.`, type: 'danger' });
+        return;
+      }
+    }
+
+    try {
+      store.updatePurchase(purchase.id, {
+        supplier,
+        date,
+        notes,
+        items: editItems.map(it => ({
+          productId: it.productId || '',
+          product: it.productName || it.product || '',
+          productName: it.productName || it.product || '',
+          category: it.category || 'Shirts',
+          brand: it.brand || 'ClassicFit',
+          size: it.size || 'Standard',
+          qty: Number(it.qty) || 0,
+          buyingPrice: Number(it.buyingPrice) || 0,
+          sellingPrice: Number(it.sellingPrice) || 0,
+          receivedQty: Number(it.receivedQty !== undefined ? it.receivedQty : (isReceivedStatus ? (it.qty || 0) : 0))
+        }))
+      });
+      hasUnsavedChanges = false;
+      toast.show({ message: `Purchase order ${purchase.id} updated successfully!`, type: 'success' });
+      if (onNavigate) onNavigate('purchases');
+    } catch (err) {
+      toast.show({ message: err.message || 'Error updating purchase.', type: 'danger' });
+    }
+  });
+
+  renderItemsList();
+  updateSummary();
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
 function renderAddPurchasePage(params = {}, onNavigate = null) {
   if (typeof params === 'function') {
     onNavigate = params;
@@ -10114,8 +11950,817 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   return container;
 }
 
+
+// ==========================================
+// DEDICATED SALES EDIT PAGE (Separate Page)
+// ==========================================
+
+// ==========================================
+// DEDICATED VIEW SALE PAGE
+// ==========================================
+function renderViewSalePage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  const saleId = params.saleId || params.id || params.reference;
+  const sale = (store.data.sales || []).find(s => s.id === saleId || s.reference === saleId);
+
+  // Missing sale error state
+  if (!sale) {
+    const errorCard = document.createElement('div');
+    errorCard.className = 'card';
+    errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
+    errorCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+        <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Sale Record Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem; max-width: 440px;">
+          The sales transaction with reference "<strong>${escapeHtml(saleId || 'unknown')}</strong>" could not be located or may have been deleted.
+        </p>
+      </div>
+      <button type="button" class="btn btn-secondary back-to-list-btn" style="margin-top: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+        <span>Return to Sales</span>
+      </button>
+    `;
+    errorCard.querySelector('.back-to-list-btn').addEventListener('click', () => {
+      if (onNavigate) onNavigate('sales');
+    });
+    container.appendChild(errorCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  const custName = sale.customer || sale.customerName || 'Walk-in Customer';
+  let matchedCustomer = null;
+  if (custName && custName !== 'Walk-in Customer') {
+    matchedCustomer = (store.data.customers || []).find(c =>
+      (c.id && sale.customerId && c.id === sale.customerId) ||
+      (c.name && c.name.toLowerCase() === custName.toLowerCase()) ||
+      (sale.phone && c.phone && c.phone === sale.phone)
+    );
+  }
+
+  const saleRef = sale.id || sale.reference || '—';
+  const paymentStatus = sale.status || sale.paymentStatus || 'Completed';
+  let statusBadgeVariant = 'secondary';
+  if (paymentStatus === 'Completed' || paymentStatus === 'Paid') statusBadgeVariant = 'success';
+  else if (paymentStatus === 'Pending') statusBadgeVariant = 'warning';
+  else if (paymentStatus === 'Failed' || paymentStatus === 'Cancelled') statusBadgeVariant = 'danger';
+
+  // Items breakdown
+  const items = Array.isArray(sale.items) && sale.items.length > 0 ? sale.items : [];
+  let calculatedSubtotal = 0;
+  let calculatedItemDiscount = 0;
+  let totalUnits = 0;
+
+  items.forEach(i => {
+    const qty = Number(i.qty !== undefined ? i.qty : (i.quantity || 1)) || 0;
+    const unitPrice = Number(i.price !== undefined ? i.price : (i.sellingPrice || 0)) || 0;
+    const itemDiscount = Number(i.discount || 0) || 0;
+    totalUnits += qty;
+    calculatedSubtotal += (unitPrice * qty);
+    calculatedItemDiscount += itemDiscount;
+  });
+
+  const finalTotal = sale.totalAmount !== undefined ? Number(sale.totalAmount) : (calculatedSubtotal - calculatedItemDiscount);
+  const paidAmount = sale.paidAmount !== undefined ? Number(sale.paidAmount) : (paymentStatus === 'Paid' || paymentStatus === 'Completed' ? finalTotal : 0);
+  const balanceDue = Math.max(0, finalTotal - paidAmount);
+
+  // 1. Header (Breadcrumb, Status & Action Buttons)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+
+  const breadcrumbWrap = document.createElement('div');
+  breadcrumbWrap.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;';
+  breadcrumbWrap.appendChild(createBreadcrumb([
+    { label: 'Sales', target: 'sales' },
+    { label: `Sale Details (${saleRef})` }
+  ], onNavigate));
+  breadcrumbWrap.appendChild(createBadge({ label: paymentStatus, variant: statusBadgeVariant }));
+  headerDiv.appendChild(breadcrumbWrap);
+
+  const headerActions = document.createElement('div');
+  headerActions.style.cssText = 'display: flex; gap: 0.5rem; align-items: center;';
+
+  const btnBack = document.createElement('button');
+  btnBack.type = 'button';
+  btnBack.className = 'btn btn-secondary btn-sm back-to-list-btn';
+  btnBack.innerHTML = `<i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i> <span>Back</span>`;
+  btnBack.addEventListener('click', () => {
+    if (onNavigate) onNavigate('sales');
+  });
+  headerActions.appendChild(btnBack);
+
+  const btnEdit = document.createElement('button');
+  btnEdit.type = 'button';
+  btnEdit.className = 'btn btn-primary btn-sm edit-sale-page-btn';
+  btnEdit.innerHTML = `<i data-lucide="pencil" style="width: 14px; height: 14px;"></i> <span>Edit Sale</span>`;
+  btnEdit.addEventListener('click', () => {
+    if (onNavigate) onNavigate('sales', { action: 'edit', saleId: sale.id });
+  });
+  headerActions.appendChild(btnEdit);
+
+  headerDiv.appendChild(headerActions);
+  container.appendChild(headerDiv);
+
+  // 2. KPI Cards
+  const kpiGrid = document.createElement('div');
+  kpiGrid.className = 'kpi-grid';
+  kpiGrid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;';
+  kpiGrid.innerHTML = `
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Customer</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(custName)}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Sale Date</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(sale.date || '—')}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Payment Method</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(sale.paymentMethod || 'Cash')}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Items / Units Sold</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">${totalUnits} units</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Net Total Amount</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;">₹${Math.round(finalTotal).toLocaleString()}</div>
+    </div>
+  `;
+  container.appendChild(kpiGrid);
+
+  // 3. Customer Info Banner
+  if (matchedCustomer) {
+    const custBanner = document.createElement('div');
+    custBanner.className = 'card';
+    custBanner.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; background: var(--bg-secondary); border: 1px solid var(--border-color);';
+    custBanner.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <div style="width: 40px; height: 40px; border-radius: 50%; background: var(--brand-primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1rem;">
+          ${escapeHtml(matchedCustomer.name.slice(0, 1).toUpperCase())}
+        </div>
+        <div>
+          <div style="font-weight: 700; color: var(--text-primary); font-size: 0.95rem;">${escapeHtml(matchedCustomer.name)}</div>
+          <div style="font-size: 0.8rem; color: var(--text-secondary);">Registered Customer • Phone: ${escapeHtml(matchedCustomer.phone || '—')} • Lifetime Spend: ₹${(matchedCustomer.totalSpend || 0).toLocaleString()}</div>
+        </div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm view-matched-cust-btn" style="display: inline-flex; align-items: center; gap: 0.35rem;">
+        <i data-lucide="user" style="width: 14px; height: 14px;"></i>
+        <span>View Customer Profile</span>
+      </button>
+    `;
+    custBanner.querySelector('.view-matched-cust-btn').addEventListener('click', () => {
+      if (onNavigate) onNavigate('customers', { action: 'view', customerId: matchedCustomer.id });
+    });
+    container.appendChild(custBanner);
+  }
+
+  // 4. Products Table Card
+  const itemsCard = document.createElement('div');
+  itemsCard.className = 'card';
+  itemsCard.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem;';
+  itemsCard.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="shopping-bag" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Itemized Products Sold (${items.length} items)
+      </h3>
+    </div>
+
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+      <table class="admin-table" style="font-size: 0.85rem;">
+        <thead>
+          <tr>
+            <th style="width: 5%; text-align: center;">S.No</th>
+            <th style="width: 30%;">Product</th>
+            <th style="width: 15%;">SKU</th>
+            <th style="width: 10%; text-align: center;">Size</th>
+            <th style="width: 10%; text-align: center;">Quantity</th>
+            <th style="width: 12%; text-align: right;">Unit Price</th>
+            <th style="width: 10%; text-align: right;">Discount</th>
+            <th style="width: 13%; text-align: right;">Line Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map((i, idx) => {
+            const pName = i.product || i.productName || i.name || 'Unnamed Product';
+            let size = i.size || '';
+            if (!size && i.sku) {
+              const parts = String(i.sku).split('-');
+              if (parts.length > 1) size = parts[parts.length - 1];
+            }
+            if (!size) size = 'Standard';
+            const qty = Number(i.qty !== undefined ? i.qty : (i.quantity || 1)) || 0;
+            const price = Number(i.price !== undefined ? i.price : (i.sellingPrice || 0)) || 0;
+            const disc = Number(i.discount || 0) || 0;
+            const lineSub = (qty * price);
+            const lineTot = i.amount !== undefined ? Number(i.amount) : (lineSub - disc);
+            return `
+              <tr>
+                <td style="text-align: center; color: var(--text-secondary); font-weight: 600;">${idx + 1}</td>
+                <td>
+                  <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(pName)}</div>
+                </td>
+                <td style="font-family: monospace; font-size: 0.8rem; color: var(--text-secondary);">${escapeHtml(i.sku || '—')}</td>
+                <td style="text-align: center;"><span class="badge badge-secondary">${escapeHtml(size)}</span></td>
+                <td style="text-align: center; font-weight: 600; color: var(--text-primary);">${qty}</td>
+                <td style="text-align: right; color: var(--text-primary);">₹${price.toLocaleString()}</td>
+                <td style="text-align: right; color: ${disc > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)'};">${disc > 0 ? `₹${disc.toLocaleString()}` : '—'}</td>
+                <td style="text-align: right; font-weight: 700; color: var(--brand-primary);">₹${Math.round(lineTot).toLocaleString()}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Financial Summary -->
+    <div style="display: flex; justify-content: flex-end; padding-top: 0.75rem;">
+      <div style="min-width: 280px; display: flex; flex-direction: column; gap: 0.5rem; background: var(--bg-secondary); padding: 1rem 1.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.875rem;">
+        <div style="display: flex; justify-content: space-between; color: var(--text-secondary);">
+          <span>Subtotal:</span>
+          <span>₹${Math.round(calculatedSubtotal).toLocaleString()}</span>
+        </div>
+        ${calculatedItemDiscount > 0 ? `
+          <div style="display: flex; justify-content: space-between; color: var(--status-warning-text);">
+            <span>Discounts:</span>
+            <span>- ₹${Math.round(calculatedItemDiscount).toLocaleString()}</span>
+          </div>
+        ` : ''}
+        <div style="display: flex; justify-content: space-between; font-weight: 700; font-size: 1.05rem; color: var(--text-primary); border-top: 1px solid var(--border-color); padding-top: 0.5rem;">
+          <span>Grand Total:</span>
+          <span style="color: var(--brand-primary);">₹${Math.round(finalTotal).toLocaleString()}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 0.8rem;">
+          <span>Amount Paid:</span>
+          <span style="color: var(--status-success); font-weight: 600;">₹${Math.round(paidAmount).toLocaleString()}</span>
+        </div>
+        ${balanceDue > 0 ? `
+          <div style="display: flex; justify-content: space-between; color: var(--status-danger); font-size: 0.8rem; font-weight: 600;">
+            <span>Balance Due:</span>
+            <span>₹${Math.round(balanceDue).toLocaleString()}</span>
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  `;
+  container.appendChild(itemsCard);
+
+  // 5. Bottom Sticky Actions Bar
+  const bottomBar = document.createElement('div');
+  bottomBar.className = 'card';
+  bottomBar.style.cssText = 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding: 1rem 1.25rem;';
+  bottomBar.innerHTML = `
+    <button type="button" class="btn btn-secondary back-to-list-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600;">
+      <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+      <span>Back to Sales</span>
+    </button>
+    <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+      <button type="button" class="btn btn-primary edit-sale-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
+        <span>Edit Sale</span>
+      </button>
+      <button type="button" class="btn btn-ghost delete-sale-bottom-btn" style="color: var(--status-danger); display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+        <span>Delete Sale</span>
+      </button>
+    </div>
+  `;
+
+  bottomBar.querySelector('.back-to-list-bottom-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('sales');
+  });
+
+  bottomBar.querySelector('.edit-sale-bottom-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('sales', { action: 'edit', saleId: sale.id });
+  });
+
+  bottomBar.querySelector('.delete-sale-bottom-btn').addEventListener('click', () => {
+    const confirmed = confirm(`Are you sure you want to delete sale "${saleRef}"?
+
+This will restore deducted inventory quantities and recalculate customer metrics.
+
+This action cannot be undone.`);
+    if (confirmed) {
+      try {
+        store.deleteSale(sale.id);
+        toast.show({ message: `Sale ${saleRef} deleted successfully.`, type: 'info' });
+        if (onNavigate) onNavigate('sales');
+      } catch (err) {
+        toast.show({ message: err.message, type: 'danger' });
+      }
+    }
+  });
+
+  container.appendChild(bottomBar);
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
+function renderEditSalePage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  const saleId = params.saleId || params.id;
+  const sale = (store.data.sales || []).find(s => s.id === saleId || s.reference === saleId);
+
+  // Missing sale error state
+  if (!sale) {
+    const errorCard = document.createElement('div');
+    errorCard.className = 'card';
+    errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
+    errorCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+        <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Sale Record Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem; max-width: 440px;">
+          The sale record with identifier "<strong>${escapeHtml(saleId || 'unknown')}</strong>" could not be located or may have been deleted.
+        </p>
+      </div>
+      <button type="button" class="btn btn-secondary back-to-list-btn" style="margin-top: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+        <span>Return to Sales</span>
+      </button>
+    `;
+    errorCard.querySelector('.back-to-list-btn').addEventListener('click', () => {
+      if (onNavigate) onNavigate('sales');
+    });
+    container.appendChild(errorCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  let hasUnsavedChanges = false;
+  const markChanged = () => { hasUnsavedChanges = true; };
+
+  const status = sale.status || 'Paid';
+  let badgeVariant = 'secondary';
+  if (status === 'Paid' || status === 'Completed') badgeVariant = 'success';
+  else if (status === 'Pending') badgeVariant = 'warning';
+  else if (status === 'Cancelled' || status === 'Failed') badgeVariant = 'danger';
+
+  // 1. Header (Breadcrumb & Status Badge)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+  
+  const breadcrumbWrap = document.createElement('div');
+  breadcrumbWrap.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;';
+  breadcrumbWrap.appendChild(createBreadcrumb([
+    { label: 'Sales', target: 'sales' },
+    { label: `Edit Sale (${sale.id})` }
+  ], onNavigate));
+  breadcrumbWrap.appendChild(createBadge({ label: status, variant: badgeVariant }));
+  headerDiv.appendChild(breadcrumbWrap);
+  container.appendChild(headerDiv);
+
+  // 2. Main Form Card
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
+
+  const customersList = store.data.customers || [];
+  const productsList = store.data.products || [];
+
+  // Group sale's items
+  // Build a map of originally deducted quantities for this sale to compute effective available stock
+  const wasActiveSale = sale.status !== 'Cancelled' && sale.status !== 'Failed' && sale.status !== 'Draft';
+  const oldDeductedMap = new Map();
+  if (wasActiveSale) {
+    (sale.items || []).forEach(it => {
+      const prodId = it.productId || '';
+      const size = (it.size || 'Standard').toUpperCase();
+      const key = `${prodId}:::${size}`;
+      const q = Number(it.qty !== undefined ? it.qty : (it.quantity || 1)) || 0;
+      oldDeductedMap.set(key, (oldDeductedMap.get(key) || 0) + q);
+    });
+  }
+
+  function getEffectiveAvailableStock(productId, size) {
+    const prod = productsList.find(p => p.id === productId);
+    if (!prod) return 0;
+    const targetSize = (size || 'Standard').toUpperCase();
+    const variant = (prod.variants || []).find(v => (v.size || 'Standard').toUpperCase() === targetSize) || (prod.variants || [])[0];
+    const curStock = variant ? (variant.stock || 0) : (prod.totalStock || 0);
+    const key = `${productId}:::${targetSize}`;
+    const previouslyDeducted = oldDeductedMap.get(key) || 0;
+    return curStock + previouslyDeducted;
+  }
+
+  let editSaleItems = [];
+  if (Array.isArray(sale.items) && sale.items.length > 0) {
+    editSaleItems = sale.items.map((it, idx) => {
+      let matchedProd = productsList.find(p => p.id === it.productId || (p.name && it.product && p.name.trim().toLowerCase() === it.product.trim().toLowerCase()));
+      const prodId = matchedProd ? matchedProd.id : (productsList[0] ? productsList[0].id : '');
+      let itemSize = it.size || '';
+      if (!itemSize && it.sku) {
+        const parts = String(it.sku).split('-');
+        if (parts.length > 1) itemSize = parts[parts.length - 1];
+      }
+      if (!itemSize) itemSize = 'Standard';
+      return {
+        id: 'sitem_' + Date.now() + '_' + idx,
+        productId: prodId,
+        size: itemSize,
+        qty: it.qty !== undefined ? it.qty : (it.quantity || 1),
+        sellingPrice: it.price !== undefined ? it.price : (it.sellingPrice || 0)
+      };
+    });
+  }
+
+  if (editSaleItems.length === 0 && productsList.length > 0) {
+    const firstP = productsList[0];
+    editSaleItems.push({
+      id: 'sitem_' + Date.now() + '_0',
+      productId: firstP.id,
+      size: (firstP.variants && firstP.variants[0]) ? firstP.variants[0].size : 'Standard',
+      qty: 1,
+      sellingPrice: firstP.sellingPrice || 0
+    });
+  }
+
+  mainCard.innerHTML = `
+    <datalist id="edit-sale-customers-list">
+      <option value="Walk-in Customer">
+      ${customersList.map(c => `<option value="${escapeHtml(c.name)}">`).join('')}
+    </datalist>
+
+    <!-- SECTION A: CUSTOMER INFORMATION -->
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="user" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Customer Information
+      </h3>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Customer Name <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="edit-sale-cust-name" class="form-input" list="edit-sale-customers-list" value="${escapeHtml(sale.customer || sale.customerName || 'Walk-in Customer')}">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Phone Number</label>
+          <input type="text" id="edit-sale-cust-phone" class="form-input" value="${escapeHtml(sale.phone && sale.phone !== '-' ? sale.phone : '')}" placeholder="+91 98765 43210">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Sale Date</label>
+          <input type="text" id="edit-sale-date" class="form-input" value="${escapeHtml(sale.date || '')}">
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS -->
+    <div style="display: flex; flex-direction: column; gap: 0.85rem;">
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="boxes" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+            Product & Size-wise Items
+          </h3>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
+            Adjust products, variant sizes, quantities, and selling prices. Available stock accounts for units already held in this sale.
+          </p>
+        </div>
+      </div>
+
+      <div id="edit-sale-items-container" style="display: flex; flex-direction: column; gap: 0.75rem;"></div>
+
+      <div style="display: flex; justify-content: flex-start; padding-top: 0.5rem;">
+        <button type="button" id="btn-edit-sale-add-item" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 600;">
+          <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+          <span>Add Another Product</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- SECTION C: PAYMENT & SUMMARY -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <h4 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--text-primary);">Payment Details</h4>
+        
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Payment Method</label>
+          <select id="edit-sale-pay-method" class="form-select">
+            <option value="Cash" ${sale.paymentMethod === 'Cash' ? 'selected' : ''}>Cash</option>
+            <option value="UPI" ${sale.paymentMethod === 'UPI' ? 'selected' : ''}>UPI</option>
+            <option value="Card" ${sale.paymentMethod === 'Card' ? 'selected' : ''}>Card</option>
+            <option value="Other" ${sale.paymentMethod === 'Other' ? 'selected' : ''}>Other</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 600;">Payment Status</label>
+          <select id="edit-sale-pay-status" class="form-select">
+            <option value="Paid" ${sale.status === 'Paid' || sale.status === 'Completed' ? 'selected' : ''}>Paid</option>
+            <option value="Pending" ${sale.status === 'Pending' ? 'selected' : ''}>Pending</option>
+            <option value="Cancelled" ${sale.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 0.85rem; background: var(--bg-secondary); padding: 1.15rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+        <h4 style="font-size: 0.95rem; font-weight: 600; margin: 0; color: var(--text-primary);">Sale Summary</h4>
+        
+        <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+          <span style="color: var(--text-secondary);">Subtotal:</span>
+          <strong id="edit-sale-summary-subtotal" style="color: var(--text-primary);">₹0</strong>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem;">
+          <span style="color: var(--text-secondary);">Discount (₹):</span>
+          <input type="number" id="edit-sale-discount-input" class="form-input" min="0" value="${sale.discount || 0}" style="width: 100px; padding: 0.25rem 0.5rem; text-align: right; font-size: 0.85rem;">
+        </div>
+
+        <div style="display: flex; justify-content: space-between; font-size: 1.15rem; font-weight: 700; color: var(--text-primary); border-top: 1px solid var(--border-color); padding-top: 0.65rem; margin-top: 0.25rem;">
+          <span>Final Total:</span>
+          <span id="edit-sale-summary-final" style="color: var(--brand-primary);">₹0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION D: STICKY ACTIONS BAR -->
+    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+      <button type="button" id="btn-edit-sale-cancel" class="btn btn-secondary" style="font-weight: 600;">
+        Back / Cancel
+      </button>
+
+      <button type="button" id="btn-edit-sale-save" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.65rem 1.5rem; font-weight: 600;">
+        <i data-lucide="save" style="width: 16px; height: 16px;"></i>
+        <span>Save Changes</span>
+      </button>
+    </div>
+  `;
+
+  container.appendChild(mainCard);
+
+  const itemsContainer = mainCard.querySelector('#edit-sale-items-container');
+
+  function updateTotals() {
+    let subtotal = 0;
+    editSaleItems.forEach(it => {
+      const q = parseInt(it.qty, 10) || 0;
+      const p = parseFloat(it.sellingPrice) || 0;
+      subtotal += (q * p);
+    });
+
+    const disc = Math.max(0, parseFloat(mainCard.querySelector('#edit-sale-discount-input').value) || 0);
+    const finalTot = Math.max(0, subtotal - disc);
+
+    mainCard.querySelector('#edit-sale-summary-subtotal').textContent = `₹${Math.round(subtotal).toLocaleString()}`;
+    mainCard.querySelector('#edit-sale-summary-final').textContent = `₹${Math.round(finalTot).toLocaleString()}`;
+  }
+
+  function renderSaleItems() {
+    itemsContainer.innerHTML = '';
+
+    editSaleItems.forEach((it, idx) => {
+      const row = document.createElement('div');
+      row.className = 'card';
+      row.style.cssText = 'padding: 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 0.75rem;';
+
+      const prod = productsList.find(p => p.id === it.productId) || productsList[0];
+      const variants = (prod && Array.isArray(prod.variants)) ? prod.variants : [];
+      const effectiveAvail = getEffectiveAvailableStock(it.productId, it.size);
+      const lineTotal = (parseInt(it.qty, 10) || 0) * (parseFloat(it.sellingPrice) || 0);
+
+      row.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-weight: 700; color: var(--brand-primary); font-size: 0.85rem;">#${idx + 1}</span>
+            <span style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem;">${escapeHtml(prod ? prod.name : 'Select Product')}</span>
+            <span class="badge ${effectiveAvail > 0 ? 'badge-secondary' : 'badge-danger'}" style="font-size: 0.7rem; padding: 0.1rem 0.4rem;">
+              ${effectiveAvail} available
+            </span>
+          </div>
+
+          ${editSaleItems.length > 1 ? `
+            <button type="button" class="btn btn-ghost btn-sm remove-sale-item-btn" style="color: var(--status-danger); padding: 0.2rem 0.5rem;" title="Remove Item">
+              <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
+            </button>
+          ` : ''}
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem;">
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product <span style="color: #ef4444;">*</span></label>
+            <select class="form-select sale-prod-select">
+              ${productsList.map(p => `<option value="${p.id}" ${p.id === it.productId ? 'selected' : ''}>${escapeHtml(p.name)} (${p.brand || ''})</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size Variant</label>
+            <select class="form-select sale-size-select">
+              ${variants.map(v => `<option value="${escapeHtml(v.size || 'Standard')}" ${(v.size || 'Standard') === it.size ? 'selected' : ''}>${escapeHtml(v.size || 'Standard')}</option>`).join('')}
+              ${variants.length === 0 ? '<option value="Standard" selected>Standard</option>' : ''}
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Available Stock</label>
+            <input type="text" class="form-input sale-avail-display" value="${effectiveAvail} units" disabled style="background: var(--bg-surface); color: ${effectiveAvail > 0 ? 'var(--text-primary)' : 'var(--status-danger)'};">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity <span style="color: #ef4444;">*</span></label>
+            <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${it.qty !== undefined ? it.qty : 1}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Unit Selling Price (₹) <span style="color: #ef4444;">*</span></label>
+            <input type="number" class="form-input sale-price-input" min="0" step="any" value="${it.sellingPrice !== undefined ? it.sellingPrice : 0}">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Item Total</label>
+            <input type="text" class="form-input sale-tot-display" value="₹${Math.round(lineTotal).toLocaleString()}" disabled style="background: var(--bg-surface); font-weight: 700; color: var(--text-primary);">
+          </div>
+        </div>
+      `;
+
+      const prodSelect = row.querySelector('.sale-prod-select');
+      const sizeSelect = row.querySelector('.sale-size-select');
+      const qtyInp = row.querySelector('.sale-qty-input');
+      const priceInp = row.querySelector('.sale-price-input');
+      const totDisplay = row.querySelector('.sale-tot-display');
+      const availDisplay = row.querySelector('.sale-avail-display');
+
+      prodSelect.addEventListener('change', (e) => {
+        it.productId = e.target.value;
+        const newP = productsList.find(p => p.id === it.productId);
+        if (newP && Array.isArray(newP.variants) && newP.variants.length > 0) {
+          it.size = newP.variants[0].size || 'Standard';
+          it.sellingPrice = newP.variants[0].sellingPrice || newP.sellingPrice || 0;
+        } else if (newP) {
+          it.size = 'Standard';
+          it.sellingPrice = newP.sellingPrice || 0;
+        }
+        markChanged();
+        renderSaleItems();
+        updateTotals();
+      });
+
+      sizeSelect.addEventListener('change', (e) => {
+        it.size = e.target.value;
+        const curP = productsList.find(p => p.id === it.productId);
+        if (curP && Array.isArray(curP.variants)) {
+          const matchedV = curP.variants.find(v => (v.size || 'Standard') === it.size);
+          if (matchedV && matchedV.sellingPrice > 0) {
+            it.sellingPrice = matchedV.sellingPrice;
+            priceInp.value = it.sellingPrice;
+          }
+        }
+        const newAvail = getEffectiveAvailableStock(it.productId, it.size);
+        availDisplay.value = `${newAvail} units`;
+        availDisplay.style.color = newAvail > 0 ? 'var(--text-primary)' : 'var(--status-danger)';
+        markChanged();
+        updateTotals();
+      });
+
+      const recomputeSaleRow = () => {
+        it.qty = parseInt(qtyInp.value, 10) || 0;
+        it.sellingPrice = parseFloat(priceInp.value) || 0;
+        const curLine = (it.qty * it.sellingPrice);
+        totDisplay.value = `₹${Math.round(curLine).toLocaleString()}`;
+        markChanged();
+        updateTotals();
+      };
+
+      qtyInp.addEventListener('input', recomputeSaleRow);
+      priceInp.addEventListener('input', recomputeSaleRow);
+
+      const removeBtn = row.querySelector('.remove-sale-item-btn');
+      if (removeBtn) {
+        removeBtn.addEventListener('click', () => {
+          editSaleItems.splice(idx, 1);
+          markChanged();
+          renderSaleItems();
+          updateTotals();
+        });
+      }
+
+      itemsContainer.appendChild(row);
+    });
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  mainCard.querySelector('#btn-edit-sale-add-item').addEventListener('click', () => {
+    const firstP = productsList[0] || {};
+    editSaleItems.push({
+      id: 'sitem_' + Date.now() + '_' + editSaleItems.length,
+      productId: firstP.id || '',
+      size: (firstP.variants && firstP.variants[0]) ? firstP.variants[0].size : 'Standard',
+      qty: 1,
+      sellingPrice: firstP.sellingPrice || 0
+    });
+    markChanged();
+    renderSaleItems();
+    updateTotals();
+  });
+
+  mainCard.querySelectorAll('#edit-sale-cust-name, #edit-sale-cust-phone, #edit-sale-date, #edit-sale-pay-method, #edit-sale-pay-status').forEach(el => {
+    el.addEventListener('input', markChanged);
+    el.addEventListener('change', markChanged);
+  });
+
+  mainCard.querySelector('#edit-sale-discount-input').addEventListener('input', () => {
+    markChanged();
+    updateTotals();
+  });
+
+  mainCard.querySelector('#btn-edit-sale-cancel').addEventListener('click', () => {
+    if (hasUnsavedChanges) {
+      const leave = confirm('You have unsaved changes. Are you sure you want to discard them and return to Sales?');
+      if (!leave) return;
+    }
+    if (onNavigate) onNavigate('sales');
+  });
+
+  mainCard.querySelector('#btn-edit-sale-save').addEventListener('click', () => {
+    const custName = mainCard.querySelector('#edit-sale-cust-name').value.trim();
+    const custPhone = mainCard.querySelector('#edit-sale-cust-phone').value.trim();
+    const saleDate = mainCard.querySelector('#edit-sale-date').value.trim();
+    const payMethod = mainCard.querySelector('#edit-sale-pay-method').value;
+    const payStatus = mainCard.querySelector('#edit-sale-pay-status').value;
+    const discount = parseFloat(mainCard.querySelector('#edit-sale-discount-input').value) || 0;
+
+    if (!custName) {
+      toast.show({ message: 'Customer Name is required.', type: 'danger' });
+      mainCard.querySelector('#edit-sale-cust-name').focus();
+      return;
+    }
+
+    if (editSaleItems.length === 0) {
+      toast.show({ message: 'Sale must have at least one product item.', type: 'danger' });
+      return;
+    }
+
+    for (let i = 0; i < editSaleItems.length; i++) {
+      const it = editSaleItems[i];
+      if (!it.productId) {
+        toast.show({ message: `Please select a product for item #${i + 1}.`, type: 'danger' });
+        return;
+      }
+      if (isNaN(it.qty) || it.qty <= 0) {
+        toast.show({ message: `Quantity must be greater than 0 for item #${i + 1}.`, type: 'danger' });
+        return;
+      }
+      if (isNaN(it.sellingPrice) || it.sellingPrice < 0) {
+        toast.show({ message: `Selling price cannot be negative for item #${i + 1}.`, type: 'danger' });
+        return;
+      }
+    }
+
+    try {
+      store.updateSale(sale.id, {
+        customerName: custName,
+        customerPhone: custPhone,
+        date: saleDate,
+        paymentMethod: payMethod,
+        paymentStatus: payStatus,
+        discount: discount,
+        items: editSaleItems
+      });
+      hasUnsavedChanges = false;
+      toast.show({ message: `Sale ${sale.id} updated successfully!`, type: 'success' });
+      if (onNavigate) onNavigate('sales');
+    } catch (err) {
+      toast.show({ message: err.message || 'Error updating sale.', type: 'danger' });
+    }
+  });
+
+  renderSaleItems();
+  updateTotals();
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
 // SALES PAGE (Standardized with Purchases Table UI)
 function renderSales(params = {}, onNavigate = null) {
+  if (params && params.action === 'edit') {
+    return renderEditSalePage(params, onNavigate);
+  }
+  if (params && params.action === 'view') {
+    return renderViewSalePage(params, onNavigate);
+  }
   if (params && (params.action === 'add' || params.view === 'add')) {
     return renderAddSalePage(onNavigate);
   }
@@ -10233,7 +12878,7 @@ function renderSales(params = {}, onNavigate = null) {
 
     pageSales.forEach((s, index) => {
       const tr = document.createElement('tr');
-      tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
+      tr.style.cssText = 'transition: background-color 0.15s ease;';
 
       const status = s.status || 'Paid';
       let badgeVariant = 'secondary';
@@ -10260,6 +12905,10 @@ function renderSales(params = {}, onNavigate = null) {
               <i data-lucide="eye"></i>
               <span class="sr-only">View</span>
             </button>
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn edit-sale-btn" data-sale-id="${s.id || ''}" title="Edit" aria-label="Edit">
+              <i data-lucide="pencil"></i>
+              <span class="sr-only">Edit</span>
+            </button>
             <button type="button" class="btn btn-sm btn-ghost table-action-btn delete-sale-btn" data-sale-id="${s.id || ''}" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
               <i data-lucide="trash-2"></i>
               <span class="sr-only">Delete</span>
@@ -10268,16 +12917,21 @@ function renderSales(params = {}, onNavigate = null) {
         </td>
       `;
 
-      // Row Click -> Open Sale Details Modal
-      tr.addEventListener('click', (e) => {
-        if (e.target.closest('.row-actions-box')) return;
-        openSaleDetailsModal(s);
-      });
+
 
       tr.querySelector('.view-sale-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        openSaleDetailsModal(s);
+        if (onNavigate) onNavigate('sales', { action: 'view', saleId: s.id });
+        else openSaleDetailsModal(s);
       });
+
+      const editSaleBtn = tr.querySelector('.edit-sale-btn');
+      if (editSaleBtn) {
+        editSaleBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (onNavigate) onNavigate('sales', { action: 'edit', saleId: s.id });
+        });
+      }
 
       const deleteSaleBtn = tr.querySelector('.delete-sale-btn');
       if (deleteSaleBtn) {
@@ -11471,8 +14125,468 @@ function openEditCustomerModal(customer, onSaved = null) {
   };
 }
 
+
+// ==========================================
+// DEDICATED CUSTOMER EDIT PAGE (Separate Page)
+// ==========================================
+
+// ==========================================
+// DEDICATED VIEW CUSTOMER PAGE
+// ==========================================
+function renderViewCustomerPage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  const customerId = params.customerId || params.id;
+  const customer = (store.data.customers || []).find(c => c.id === customerId);
+
+  // Missing customer error state
+  if (!customer) {
+    const errorCard = document.createElement('div');
+    errorCard.className = 'card';
+    errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
+    errorCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+        <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Customer Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem; max-width: 440px;">
+          The customer record with identifier "<strong>${escapeHtml(customerId || 'unknown')}</strong>" could not be located or may have been deleted.
+        </p>
+      </div>
+      <button type="button" class="btn btn-secondary back-to-list-btn" style="margin-top: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+        <span>Return to Customers</span>
+      </button>
+    `;
+    errorCard.querySelector('.back-to-list-btn').addEventListener('click', () => {
+      if (onNavigate) onNavigate('customers');
+    });
+    container.appendChild(errorCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  // Find customer sales
+  const customerSales = (store.data.sales || []).filter(s => {
+    const isIdMatch = s.customerId && customer.id && s.customerId === customer.id;
+    const isNameMatch = (s.customer || s.customerName || '').toLowerCase() === (customer.name || '').toLowerCase();
+    const isPhoneMatch = customer.phone && customer.phone !== '-' && s.phone === customer.phone;
+    return isIdMatch || isNameMatch || isPhoneMatch;
+  });
+
+  const totalOrders = customer.ordersCount !== undefined ? customer.ordersCount : customerSales.length;
+  const totalSpend = customer.totalSpend !== undefined ? customer.totalSpend : customerSales.reduce((s, x) => s + (Number(x.totalAmount) || 0), 0);
+  const avgOrderValue = totalOrders > 0 ? Math.round(totalSpend / totalOrders) : 0;
+
+  // 1. Header (Breadcrumb & Action Buttons)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+
+  const breadcrumbWrap = document.createElement('div');
+  breadcrumbWrap.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;';
+  breadcrumbWrap.appendChild(createBreadcrumb([
+    { label: 'Customers', target: 'customers' },
+    { label: customer.name }
+  ], onNavigate));
+  breadcrumbWrap.appendChild(createBadge({ label: `${totalOrders} orders`, variant: 'info' }));
+  headerDiv.appendChild(breadcrumbWrap);
+
+  const headerActions = document.createElement('div');
+  headerActions.style.cssText = 'display: flex; gap: 0.5rem; align-items: center;';
+
+  const btnBack = document.createElement('button');
+  btnBack.type = 'button';
+  btnBack.className = 'btn btn-secondary btn-sm back-to-list-btn';
+  btnBack.innerHTML = `<i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i> <span>Back</span>`;
+  btnBack.addEventListener('click', () => {
+    if (onNavigate) onNavigate('customers');
+  });
+  headerActions.appendChild(btnBack);
+
+  const btnEdit = document.createElement('button');
+  btnEdit.type = 'button';
+  btnEdit.className = 'btn btn-primary btn-sm edit-cust-page-btn';
+  btnEdit.innerHTML = `<i data-lucide="pencil" style="width: 14px; height: 14px;"></i> <span>Edit Customer</span>`;
+  btnEdit.addEventListener('click', () => {
+    if (onNavigate) onNavigate('customers', { action: 'edit', customerId: customer.id });
+  });
+  headerActions.appendChild(btnEdit);
+
+  headerDiv.appendChild(headerActions);
+  container.appendChild(headerDiv);
+
+  // 2. KPI Cards
+  const kpiGrid = document.createElement('div');
+  kpiGrid.className = 'kpi-grid';
+  kpiGrid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;';
+  kpiGrid.innerHTML = `
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Lifetime Spend</div>
+      <div style="font-size: 1.2rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">₹${totalSpend.toLocaleString()}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Orders Completed</div>
+      <div style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${totalOrders} purchases</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Avg. Order Value</div>
+      <div style="font-size: 1.2rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;">₹${avgOrderValue.toLocaleString()}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Customer ID</div>
+      <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(customer.id)}</div>
+    </div>
+  `;
+  container.appendChild(kpiGrid);
+
+  // 3. Customer Profile Card
+  const profileCard = document.createElement('div');
+  profileCard.className = 'card';
+  profileCard.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem;';
+  profileCard.innerHTML = `
+    <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="user" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Customer Profile Details
+      </h3>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem; font-size: 0.875rem;">
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Full Name</div>
+        <div style="font-weight: 700; color: var(--text-primary); margin-top: 0.25rem; font-size: 1rem;">${escapeHtml(customer.name)}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Phone Number</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(customer.phone || 'Not Provided')}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Email Address</div>
+        <div style="color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(customer.email || '—')}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">City / Address</div>
+        <div style="color: var(--text-primary); margin-top: 0.25rem;">${escapeHtml(customer.city || customer.address || '—')}</div>
+      </div>
+    </div>
+  `;
+  container.appendChild(profileCard);
+
+  // 4. Sales History Table Card
+  const salesCard = document.createElement('div');
+  salesCard.className = 'card';
+  salesCard.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem;';
+  salesCard.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+      <h3 style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="shopping-bag" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Customer Purchase History (${customerSales.length} orders)
+      </h3>
+    </div>
+
+    <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+      <table class="admin-table" style="font-size: 0.85rem;">
+        <thead>
+          <tr>
+            <th style="width: 6%; text-align: center;">S.No</th>
+            <th style="width: 20%;">Sale Reference</th>
+            <th style="width: 16%;">Date</th>
+            <th style="width: 16%; text-align: center;">Units</th>
+            <th style="width: 18%;">Total Amount</th>
+            <th style="width: 14%;">Payment Status</th>
+            <th style="width: 10%; text-align: right;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${customerSales.length === 0 ? `
+            <tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No purchases on record for this customer.</td></tr>
+          ` : customerSales.map((s, idx) => {
+            const sUnits = (s.items || []).reduce((sum, item) => sum + (Number(item.qty || item.quantity || 1) || 0), 0);
+            return `
+              <tr>
+                <td style="text-align: center; color: var(--text-secondary); font-weight: 600;">${idx + 1}</td>
+                <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(s.id || s.reference || 'SAL')}</td>
+                <td style="color: var(--text-secondary);">${escapeHtml(s.date || '—')}</td>
+                <td style="text-align: center; font-weight: 600;">${sUnits} units</td>
+                <td style="font-weight: 700; color: var(--brand-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
+                <td>${createBadge({ label: s.status || 'Paid', variant: (s.status === 'Paid' || s.status === 'Completed') ? 'success' : 'warning' }).outerHTML}</td>
+                <td style="text-align: right;">
+                  <button type="button" class="btn btn-sm btn-secondary table-action-btn view-rel-sale-btn" data-sale-id="${s.id}" title="View Sale" aria-label="View Sale">
+                    <i data-lucide="eye"></i>
+                    <span class="sr-only">View Sale</span>
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  salesCard.querySelectorAll('.view-rel-sale-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const sId = btn.getAttribute('data-sale-id');
+      if (onNavigate) onNavigate('sales', { action: 'view', saleId: sId });
+    });
+  });
+
+  container.appendChild(salesCard);
+
+  // 5. Bottom Sticky Actions Bar
+  const bottomBar = document.createElement('div');
+  bottomBar.className = 'card';
+  bottomBar.style.cssText = 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding: 1rem 1.25rem;';
+  bottomBar.innerHTML = `
+    <button type="button" class="btn btn-secondary back-to-list-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600;">
+      <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+      <span>Back to Customers</span>
+    </button>
+    <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+      <button type="button" class="btn btn-primary edit-cust-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
+        <span>Edit Customer</span>
+      </button>
+      <button type="button" class="btn btn-ghost delete-cust-bottom-btn" style="color: var(--status-danger); display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+        <span>Delete Customer</span>
+      </button>
+    </div>
+  `;
+
+  bottomBar.querySelector('.back-to-list-bottom-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('customers');
+  });
+
+  bottomBar.querySelector('.edit-cust-bottom-btn').addEventListener('click', () => {
+    if (onNavigate) onNavigate('customers', { action: 'edit', customerId: customer.id });
+  });
+
+  bottomBar.querySelector('.delete-cust-bottom-btn').addEventListener('click', () => {
+    const confirmed = confirm(`Are you sure you want to delete customer "${customer.name}" (${customer.id})?
+
+Their past sales records will be preserved for store reporting.
+
+This action cannot be undone.`);
+    if (confirmed) {
+      try {
+        store.deleteCustomer(customer.id);
+        toast.show({ message: `Customer "${customer.name}" deleted successfully.`, type: 'info' });
+        if (onNavigate) onNavigate('customers');
+      } catch (err) {
+        toast.show({ message: err.message, type: 'danger' });
+      }
+    }
+  });
+
+  container.appendChild(bottomBar);
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
+function renderEditCustomerPage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  const customerId = params.customerId || params.id;
+  const customer = (store.data.customers || []).find(c => c.id === customerId);
+
+  // Missing record error state
+  if (!customer) {
+    const errorCard = document.createElement('div');
+    errorCard.className = 'card';
+    errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
+    errorCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+        <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Customer Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem; max-width: 440px;">
+          The customer record with identifier "<strong>${escapeHtml(customerId || 'unknown')}</strong>" could not be located or may have been deleted.
+        </p>
+      </div>
+      <button type="button" class="btn btn-secondary back-to-list-btn" style="margin-top: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+        <span>Return to Customers</span>
+      </button>
+    `;
+    errorCard.querySelector('.back-to-list-btn').addEventListener('click', () => {
+      if (onNavigate) onNavigate('customers');
+    });
+    container.appendChild(errorCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  let hasUnsavedChanges = false;
+  const markChanged = () => { hasUnsavedChanges = true; };
+
+  // 1. Header (Breadcrumb)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+  headerDiv.appendChild(createBreadcrumb([
+    { label: 'Customers', target: 'customers' },
+    { label: `Edit Customer (${customer.name})` }
+  ], onNavigate));
+  container.appendChild(headerDiv);
+
+  // 2. Customer Summary KPIs
+  const kpiCard = document.createElement('div');
+  kpiCard.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;';
+  kpiCard.innerHTML = `
+    <div class="card" style="padding: 1rem 1.25rem;">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Customer ID</div>
+      <div style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem; font-family: monospace;">${customer.id}</div>
+    </div>
+    <div class="card" style="padding: 1rem 1.25rem;">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Orders</div>
+      <div style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem;">${customer.ordersCount || 0} purchases</div>
+    </div>
+    <div class="card" style="padding: 1rem 1.25rem;">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Lifetime Spend</div>
+      <div style="font-size: 1.15rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">₹${(customer.totalSpend || 0).toLocaleString()}</div>
+    </div>
+    <div class="card" style="padding: 1rem 1.25rem;">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Last Purchase</div>
+      <div style="font-size: 1.15rem; font-weight: 600; color: var(--text-secondary); margin-top: 0.25rem;">${customer.lastPurchase || '—'}</div>
+    </div>
+  `;
+  container.appendChild(kpiCard);
+
+  // 3. Main Form Card
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%;';
+
+  mainCard.innerHTML = `
+    <div>
+      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0 0 0.25rem 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="user-pen" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Customer Contact Information
+      </h3>
+      <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">
+        Update contact details and customer preferences. Changes will update customer references while preserving historical sales transactions.
+      </p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem;">
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 600;">Customer Name <span style="color: #ef4444;">*</span></label>
+        <input type="text" id="cust-edit-name" class="form-input" value="${escapeHtml(customer.name || '')}" placeholder="Full Customer Name">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 600;">Phone Number</label>
+        <input type="text" id="cust-edit-phone" class="form-input" value="${escapeHtml(customer.phone && customer.phone !== '-' ? customer.phone : '')}" placeholder="+91 98765 43210">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 600;">Email Address</label>
+        <input type="email" id="cust-edit-email" class="form-input" value="${escapeHtml(customer.email || '')}" placeholder="customer@example.com">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="font-weight: 600;">City</label>
+        <input type="text" id="cust-edit-city" class="form-input" value="${escapeHtml(customer.city || '')}" placeholder="e.g. Mumbai, Bangalore">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" style="font-weight: 600;">Address</label>
+      <input type="text" id="cust-edit-address" class="form-input" value="${escapeHtml(customer.address || '')}" placeholder="Street, Flat/Building, Landmark">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" style="font-weight: 600;">Customer Notes / Preferences</label>
+      <textarea id="cust-edit-notes" class="form-input" rows="3" placeholder="Preferred fit, style choices, sizes, notes...">${escapeHtml(customer.notes || '')}</textarea>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+      <button type="button" id="btn-cust-cancel" class="btn btn-secondary" style="font-weight: 600;">
+        Back / Cancel
+      </button>
+
+      <button type="button" id="btn-cust-save" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.65rem 1.5rem; font-weight: 600;">
+        <i data-lucide="save" style="width: 16px; height: 16px;"></i>
+        <span>Save Changes</span>
+      </button>
+    </div>
+  `;
+
+  container.appendChild(mainCard);
+
+  mainCard.querySelectorAll('input, textarea').forEach(el => {
+    el.addEventListener('input', markChanged);
+  });
+
+  mainCard.querySelector('#btn-cust-cancel').addEventListener('click', () => {
+    if (hasUnsavedChanges) {
+      const leave = confirm('You have unsaved changes. Are you sure you want to discard them and return to Customers?');
+      if (!leave) return;
+    }
+    if (onNavigate) onNavigate('customers');
+  });
+
+  mainCard.querySelector('#btn-cust-save').addEventListener('click', () => {
+    const name = mainCard.querySelector('#cust-edit-name').value.trim();
+    const phone = mainCard.querySelector('#cust-edit-phone').value.trim();
+    const email = mainCard.querySelector('#cust-edit-email').value.trim();
+    const city = mainCard.querySelector('#cust-edit-city').value.trim();
+    const address = mainCard.querySelector('#cust-edit-address').value.trim();
+    const notes = mainCard.querySelector('#cust-edit-notes').value.trim();
+
+    if (!name) {
+      toast.show({ message: 'Customer Name is required.', type: 'danger' });
+      mainCard.querySelector('#cust-edit-name').focus();
+      return;
+    }
+
+    try {
+      store.updateCustomer(customer.id, {
+        name,
+        phone,
+        email,
+        city,
+        address,
+        notes
+      });
+      hasUnsavedChanges = false;
+      toast.show({ message: `Customer "${name}" updated successfully.`, type: 'success' });
+      if (onNavigate) onNavigate('customers');
+    } catch (err) {
+      toast.show({ message: err.message || 'Error updating customer.', type: 'danger' });
+    }
+  });
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
 // CUSTOMERS PAGE (Standardized with Purchases Table UI & Full Pagination)
-function renderCustomers(onNavigate = null) {
+function renderCustomers(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+  if (params && params.action === 'edit') {
+    return renderEditCustomerPage(params, onNavigate);
+  }
+  if (params && params.action === 'view') {
+    return renderViewCustomerPage(params, onNavigate);
+  }
   const container = document.createElement('div');
   container.className = 'page-container';
 
@@ -11611,7 +14725,7 @@ function renderCustomers(onNavigate = null) {
     pageCustomers.forEach((c, index) => {
       const globalIndex = startIdx + index + 1;
       const tr = document.createElement('tr');
-      tr.style.cssText = 'cursor: pointer; transition: background-color 0.15s ease;';
+      tr.style.cssText = 'transition: background-color 0.15s ease;';
 
       tr.innerHTML = `
         <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${globalIndex}</td>
@@ -11637,20 +14751,17 @@ function renderCustomers(onNavigate = null) {
         </td>
       `;
 
-      // Row Click -> Open Customer Details Modal
-      tr.addEventListener('click', (e) => {
-        if (e.target.closest('.row-actions-box')) return;
-        openCustomerDetailsModal(c, onNavigate);
-      });
+
 
       tr.querySelector('.view-cust-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        openCustomerDetailsModal(c, onNavigate);
+        if (onNavigate) onNavigate('customers', { action: 'view', customerId: c.id });
+        else openCustomerDetailsModal(c, onNavigate);
       });
 
       tr.querySelector('.edit-cust-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        openEditCustomerModal(c, () => renderCustomersTable());
+        if (onNavigate) onNavigate('customers', { action: 'edit', customerId: c.id });
       });
 
       const deleteCustBtn = tr.querySelector('.delete-cust-btn');
@@ -12462,7 +15573,7 @@ class MasterWebAdminApp {
       case 'manage-product': pageView = renderProductManagementPage(this.navParams, this.navigateTo); break;
       case 'purchases': pageView = renderPurchases(this.navParams, this.navigateTo); break;
       case 'sales': pageView = renderSales(this.navParams, this.navigateTo); break;
-      case 'customers': pageView = renderCustomers(this.navigateTo); break;
+      case 'customers': pageView = renderCustomers(this.navParams, this.navigateTo); break;
       case 'reports': pageView = renderReports(this.navigateTo); break;
       case 'settings': pageView = renderSettings(this.toggleTheme, this.navigateTo); break;
       default: pageView = renderOverview(this.navigateTo);
