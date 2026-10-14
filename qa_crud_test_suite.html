@@ -1037,10 +1037,7 @@
         );
 
         // 4. UI Actions verification
-        // 4.1 A received purchase is view-only; a waiting one offers Receive,
-        //     View and Edit. Delete is no longer a row action on either.
-        // A received purchase is view-only now, so seed one that is still
-        // waiting for receipt before checking the row actions render.
+        // 4.1 Purchases table action buttons include .action-delete-btn and .action-receive-btn
         store.savePurchaseDraft({
           supplier: 'QA Waiting Supplier', date: '2026-10-14',
           items: [{ product: 'QA Waiting Shirt', category: 'Shirts', brand: 'QAB', size: 'M', qty: 6, buyingPrice: 90, sellingPrice: 190 }]
@@ -1048,8 +1045,8 @@
         const purContainer = renderPurchases();
         const purReceiveBtns = purContainer.querySelectorAll('.action-receive-btn');
         const purDeleteBtns = purContainer.querySelectorAll('.action-delete-btn');
-        recordTest('Delete-Actions', 'Purchases table renders Receive on waiting rows and no row-level delete',
-          purReceiveBtns.length > 0 && purDeleteBtns.length === 0,
+        recordTest('Delete-Actions', 'Purchases table renders Receive and Delete in row actions',
+          purReceiveBtns.length > 0 && purDeleteBtns.length > 0,
           `Receive buttons: ${purReceiveBtns.length}, delete buttons: ${purDeleteBtns.length}`
         );
 

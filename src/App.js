@@ -2917,7 +2917,12 @@ class StoreManager {
     }
 
     if (!purchaseRecord) {
-      const newId = `PUR-${Date.now().toString().slice(-4)}`;
+      let seq = Date.now().toString().slice(-4);
+      let newId = `PUR-${seq}`;
+      let counter = 1;
+      while ((this.data.purchases || []).some(p => p.id === newId)) {
+        newId = `PUR-${seq}-${counter++}`;
+      }
       purchaseRecord = {
         id: newId,
         supplier: payload.supplier || 'General Supplier',
@@ -7034,7 +7039,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
 
   const container = document.createElement('div');
   container.className = 'page-container product-management-page';
-  container.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; max-width: 1200px; margin: 0 auto; width: 100%;';
+  container.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%; max-width: 100%; margin: 0; box-sizing: border-box;';
 
   const productId = (params && (params.id || params.productId)) || null;
   const requestedSize = (params && (params.size || params.variantSize)) || null;
@@ -7180,7 +7185,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
 
     const sec1Card = document.createElement('div');
     sec1Card.className = 'card';
-    sec1Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
+    sec1Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); width: 100%; box-sizing: border-box;';
     sec1Card.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color);">
         <div style="display: flex; align-items: center; gap: 0.5rem;">
@@ -7195,11 +7200,11 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
             Product Name <span style="color: var(--status-danger);">*</span>
           </label>
-          <input type="text" id="manage-prod-name" class="form-input" value="${product.name || ''}" placeholder="Enter product name" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
+          <input type="text" id="manage-prod-name" class="form-input" value="${escapeHtml(product.name || '')}" placeholder="Enter product name" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
           <div id="manage-prod-name-err" style="font-size: 0.75rem; color: var(--status-danger); margin-top: 3px; display: none;">Product Name is required.</div>
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
               Category
@@ -7232,10 +7237,10 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
             Product Description (Optional)
           </label>
-          <textarea id="manage-prod-desc" class="form-textarea" rows="2" placeholder="Enter product description, fabric, care instructions..." style="font-size: 0.85rem; padding: 0.5rem 0.75rem; line-height: 1.4; resize: vertical;">${product.description || ''}</textarea>
+          <textarea id="manage-prod-desc" class="form-textarea" rows="2" placeholder="Enter product description, fabric, care instructions..." style="font-size: 0.85rem; padding: 0.5rem 0.75rem; line-height: 1.4; resize: vertical;">${escapeHtml(product.description || '')}</textarea>
         </div>
 
-        <div style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+        <div style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--border-color); margin-top: 0.25rem;">
           <button type="button" id="manage-save-basic-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-size: 0.85rem; font-weight: 600;">
             <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
             <span>Save Changes</span>
@@ -7277,7 +7282,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     // 4. SECTION 02 — Size & Pricing
     const sec2Card = document.createElement('div');
     sec2Card.className = 'card';
-    sec2Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
+    sec2Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); width: 100%; box-sizing: border-box;';
     
     let pricingBodyHtml = '';
     if (hasSizes) {
@@ -7370,9 +7375,11 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
         <span style="font-size: 0.775rem; color: var(--text-secondary);">Preserves Inventory Quantities</span>
       </div>
 
-      <div>
-        ${pricingBodyHtml}
-        <div style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--border-color); margin-top: 0.5rem;">
+      <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <div>
+          ${pricingBodyHtml}
+        </div>
+        <div style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--border-color); margin-top: 0.25rem;">
           <button type="button" id="manage-save-pricing-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-size: 0.85rem; font-weight: 600;">
             <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
             <span>Save Price Changes</span>
@@ -7380,6 +7387,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
         </div>
       </div>
     `;
+
     container.appendChild(sec2Card);
 
     // Pricing Save Handler
@@ -7418,7 +7426,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     const sec3Card = document.createElement('div');
     sec3Card.className = 'card';
     sec3Card.id = 'product-stock-management-section';
-    sec3Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
+    sec3Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); width: 100%; box-sizing: border-box;';
 
     const ADD_STOCK_REASONS = [
       'Found Stock',
@@ -7505,7 +7513,6 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
       <div id="manage-adjustment-form-panel" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1.15rem 1.25rem;">
       </div>
     `;
-    container.appendChild(sec3Card);
 
     // Stock Management Multi-Adjustment State & Handlers
     const adjPanel = sec3Card.querySelector('#manage-adjustment-form-panel');
@@ -8039,7 +8046,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     // 6. SECTION 04 — Stock History
     const sec4Card = document.createElement('div');
     sec4Card.className = 'card';
-    sec4Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);';
+    sec4Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); width: 100%; box-sizing: border-box;';
 
     const allMovements = store.data.stockMovements || [];
     const productMovements = allMovements.filter(m => {
@@ -8129,6 +8136,9 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
       </div>
       ${historyTableHtml}
     `;
+
+    // Append Section 03 and Section 04 sequentially in single-column layout
+    container.appendChild(sec3Card);
     container.appendChild(sec4Card);
 
     if (window.lucide) window.lucide.createIcons();
@@ -8165,6 +8175,7 @@ function renderViewProductPage(params = {}, onNavigate = null) {
   }
   const container = document.createElement('div');
   container.className = 'page-container product-view-page';
+  container.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%; max-width: 100%; margin: 0; box-sizing: border-box;';
 
   const productId = params.productId || params.id;
   const productsList = store.data.products || [];
@@ -9793,13 +9804,13 @@ function renderPurchases(params = {}, onNavigate = null) {
       <table class="admin-table" style="font-size: 0.875rem;">
         <thead>
           <tr>
-            <th style="width: 8%; text-align: center;">S.No</th>
-            <th style="width: 22%;">Supplier</th>
-            <th style="width: 14%;">Date</th>
+            <th style="width: 6%; text-align: center;">S.No</th>
+            <th style="width: 20%;">Supplier</th>
+            <th style="width: 13%;">Date</th>
             <th style="width: 16%;">Units (Rec / Ord)</th>
             <th style="width: 14%;">Total Cost</th>
-            <th style="width: 12%;">Status</th>
-            <th style="width: 14%; text-align: right;">Actions</th>
+            <th style="width: 13%;">Status</th>
+            <th style="width: 18%; text-align: right;">Actions</th>
           </tr>
         </thead>
         <tbody id="pur-table-tbody"></tbody>
@@ -9871,9 +9882,9 @@ function renderPurchases(params = {}, onNavigate = null) {
       const totalReceived = p.totalReceived !== undefined ? Number(p.totalReceived) : (p.items || []).reduce((s, i) => s + Number(i.receivedQty !== undefined ? i.receivedQty : (i.received !== undefined ? i.received : (status === 'Completed' || status === 'Received' ? (i.qty || 0) : 0))), 0);
 
       // Row actions by status:
-      //   Waiting for Receive  -> View, Edit, Receive
-      //   Partially Received   -> View, Edit, Receive Remaining
-      //   Received             -> View only (the order is final)
+      //   Waiting for Receive  -> Receive, View, Edit, Delete
+      //   Partially Received   -> Receive Remaining, View, Edit, Delete
+      //   Received             -> View, Delete
       const actionView = `
             <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
               <i data-lucide="eye"></i>
@@ -9889,25 +9900,30 @@ function renderPurchases(params = {}, onNavigate = null) {
               <i data-lucide="package-check"></i>
               <span class="sr-only">${label}</span>
             </button>`;
+      const actionDelete = `
+            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
+              <i data-lucide="trash-2"></i>
+              <span class="sr-only">Delete</span>
+            </button>`;
 
       let actionsHtml = '';
       if (isPurchaseWaiting(status)) {
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            ${actionReceive('Receive')}${actionView}${actionEdit}
+            ${actionReceive('Receive')}${actionView}${actionEdit}${actionDelete}
           </div>
         `;
       } else if (status === 'Partially Received') {
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            ${actionReceive('Receive Remaining')}${actionView}${actionEdit}
+            ${actionReceive('Receive Remaining')}${actionView}${actionEdit}${actionDelete}
           </div>
         `;
       } else {
-        // Received: view-only.
+        // Received: view, edit (with stock reconciliation), and delete.
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            ${actionView}
+            ${actionView}${actionEdit}${actionDelete}
           </div>
         `;
       }
@@ -10470,8 +10486,14 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
 
     <!-- Modal Footer Actions -->
     <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+      <button type="button" class="btn btn-ghost modal-delete-btn" style="color: var(--status-danger); margin-right: auto; display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+        <span>Delete Purchase</span>
+      </button>
+
+      <button type="button" class="btn btn-secondary modal-edit-btn">Edit Purchase</button>
+
       ${isPurchaseWaiting(status) ? `
-        <button type="button" class="btn btn-secondary modal-edit-btn">Edit Purchase</button>
         <button type="button" class="btn btn-primary modal-receive-btn">
           <i data-lucide="package-check" style="width: 16px; height: 16px;"></i> Receive Purchase Stock
         </button>
@@ -10811,15 +10833,15 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
           <i data-lucide="package-check" style="width: 16px; height: 16px;"></i>
           <span>${status === 'Partially Received' ? 'Receive Remaining Stock' : 'Receive Stock'}</span>
         </button>
-        <button type="button" class="btn btn-primary edit-pur-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
-          <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
-          <span>Edit Purchase</span>
-        </button>
-        <button type="button" class="btn btn-ghost delete-pur-bottom-btn" style="color: var(--status-danger); display: inline-flex; align-items: center; gap: 0.4rem;">
-          <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
-          <span>Delete Purchase</span>
-        </button>
       ` : ''}
+      <button type="button" class="btn btn-primary edit-pur-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
+        <span>Edit Purchase</span>
+      </button>
+      <button type="button" class="btn btn-ghost delete-pur-bottom-btn" style="color: var(--status-danger); display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+        <span>Delete Purchase</span>
+      </button>
     </div>
   `;
 
@@ -10912,12 +10934,6 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
     container.appendChild(errorCard);
     if (window.lucide) window.lucide.createIcons();
     return container;
-  }
-
-  // A received purchase is final: stock has already moved against it, so it
-  // is view-only. An old link or a typed URL lands on the detail page.
-  if (isPurchaseReceived(purchase.status)) {
-    return renderViewPurchasePage({ ...params, purchaseId: purchase.id }, onNavigate);
   }
 
   let hasUnsavedChanges = false;
