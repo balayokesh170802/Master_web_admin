@@ -42,7 +42,24 @@ const server = http.createServer((req, res) => {
   }
 
   const safePath = path.normalize(reqPath).replace(/^(\.\.[/\\])+/, '');
+
+  // Never serve dotfiles or dot-directories (.git, .env, .ssh, ...).
+  const segments = safePath.split(/[/\\]/).filter(Boolean);
+  if (segments.some(seg => seg.startsWith('.'))) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('403 Forbidden');
+    return;
+  }
+
   let filePath = path.join(__dirname, safePath);
+
+  // Keep every resolved path inside the project root.
+  const rootDir = path.resolve(__dirname);
+  if (path.resolve(filePath) !== rootDir && !path.resolve(filePath).startsWith(rootDir + path.sep)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('403 Forbidden');
+    return;
+  }
 
   if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
     filePath = path.join(filePath, 'index.html');

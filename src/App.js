@@ -2,6 +2,8 @@ const sampleDemoData = {
   storeInfo: {
     name: "Apex Fashion Store",
     branch: "Main Street Branch #01",
+    ownerName: "Suresh Menon",
+    ownerRole: "Store Owner",
     currency: "₹",
     currencyCode: "INR",
     phone: "+91 98765 43210",
@@ -1409,6 +1411,8 @@ const emptyInitialData = {
   storeInfo: {
     name: "Apex Fashion Store",
     branch: "Main Street Branch #01",
+    ownerName: "Suresh Menon",
+    ownerRole: "Store Owner",
     currency: "₹",
     currencyCode: "INR",
     phone: "+91 98765 43210",
@@ -1439,6 +1443,38 @@ const emptyInitialData = {
 };
 
 const initialData = emptyInitialData;
+
+// ==========================================
+// PURCHASE LIFECYCLE
+// ------------------------------------------
+// Waiting for Receive  ->  Received
+//
+// There is no approval step. 'Draft' and 'Approved' are legacy statuses from
+// the old approval workflow; both meant "ordered, no stock moved", which is
+// exactly what 'Waiting for Receive' means now. Existing records are migrated
+// on load, and every check below still accepts the legacy values so that a
+// record written by an older build behaves correctly either way.
+// 'Partially Received' is NOT a legacy status — it is a real state produced
+// when a delivery arrives short, and it keeps its own handling.
+// ==========================================
+const PURCHASE_STATUS_WAITING = 'Waiting for Receive';
+const PURCHASE_STATUS_RECEIVED = 'Received';
+const PURCHASE_LEGACY_PENDING = ['Draft', 'Approved'];
+
+/** True while a purchase is ordered but no stock has been moved for it. */
+function isPurchaseWaiting(status) {
+  return status === PURCHASE_STATUS_WAITING || PURCHASE_LEGACY_PENDING.includes(status);
+}
+
+/** True once a purchase is fully received and therefore view-only. */
+function isPurchaseReceived(status) {
+  return status === PURCHASE_STATUS_RECEIVED || status === 'Completed';
+}
+
+/** True while a purchase can still take stock in. */
+function isPurchaseReceivable(status) {
+  return isPurchaseWaiting(status) || status === 'Partially Received';
+}
 
 class StoreManager {
   constructor() {
@@ -1536,8 +1572,8 @@ class StoreManager {
     const productReceivedMap = {};
     const historicalCostMap = {};
     this.data.purchases.forEach(pur => {
-      const isCompletedOrReceived = pur.status === 'Completed' || pur.status === 'Received';
-      const isDraftOrApproved = pur.status === 'Draft' || pur.status === 'Approved';
+      const isCompletedOrReceived = isPurchaseReceived(pur.status);
+      const isDraftOrApproved = isPurchaseWaiting(pur.status);
 
       let purRecSum = 0;
       (pur.items || []).forEach(it => {
@@ -1712,8 +1748,72 @@ class StoreManager {
       this.data.inventorySettings.lowStockThreshold = (!isNaN(val) && val >= 1) ? val : 5;
     }
 
-    // 5. Recalculate customer metrics from actual sales
+    // 5. Ensure storeInfo exists and carries the owner fields
+    if (!this.data.storeInfo || typeof this.data.storeInfo !== 'object') {
+      this.data.storeInfo = JSON.parse(JSON.stringify(emptyInitialData.storeInfo));
+    } else {
+      const defaults = emptyInitialData.storeInfo || {};
+      ['name', 'branch', 'ownerName', 'ownerRole', 'currency', 'currencyCode', 'phone', 'email', 'address'].forEach(k => {
+        if (this.data.storeInfo[k] === undefined || this.data.storeInfo[k] === null) {
+          this.data.storeInfo[k] = defaults[k] !== undefined ? defaults[k] : '';
+        }
+      });
+    }
+
+    // 5b. Retire the approval workflow on existing records.
+    //     Draft and Approved both meant "ordered, nothing received", so they
+    //     become 'Waiting for Receive'. Nothing else about the record is
+    //     touched: items, quantities, prices, receipt history and any
+    //     Received / Partially Received status are all left exactly as saved.
+    (this.data.purchases || []).forEach(pur => {
+      if (!pur) return;
+      if (PURCHASE_LEGACY_PENDING.includes(pur.status)) {
+        pur.legacyStatus = pur.status;
+        pur.status = PURCHASE_STATUS_WAITING;
+      }
+    });
+
+    // 6. Build the payment ledger for sales saved before it existed.
+    //    Monetary values are preserved; only payments[] is inferred.
+    (this.data.sales || []).forEach(s => this._migrateSalePayments(s));
+
+    // 7. Recalculate customer metrics from actual sales
     this.recalculateCustomerMetrics();
+  }
+
+  getStoreInfo() {
+    if (!this.data.storeInfo || typeof this.data.storeInfo !== 'object') {
+      this.data.storeInfo = JSON.parse(JSON.stringify(emptyInitialData.storeInfo));
+    }
+    return this.data.storeInfo;
+  }
+
+  /**
+   * Update editable store/owner details. Only known fields are accepted, and
+   * the owner and store names must not be blank.
+   */
+  updateStoreInfo(payload = {}) {
+    const info = this.getStoreInfo();
+    const editable = ['name', 'branch', 'ownerName', 'ownerRole', 'phone', 'email', 'address'];
+
+    const next = {};
+    editable.forEach(k => {
+      if (payload[k] !== undefined) next[k] = String(payload[k]).trim();
+    });
+
+    if (next.ownerName !== undefined && !next.ownerName) {
+      throw new Error('Owner name cannot be empty.');
+    }
+    if (next.name !== undefined && !next.name) {
+      throw new Error('Store name cannot be empty.');
+    }
+    if (next.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) {
+      throw new Error('Please enter a valid email address.');
+    }
+
+    Object.assign(info, next);
+    this.save();
+    return info;
   }
 
   getItemUnitCost(item, product = null) {
@@ -1771,20 +1871,90 @@ class StoreManager {
     }, 0);
   }
 
+  /**
+   * The single place that decides which sales belong to a customer. The
+   * customers table, the customer view page and the stored metrics all read
+   * it, so their totals can never disagree.
+   *
+   * A sale is matched by customerId. A legacy sale saved without one falls
+   * back to an exact name match. Phone is deliberately NOT a fallback: two
+   * customers can share a household number, which would count one sale twice.
+   * Cancelled / Failed / Draft sales are never billed, so they are excluded.
+   */
+  getCustomerSales(customerOrId) {
+    const cust = (typeof customerOrId === 'string')
+      ? (this.data.customers || []).find(c => c.id === customerOrId)
+      : customerOrId;
+    if (!cust) return [];
+
+    const name = (cust.name || '').trim().toLowerCase();
+    return (this.data.sales || []).filter(s => {
+      if (!s) return false;
+      if (s.status === 'Cancelled' || s.status === 'Failed' || s.status === 'Draft') return false;
+      if (s.customerId) return s.customerId === cust.id;
+      return !!name && (s.customer || s.customerName || '').trim().toLowerCase() === name;
+    });
+  }
+
+  /**
+   * Billed vs collected for one customer.
+   *
+   * Every figure is derived from the sale payment ledger (amountPaid /
+   * balanceDue), never from a status label — a "Partial" sale contributes
+   * only the amount actually recorded against it, and a sale with no recorded
+   * payment contributes zero however it is labelled.
+   *
+   * Outstanding is the sum of each sale's own balanceDue rather than
+   * (purchases - paid) so that an overpayment on one sale cannot silently
+   * cancel out a genuine due on another.
+   */
+  getCustomerPaymentSummary(customerOrId) {
+    const sales = this.getCustomerSales(customerOrId);
+
+    const rows = sales.map(s => {
+      const total = this._money(Number(s.totalAmount) || 0);
+      const paid = this._money(Number(s.amountPaid) || 0);
+      const due = this._money(
+        s.balanceDue !== undefined && s.balanceDue !== null
+          ? Math.max(0, Number(s.balanceDue) || 0)
+          : Math.max(0, total - paid)
+      );
+      return {
+        id: s.id,
+        reference: s.id || s.reference || '—',
+        date: s.date || '',
+        totalAmount: total,
+        amountPaid: paid,
+        balanceDue: due,
+        status: s.status || 'Pending',
+        needsReview: !!s.paymentsNeedReview,
+        sale: s
+      };
+    });
+
+    return {
+      orders: rows.length,
+      totalPurchases: this._money(rows.reduce((sum, r) => sum + r.totalAmount, 0)),
+      totalPaid: this._money(rows.reduce((sum, r) => sum + r.amountPaid, 0)),
+      outstanding: this._money(rows.reduce((sum, r) => sum + r.balanceDue, 0)),
+      sales: rows
+    };
+  }
+
   recalculateCustomerMetrics() {
     if (!Array.isArray(this.data.customers)) this.data.customers = [];
-    const qualifyingSales = (this.data.sales || []).filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed' && s.status !== 'Draft');
 
     this.data.customers.forEach(c => {
-      const custSales = qualifyingSales.filter(s =>
-        (s.customerId && s.customerId === c.id) ||
-        (!s.customerId && (s.customer || s.customerName || '').toLowerCase() === c.name.toLowerCase())
-      );
+      const summary = this.getCustomerPaymentSummary(c);
 
-      c.ordersCount = custSales.length;
-      c.totalSpend = custSales.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
-      if (custSales.length > 0) {
-        const lastSale = custSales[0];
+      c.ordersCount = summary.orders;
+      c.totalSpend = summary.totalPurchases;
+      // Billed vs collected, so a customer's dues are visible.
+      c.totalPaid = summary.totalPaid;
+      c.outstanding = summary.outstanding;
+
+      if (summary.sales.length > 0) {
+        const lastSale = summary.sales[0];
         c.lastPurchase = lastSale.date ? String(lastSale.date).split(',')[0] : c.lastPurchase;
       }
     });
@@ -1854,7 +2024,7 @@ class StoreManager {
 
     const parts = [];
     if (products.length > 0) {
-      const prodNames = products.slice(0, 3).map(p => `"${p.name}"`).join(', ');
+      const prodNames = products.slice(0, 3).map(p => `"${escapeHtml(p.name)}"`).join(', ');
       const more = products.length > 3 ? ` and ${products.length - 3} more` : '';
       parts.push(`${products.length} product(s) (${prodNames}${more})`);
     }
@@ -1960,7 +2130,7 @@ class StoreManager {
 
     const parts = [];
     if (products.length > 0) {
-      const prodNames = products.slice(0, 3).map(p => `"${p.name}"`).join(', ');
+      const prodNames = products.slice(0, 3).map(p => `"${escapeHtml(p.name)}"`).join(', ');
       const more = products.length > 3 ? ` and ${products.length - 3} more` : '';
       parts.push(`${products.length} product(s) (${prodNames}${more})`);
     }
@@ -2075,7 +2245,7 @@ class StoreManager {
 
     const parts = [];
     if (products.length > 0) {
-      const prodNames = products.slice(0, 3).map(p => `"${p.name}"`).join(', ');
+      const prodNames = products.slice(0, 3).map(p => `"${escapeHtml(p.name)}"`).join(', ');
       const more = products.length > 3 ? ` and ${products.length - 3} more` : '';
       parts.push(`${products.length} product(s) with ${stockCount} unit(s) in inventory (${prodNames}${more})`);
     }
@@ -2304,7 +2474,7 @@ class StoreManager {
         pOrdUnits += ord;
 
         let rec = 0;
-        if (p.status === 'Draft' || p.status === 'Approved') {
+        if (isPurchaseWaiting(p.status)) {
           rec = 0;
         } else if (it.receivedQty !== undefined && it.receivedQty !== null) {
           rec = Math.max(0, Number(it.receivedQty) || 0);
@@ -2316,7 +2486,7 @@ class StoreManager {
         pRecUnits += rec;
       });
 
-      if (p.status !== 'Draft' && p.status !== 'Approved') {
+      if (!isPurchaseWaiting(p.status)) {
         if (p.totalReceived !== undefined && Number(p.totalReceived) > 0) {
           pRecUnits = Math.max(pRecUnits, Number(p.totalReceived));
         } else if (p.receivedQuantity !== undefined && Number(p.receivedQuantity) > 0) {
@@ -2756,7 +2926,7 @@ class StoreManager {
         productCount: itemRecords.length,
         totalQuantity: totalQty,
         totalAmount: totalAmount,
-        status: 'Draft',
+        status: PURCHASE_STATUS_WAITING,
         totalReceived: 0,
         receivedQuantity: 0,
         items: itemRecords,
@@ -2770,25 +2940,39 @@ class StoreManager {
     return purchaseRecord;
   }
 
-  approvePurchase(purchaseId) {
-    const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
-    if (!purchase) throw new Error('Purchase not found');
-    if (purchase.status !== 'Draft') throw new Error('Only Draft purchases can be approved');
+  /**
+   * Save a purchase AND receive its full ordered quantity in one step.
+   * Used by the "Received Product" button on the Add Purchase page.
+   *
+   * Stock moves exactly once: receivePurchaseStock() is the only thing that
+   * touches inventory, and it refuses a purchase that is already received.
+   */
+  savePurchaseAndReceive(payload, existingId = null) {
+    const purchase = this.savePurchaseDraft(payload, existingId);
 
-    purchase.status = 'Approved';
-    purchase.approvedAt = new Date().toISOString();
-    this.save();
-    return purchase;
+    const receiveMap = {};
+    (purchase.items || []).forEach((item, idx) => {
+      receiveMap[item.id || idx] = Number(item.qty) || 0;
+    });
+
+    return this.receivePurchaseStock(
+      purchase.id,
+      receiveMap,
+      payload.date || purchase.date,
+      payload.notes || ''
+    );
   }
 
   receivePurchaseStock(purchaseId, receivedQuantitiesMap, receiptDate, notes = '') {
     const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
     if (!purchase) throw new Error('Purchase not found');
-    if (purchase.status !== 'Approved' && purchase.status !== 'Partially Received') {
-      if (purchase.status === 'Received' || purchase.status === 'Completed') {
+    // No approval step: a purchase waiting for receipt can be received
+    // directly. Receiving twice is still refused, so stock moves only once.
+    if (!isPurchaseReceivable(purchase.status)) {
+      if (isPurchaseReceived(purchase.status)) {
         throw new Error(`Purchase order ${purchaseId} has already been received.`);
       }
-      throw new Error(`Only Approved or Partially Received purchases can be received (current status: ${purchase.status})`);
+      throw new Error(`This purchase cannot be received (current status: ${purchase.status})`);
     }
 
     if (!this._receivingLocks) this._receivingLocks = new Set();
@@ -2996,7 +3180,7 @@ class StoreManager {
   deleteDraftPurchase(purchaseId) {
     const purchase = (this.data.purchases || []).find(p => p.id === purchaseId);
     if (!purchase) throw new Error('Purchase not found');
-    if (purchase.status !== 'Draft') throw new Error('Only Draft purchases can be deleted with deleteDraftPurchase');
+    if (!isPurchaseWaiting(purchase.status)) throw new Error('Only purchases waiting for receipt can be deleted this way');
     return this.deletePurchase(purchaseId);
   }
 
@@ -3080,7 +3264,7 @@ class StoreManager {
   }
 
 
-  normalizePurchaseItem(it, purchaseStatus = 'Draft') {
+  normalizePurchaseItem(it, purchaseStatus = PURCHASE_STATUS_WAITING) {
     if (!it) return null;
     const pName = (it.product || it.productName || '').trim();
     const productsList = this.data.products || [];
@@ -3168,7 +3352,7 @@ class StoreManager {
     const date = updatedPayload.date || purchase.date || new Date().toISOString().split('T')[0];
     const notes = updatedPayload.notes !== undefined ? updatedPayload.notes : (purchase.notes || '');
 
-    const oldStatus = purchase.status || 'Draft';
+    const oldStatus = purchase.status || PURCHASE_STATUS_WAITING;
     const oldItemsRaw = Array.isArray(purchase.items) ? purchase.items : [];
     const isReceivedOrPartial = oldStatus === 'Received' || oldStatus === 'Completed' || oldStatus === 'Partially Received';
 
@@ -3327,7 +3511,7 @@ class StoreManager {
     purchase.totalQuantity = totalQty;
     purchase.totalAmount = totalAmount;
     purchase.totalReceived = totalReceived;
-    if (updatedPayload.status && ['Draft', 'Approved', 'Partially Received', 'Received', 'Completed'].includes(updatedPayload.status)) {
+    if (updatedPayload.status && [PURCHASE_STATUS_WAITING, 'Draft', 'Approved', 'Partially Received', 'Received', 'Completed'].includes(updatedPayload.status)) {
       purchase.status = updatedPayload.status;
     }
 
@@ -3429,7 +3613,7 @@ class StoreManager {
       if (isNaN(q) || q <= 0) {
         throw new Error('Quantity must be a positive whole number greater than 0.');
       }
-      const key = `${item.productId}:::${item.size || 'Standard'}`;
+      const key = `${item.productId}:::${escapeHtml(item.size || 'Standard')}`;
       requiredStockMap[key] = (requiredStockMap[key] || 0) + q;
     });
 
@@ -3539,8 +3723,36 @@ class StoreManager {
       paymentMethod: salePayload.paymentMethod || 'Cash',
       status: salePayload.paymentStatus || 'Paid',
       discount: discountVal,
-      items: saleItems
+      items: saleItems,
+      payments: []
     };
+
+    // Open the payment ledger from the status chosen at the till.
+    const requestedStatus = salePayload.paymentStatus || 'Paid';
+    const payMethod = salePayload.paymentMethod || 'Cash';
+    let openingPayment = 0;
+    if (requestedStatus === 'Paid' || requestedStatus === 'Completed') {
+      openingPayment = this._money(finalTotal);
+    } else if (requestedStatus === 'Partial') {
+      openingPayment = this._money(salePayload.amountPaid);
+      if (!isFinite(openingPayment) || openingPayment <= 0) {
+        throw new Error('A partial sale needs the amount actually paid.');
+      }
+      if (openingPayment - this._money(finalTotal) > 0.005) {
+        throw new Error(`Amount paid (₹${openingPayment.toLocaleString()}) cannot exceed the sale total of ₹${this._money(finalTotal).toLocaleString()}.`);
+      }
+    }
+
+    if (openingPayment > 0) {
+      saleRecord.payments.push({
+        id: `PAY-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`,
+        amount: openingPayment,
+        date: saleRecord.date,
+        method: payMethod,
+        note: 'Payment at point of sale'
+      });
+    }
+    this.recalculateSalePayments(saleRecord);
 
     // Log Stock Movement for completed sale
     if (shouldDeductStock) {
@@ -3571,6 +3783,151 @@ class StoreManager {
     return saleRecord;
   }
 
+  // ==========================================
+  // PAYMENT LEDGER
+  // ------------------------------------------
+  // A sale carries an immutable `totalAmount` plus a `payments[]` ledger.
+  // `amountPaid` and `balanceDue` are always DERIVED from that ledger, never
+  // set directly, so they cannot drift. Status follows the balance:
+  //   nothing paid -> Pending | part paid -> Partial | balance 0 -> Paid
+  // Recording a payment never touches inventory.
+  // ==========================================
+
+  /** Round to paise so floating point never leaves a 0.0000001 balance. */
+  _money(n) {
+    const v = Number(n);
+    if (!isFinite(v)) return 0;
+    return Math.round(v * 100) / 100;
+  }
+
+  /**
+   * Recompute amountPaid / balanceDue / status for one sale from its ledger.
+   * Terminal states (Cancelled, Failed, Draft) are never overwritten, and the
+   * legacy 'Completed' label is preserved rather than rewritten to 'Paid'.
+   */
+  recalculateSalePayments(sale) {
+    if (!sale || typeof sale !== 'object') return sale;
+    if (!Array.isArray(sale.payments)) sale.payments = [];
+
+    const total = this._money(sale.totalAmount || 0);
+    const paid = this._money(sale.payments.reduce((sum, pm) => sum + (Number(pm.amount) || 0), 0));
+
+    sale.amountPaid = paid;
+    sale.balanceDue = this._money(Math.max(0, total - paid));
+    // Anything paid beyond the total is surfaced rather than silently dropped.
+    sale.overpaidAmount = this._money(Math.max(0, paid - total));
+
+    const terminal = ['Cancelled', 'Failed', 'Draft'];
+    if (terminal.includes(sale.status)) return sale;
+
+    if (paid <= 0) {
+      sale.status = 'Pending';
+    } else if (paid + 0.005 < total) {
+      sale.status = 'Partial';
+    } else {
+      // Keep the historical 'Completed' wording where it was already in use.
+      sale.status = sale.status === 'Completed' ? 'Completed' : 'Paid';
+    }
+    return sale;
+  }
+
+  /**
+   * One-time migration for sales saved before the ledger existed.
+   *
+   * Existing monetary values are never altered — only a payments[] ledger is
+   * inferred from the status that was already stored:
+   *   Paid / Completed -> one migrated payment for the full total
+   *   Pending          -> no payments
+   *   Partial          -> no recorded amount exists, so the ledger stays empty
+   *                       and the Partial status is PRESERVED rather than
+   *                       downgraded to Pending. `paymentsNeedReview` marks it
+   *                       so the amount can be entered later.
+   */
+  _migrateSalePayments(sale) {
+    if (!sale || typeof sale !== 'object') return;
+    if (Array.isArray(sale.payments)) {
+      this.recalculateSalePayments(sale);
+      return;
+    }
+
+    const total = this._money(sale.totalAmount || 0);
+    const status = sale.status || 'Paid';
+    sale.payments = [];
+
+    if (status === 'Paid' || status === 'Completed') {
+      sale.payments.push({
+        id: `PAY-MIG-${sale.id || Math.random().toString(36).slice(2, 7)}`,
+        amount: total,
+        date: sale.date || new Date().toLocaleString(),
+        method: sale.paymentMethod || 'Cash',
+        note: 'Opening balance migrated from the existing record',
+        migrated: true
+      });
+    } else if (status === 'Partial') {
+      // The old model stored no amount for partial sales; flag for review.
+      sale.paymentsNeedReview = true;
+    }
+
+    this.recalculateSalePayments(sale);
+
+    // Preserve the operator's original intent for legacy partial sales.
+    if (status === 'Partial' && sale.amountPaid === 0 && !['Cancelled', 'Failed', 'Draft'].includes(status)) {
+      sale.status = 'Partial';
+    }
+  }
+
+  /**
+   * Record a payment against an existing sale.
+   * Never deducts inventory and never alters the sale's items or total.
+   */
+  recordSalePayment(saleId, { amount, method, date, note } = {}) {
+    const sale = (this.data.sales || []).find(s => s.id === saleId || s.reference === saleId);
+    if (!sale) throw new Error('Sale not found.');
+
+    if (['Cancelled', 'Failed'].includes(sale.status)) {
+      throw new Error(`Cannot record a payment against a ${sale.status.toLowerCase()} sale.`);
+    }
+
+    this.recalculateSalePayments(sale);
+
+    const amt = this._money(amount);
+    if (!isFinite(amt) || amt <= 0) throw new Error('Payment amount must be greater than zero.');
+
+    const balance = this._money(sale.balanceDue);
+    if (balance <= 0) throw new Error(`Sale ${sale.id} is already fully paid.`);
+    if (amt - balance > 0.005) {
+      throw new Error(`Payment of ₹${amt.toLocaleString()} exceeds the outstanding balance of ₹${balance.toLocaleString()}.`);
+    }
+
+    sale.payments.push({
+      id: `PAY-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`,
+      amount: amt,
+      date: date || new Date().toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }),
+      method: method || sale.paymentMethod || 'Cash',
+      note: (note || '').trim()
+    });
+    delete sale.paymentsNeedReview;
+
+    this.recalculateSalePayments(sale);
+    this.recalculateCustomerMetrics();
+    this.save();
+    this.notify();
+    return sale;
+  }
+
+  /** Store-wide money position: billed, collected and still owed. */
+  getPaymentTotals() {
+    const active = (this.data.sales || []).filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed' && s.status !== 'Draft');
+    const revenue = this._money(active.reduce((a, s) => a + (Number(s.totalAmount) || 0), 0));
+    const collected = this._money(active.reduce((a, s) => a + (Number(s.amountPaid) || 0), 0));
+    return {
+      revenue,
+      collected,
+      outstanding: this._money(Math.max(0, revenue - collected)),
+      unpaidCount: active.filter(s => (Number(s.balanceDue) || 0) > 0).length
+    };
+  }
+
   updateSalePaymentStatus(saleId, newStatus) {
     const sale = (this.data.sales || []).find(s => s.id === saleId);
     if (!sale) throw new Error('Sale not found.');
@@ -3581,7 +3938,34 @@ class StoreManager {
     }
 
     // Changing payment status (e.g. Pending -> Paid) DOES NOT deduct stock again!
-    sale.status = newStatus;
+    // Marking a sale paid settles the balance through the ledger, so the two
+    // can never disagree; clearing it back to Pending removes only the
+    // payments this shortcut created, never a real recorded payment.
+    if (!Array.isArray(sale.payments)) sale.payments = [];
+    if (newStatus === 'Paid' || newStatus === 'Completed') {
+      this.recalculateSalePayments(sale);
+      if (sale.balanceDue > 0) {
+        sale.payments.push({
+          id: `PAY-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`,
+          amount: sale.balanceDue,
+          date: new Date().toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }),
+          method: sale.paymentMethod || 'Cash',
+          note: 'Balance settled by status change'
+        });
+      }
+      sale.status = newStatus;
+    } else if (newStatus === 'Pending') {
+      const realPayments = sale.payments.filter(pm => !/status change|Marked paid while editing/i.test(pm.note || ''));
+      if (realPayments.length > 0) {
+        throw new Error(`Sale ${sale.id} has recorded payments and cannot be set back to Pending. Adjust the payments instead.`);
+      }
+      sale.payments = [];
+      sale.status = newStatus;
+    } else {
+      sale.status = newStatus;
+    }
+
+    this.recalculateSalePayments(sale);
     this.recalculateCustomerMetrics();
     this.save();
     return sale;
@@ -3897,6 +4281,23 @@ class StoreManager {
     sale.discount = discountVal;
     sale.items = saleItems;
 
+    // Payment history is never rewritten by an item edit. Once any payment
+    // exists the ledger is authoritative and the status dropdown cannot
+    // override it; only an unpaid sale can still take its status as intent.
+    if (!Array.isArray(sale.payments)) sale.payments = [];
+    const alreadyPaid = sale.payments.reduce((a, pm) => a + (Number(pm.amount) || 0), 0);
+
+    if (alreadyPaid <= 0 && (newStatus === 'Paid' || newStatus === 'Completed')) {
+      sale.payments.push({
+        id: `PAY-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`,
+        amount: this._money(finalTotal),
+        date: sale.date,
+        method: sale.paymentMethod,
+        note: 'Marked paid while editing the sale'
+      });
+    }
+
+    this.recalculateSalePayments(sale);
     this.recalculateCustomerMetrics();
     this.save();
     return sale;
@@ -4052,6 +4453,57 @@ class StoreManager {
       this.data.products[idx].stock = this.data.products[idx].totalStock;
       this.save();
     }
+  }
+
+  /**
+   * Bring an archived product back into circulation.
+   *
+   * Archiving only flips `status` — variants, stock and history are left
+   * intact — so reactivating is a pure status change. It deliberately does
+   * NOT touch stock levels or create purchase records; the units preserved at
+   * archive time simply become sellable again.
+   */
+  reactivateProduct(id) {
+    const product = (this.data.products || []).find(p => p.id === id);
+    if (!product) throw new Error('Product not found.');
+    if (product.status !== 'Archived' && product.status !== 'Inactive') {
+      throw new Error(`Product "${product.name}" is already active.`);
+    }
+
+    const previousStatus = product.status;
+    const stockBefore = Number(product.totalStock || 0);
+
+    product.status = 'Active';
+
+    // Recompute from variants rather than assigning, so no quantity is invented.
+    if (Array.isArray(product.variants) && product.variants.length > 0) {
+      product.totalStock = product.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+    }
+    product.stock = product.totalStock;
+
+    if (Number(product.totalStock || 0) !== stockBefore) {
+      // Should never happen; guard against silent drift.
+      console.warn('Reactivation changed stock unexpectedly', stockBefore, product.totalStock);
+    }
+
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
+    this.data.stockMovements.unshift({
+      id: `MOV-REACT-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 100)}`,
+      date: new Date().toLocaleString(),
+      product: product.name,
+      productId: product.id,
+      size: 'All',
+      sku: `${(product.name || 'PRD').slice(0, 3).toUpperCase()}-REACT`,
+      type: 'Product Reactivated',
+      quantity: 0,
+      reference: `REACTIVATE-${product.id}`,
+      user: 'Admin',
+      notes: `Product reactivated from ${previousStatus}. Existing stock of ${product.totalStock || 0} units retained; no new stock created.`
+    });
+
+    this.save();
+    this.notify();
+    return product;
   }
 
   deleteProduct(id) {
@@ -4269,6 +4721,77 @@ function createModal({ title, bodyElement, footerButtons = [], onClose = null })
   return { overlay, closeModal };
 }
 
+/**
+ * In-app replacement for window.confirm().
+ *
+ * Native confirm() is unavailable in several embedded contexts (sandboxed
+ * iframes and some app webviews), where it returns false immediately. That
+ * silently turned destructive and workflow actions — Approve, Receive,
+ * Delete — into no-ops. This renders a real modal and resolves to a boolean.
+ *
+ * Usage: if (await uiConfirm({ message })) { ... }
+ */
+function uiConfirm({
+  title = 'Please confirm',
+  message = '',
+  confirmText = 'Confirm',
+  cancelText = 'Cancel',
+  variant = 'primary'
+} = {}) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener('keydown', onKey, true);
+      resolve(result);
+    };
+
+    const body = document.createElement('div');
+    body.style.cssText = 'display: flex; flex-direction: column; gap: 0.5rem;';
+    // Preserve the \n\n paragraph breaks the old confirm() messages used.
+    String(message).split(/\n{2,}/).forEach(para => {
+      if (!para.trim()) return;
+      const pEl = document.createElement('p');
+      pEl.style.cssText = 'margin: 0; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary); white-space: pre-line;';
+      pEl.textContent = para;
+      body.appendChild(pEl);
+    });
+
+    const cancelBtn = createButton({
+      text: cancelText,
+      variant: 'secondary',
+      onClick: () => { modal.closeModal(); }
+    });
+    const okBtn = createButton({
+      text: confirmText,
+      variant: variant,
+      // Remove the overlay directly rather than via closeModal(), so onClose
+      // (which resolves false) never fires for an accepted dialog.
+      onClick: () => { modal.overlay.remove(); finish(true); }
+    });
+
+    const modal = createModal({
+      title,
+      bodyElement: body,
+      footerButtons: [cancelBtn, okBtn],
+      onClose: () => finish(false)
+    });
+
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); modal.closeModal(); }
+      else if (e.key === 'Enter') { e.preventDefault(); okBtn.click(); }
+    }
+    document.addEventListener('keydown', onKey, true);
+
+    modal.overlay.classList.add('confirm-dialog-overlay');
+    setTimeout(() => okBtn.focus(), 0);
+  });
+}
+
+// Keep a reference for any code path that still expects the native API.
+window.uiConfirm = uiConfirm;
+
 const toast = {
   show({ message, type = 'success', duration = 3000 }) {
     let container = document.querySelector('.toast-container');
@@ -4285,7 +4808,7 @@ const toast = {
 
     t.innerHTML = `
       <i data-lucide="${icon}" style="width: 18px; height: 18px; color: ${color}; flex-shrink: 0;"></i>
-      <span style="font-size: 0.875rem; font-weight: 500; color: var(--text-primary);">${message}</span>
+      <span style="font-size: 0.875rem; font-weight: 500; color: var(--text-primary);">${escapeHtml(message)}</span>
     `;
 
     container.appendChild(t);
@@ -4335,13 +4858,13 @@ function openProductDetailsModal(productInput) {
     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color);">
       <div>
         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-          <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin: 0;">${product.name}</h3>
+          <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--text-primary); margin: 0;">${escapeHtml(product.name)}</h3>
           ${createBadge({ label: stockInfo.label, variant: stockInfo.variant }).outerHTML}
           ${product.status === 'Inactive' ? createBadge({ label: 'Inactive', variant: 'secondary' }).outerHTML : ''}
         </div>
         <div style="font-size: 0.8rem; color: var(--text-secondary); display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-          <span>Category: <strong>${product.category || 'General'}</strong></span>
-          <span>Brand: <strong>${product.brand || 'Unbranded'}</strong></span>
+          <span>Category: <strong>${escapeHtml(product.category || 'General')}</strong></span>
+          <span>Brand: <strong>${escapeHtml(product.brand || 'Unbranded')}</strong></span>
         </div>
       </div>
     </div>
@@ -4363,7 +4886,7 @@ function openProductDetailsModal(productInput) {
           <tbody>
             ${variants.map(v => `
               <tr>
-                <td><span style="font-weight: 600; padding: 0.2rem 0.5rem; background: var(--bg-secondary); border-radius: 4px; font-size: 0.8rem;">${v.size || 'Standard'}</span></td>
+                <td><span style="font-weight: 600; padding: 0.2rem 0.5rem; background: var(--bg-secondary); border-radius: 4px; font-size: 0.8rem;">${escapeHtml(v.size || 'Standard')}</span></td>
                 <td style="font-weight: 600; color: ${v.stock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${v.stock || 0} units</td>
                 <td style="color: var(--text-secondary);">₹${(v.purchasePrice || product.purchasePrice || 0).toLocaleString()}</td>
                 <td style="font-weight: 600;">${v.sellingPrice ? '₹' + (v.sellingPrice || 0).toLocaleString() : priceDisplay}</td>
@@ -4378,7 +4901,7 @@ function openProductDetailsModal(productInput) {
     ${product.description ? `
       <div style="display: flex; flex-direction: column; gap: 0.35rem; background: var(--bg-secondary); padding: 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
         <strong style="font-size: 0.85rem; color: var(--text-primary);">Description:</strong>
-        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0; line-height: 1.4;">${product.description}</p>
+        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0; line-height: 1.4;">${escapeHtml(product.description)}</p>
       </div>
     ` : ''}
 
@@ -4413,11 +4936,11 @@ function openProductDetailsModal(productInput) {
                 <tr>
                   <td style="color: var(--text-secondary);">${m.date || '-'}</td>
                   <td>${createBadge({ label: m.type || 'Movement', variant: m.type === 'Stock In' ? 'success' : (m.type === 'Sale' ? 'info' : 'warning') }).outerHTML}</td>
-                  <td style="font-weight: 600;">${m.size || m.sku || 'Standard'}</td>
+                  <td style="font-weight: 600;">${escapeHtml(m.size || m.sku || 'Standard')}</td>
                   <td style="font-weight: 700; color: ${m.quantity > 0 ? 'var(--status-success)' : 'var(--status-danger)'};">
                     ${m.quantity > 0 ? `+${m.quantity}` : m.quantity} units
                   </td>
-                  <td style="color: var(--text-secondary);">${m.reference || '-'}</td>
+                  <td style="color: var(--text-secondary);">${escapeHtml(m.reference || '-')}</td>
                 </tr>
               `).join('');
             })()}
@@ -4516,8 +5039,8 @@ function openSaleDetailsModal(saleInput) {
       <tr style="border-bottom: 1px solid var(--border-color); transition: background-color 0.15s ease;">
         <td style="font-weight: 600; color: var(--text-secondary); text-align: center; padding: 0.75rem 0.5rem; vertical-align: middle;">${idx + 1}</td>
         <td style="padding: 0.75rem; vertical-align: middle;">
-          <div style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">${prodName}</div>
-          ${i.sku ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px; font-family: monospace;">SKU: ${i.sku}</div>` : ''}
+          <div style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">${escapeHtml(prodName)}</div>
+          ${i.sku ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px; font-family: monospace;">SKU: ${escapeHtml(i.sku)}</div>` : ''}
         </td>
         <td style="padding: 0.75rem; text-align: center; vertical-align: middle;">
           <span style="display: inline-block; padding: 0.2rem 0.55rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.785rem; font-weight: 600; color: var(--text-primary);">
@@ -4575,7 +5098,7 @@ function openSaleDetailsModal(saleInput) {
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.85rem;">
       <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.85rem 1rem;">
         <div style="font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">Invoice / Bill ID</div>
-        <div style="font-weight: 700; font-size: 1.05rem; color: var(--text-primary); margin-top: 0.25rem; font-family: monospace;">${saleRef}</div>
+        <div style="font-weight: 700; font-size: 1.05rem; color: var(--text-primary); margin-top: 0.25rem; font-family: monospace;">${escapeHtml(saleRef)}</div>
         <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 0.25rem; display: flex; align-items: center; gap: 0.35rem;">
           <i data-lucide="calendar" style="width: 12px; height: 12px;"></i>
           <span>${saleDate}</span>
@@ -4619,12 +5142,12 @@ function openSaleDetailsModal(saleInput) {
           <i data-lucide="user" style="width: 16px; height: 16px; color: var(--brand-primary);"></i>
           <h4 style="margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--text-primary); text-transform: uppercase; letter-spacing: 0.04em;">Customer Details</h4>
         </div>
-        ${custId ? `<span class="badge badge-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.55rem; font-weight: 600;"><i data-lucide="tag" style="width: 11px; height: 11px; margin-right: 4px; display: inline-block; vertical-align: -1px;"></i>ID: ${custId}</span>` : ''}
+        ${custId ? `<span class="badge badge-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.55rem; font-weight: 600;"><i data-lucide="tag" style="width: 11px; height: 11px; margin-right: 4px; display: inline-block; vertical-align: -1px;"></i>ID: ${escapeHtml(custId)}</span>` : ''}
       </div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.85rem 1.25rem; font-size: 0.85rem;">
         <div>
           <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Customer Name</div>
-          <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.2rem; font-size: 0.95rem;">${custName}</div>
+          <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.2rem; font-size: 0.95rem;">${escapeHtml(custName)}</div>
         </div>
         <div>
           <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Customer ID</div>
@@ -4657,13 +5180,13 @@ function openSaleDetailsModal(saleInput) {
         ${matchedCustomer && matchedCustomer.email ? `
           <div>
             <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Email</div>
-            <div style="font-weight: 500; color: var(--text-primary); margin-top: 0.2rem;">${matchedCustomer.email}</div>
+            <div style="font-weight: 500; color: var(--text-primary); margin-top: 0.2rem;">${escapeHtml(matchedCustomer.email)}</div>
           </div>
         ` : ''}
         ${matchedCustomer && matchedCustomer.address ? `
           <div>
             <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Address</div>
-            <div style="font-weight: 500; color: var(--text-primary); margin-top: 0.2rem;">${matchedCustomer.address}</div>
+            <div style="font-weight: 500; color: var(--text-primary); margin-top: 0.2rem;">${escapeHtml(matchedCustomer.address)}</div>
           </div>
         ` : ''}
       </div>
@@ -4713,7 +5236,7 @@ function openSaleDetailsModal(saleInput) {
           ${notes ? `
             <div>
               <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;">Notes / Remarks</div>
-              <div style="color: var(--text-primary); margin-top: 0.15rem; font-style: italic;">"${notes}"</div>
+              <div style="color: var(--text-primary); margin-top: 0.15rem; font-style: italic;">"${escapeHtml(notes)}"</div>
             </div>
           ` : ''}
           ${staff ? `
@@ -4810,8 +5333,8 @@ function openSaleDetailsModal(saleInput) {
     text: 'Delete Sale',
     icon: 'trash-2',
     variant: 'ghost',
-    onClick: () => {
-      const confirmed = confirm(`Are you sure you want to delete sale "${saleRef}"?\n\nThis will restore deducted inventory quantities and recalculate customer metrics.\n\nThis action cannot be undone.`);
+    onClick: async () => {
+      const confirmed = await uiConfirm({ title: 'Confirm deletion', message: `Are you sure you want to delete sale "${saleRef}"?\n\nThis will restore deducted inventory quantities and recalculate customer metrics.\n\nThis action cannot be undone.`, confirmText: 'Delete', variant: 'danger' });
       if (confirmed) {
         try {
           store.deleteSale(sale.id);
@@ -4946,13 +5469,19 @@ function createSidebar(activeNavId, onNavigate) {
   const sidebar = document.createElement('aside');
   sidebar.className = 'sidebar';
   
+  // Store identity comes from Settings -> Store Details.
+  const sbInfo = (typeof store !== 'undefined' && store.getStoreInfo) ? store.getStoreInfo() : {};
+  const storeName = sbInfo.name || 'Master Admin';
+  const storeBranch = sbInfo.branch || '';
+  const storeBadge = (storeName.trim()[0] || 'M').toUpperCase();
+
   const header = document.createElement('div');
   header.className = 'sidebar-header';
   header.innerHTML = `
-    <div class="brand-badge">M</div>
+    <div class="brand-badge">${escapeHtml(storeBadge)}</div>
     <div>
-      <div class="brand-title">Master Admin</div>
-      <div class="brand-subtitle">Apex Store #01</div>
+      <div class="brand-title">${escapeHtml(storeName)}</div>
+      <div class="brand-subtitle">${escapeHtml(storeBranch)}</div>
     </div>
   `;
   
@@ -4976,11 +5505,23 @@ function createSidebar(activeNavId, onNavigate) {
   return sidebar;
 }
 
-function createTopbar(activeTitle, onThemeToggle) {
+function createTopbar(activeTitle, onThemeToggle, onNavigate = null) {
   const topbar = document.createElement('header');
   topbar.className = 'topbar';
   const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
-  
+
+  // Owner identity comes from Settings -> Store Details.
+  const sInfo = (typeof store !== 'undefined' && store.getStoreInfo) ? store.getStoreInfo() : {};
+  const ownerName = sInfo.ownerName || 'Store Owner';
+  const ownerRole = sInfo.ownerRole || 'Store Owner';
+  const ownerInitials = ownerName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w[0].toUpperCase())
+    .join('') || 'S';
+  const branchLabel = sInfo.branch || 'Store #01';
+
   topbar.innerHTML = `
     <div class="topbar-left">
       <h1 class="page-title" style="font-size: 1.35rem;">${activeTitle}</h1>
@@ -4988,26 +5529,38 @@ function createTopbar(activeTitle, onThemeToggle) {
     <div class="topbar-right">
       <div style="font-size: 0.8rem; background: var(--bg-secondary); padding: 0.35rem 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: flex; align-items: center; gap: 0.4rem;">
         <span style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--status-success);"></span>
-        <span style="font-weight: 500; color: var(--text-secondary);">Store #01 • Online</span>
+        <span style="font-weight: 500; color: var(--text-secondary);">${escapeHtml(branchLabel)} • Online</span>
       </div>
       
       <button class="btn btn-secondary btn-sm theme-toggle-btn" title="Toggle Light/Dark Mode" style="padding: 0.45rem;">
         <i data-lucide="${currentTheme === 'dark' ? 'sun' : 'moon'}" style="width: 16px; height: 16px;"></i>
       </button>
 
-      <div style="display: flex; align-items: center; gap: 0.6rem; padding-left: 0.5rem; border-left: 1px solid var(--border-color);">
-        <div style="width: 32px; height: 32px; border-radius: 50%; background-color: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.85rem;">
-          SM
+      <button type="button" class="topbar-profile-btn" title="View profile" aria-label="View profile" style="display: flex; align-items: center; gap: 0.6rem; padding: 0.25rem 0.5rem 0.25rem 0.75rem; margin-left: 0.25rem; border: none; border-left: 1px solid var(--border-color); border-radius: var(--radius-sm); background: transparent; cursor: pointer; text-align: left; font: inherit; color: inherit;">
+        <div style="width: 32px; height: 32px; border-radius: 50%; background-color: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.85rem; flex-shrink: 0;">
+          ${escapeHtml(ownerInitials)}
         </div>
         <div style="display: flex; flex-direction: column;">
-          <span style="font-size: 0.85rem; font-weight: 600; line-height: 1.2;">Suresh Menon</span>
-          <span style="font-size: 0.725rem; color: var(--text-secondary);">Store Owner</span>
+          <span style="font-size: 0.85rem; font-weight: 600; line-height: 1.2; color: var(--text-primary);">${escapeHtml(ownerName)}</span>
+          <span style="font-size: 0.725rem; color: var(--text-secondary);">${escapeHtml(ownerRole)}</span>
         </div>
-      </div>
+        <i data-lucide="chevron-right" style="width: 15px; height: 15px; color: var(--text-secondary); flex-shrink: 0;"></i>
+      </button>
     </div>
   `;
   
   topbar.querySelector('.theme-toggle-btn').addEventListener('click', onThemeToggle);
+
+  const profileBtn = topbar.querySelector('.topbar-profile-btn');
+  if (profileBtn) {
+    profileBtn.addEventListener('click', () => {
+      if (onNavigate) onNavigate('profile');
+      else if (window.appInstance) window.appInstance.navigateTo('profile');
+    });
+    profileBtn.addEventListener('mouseenter', () => { profileBtn.style.background = 'var(--bg-secondary)'; });
+    profileBtn.addEventListener('mouseleave', () => { profileBtn.style.background = 'transparent'; });
+  }
+
   return topbar;
 }
 
@@ -5163,21 +5716,26 @@ function renderAddProductPage(params = {}, onNavigate = null) {
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   
+  // Where Cancel / Back / Save return to. Opened from Add Purchase it returns
+  // there with the new product selected; opened from Inventory it returns to
+  // Inventory, which is where a standalone product is managed.
+  const exitNav = returnTo === 'add-purchase' ? 'purchases' : 'inventory';
+
   const breadcrumbItems = returnTo === 'add-purchase'
     ? [{ label: 'Purchases', target: 'purchases' }, { label: 'Add Purchase', target: 'purchases', params: { action: 'add' } }, { label: 'Create New Product' }]
-    : [{ label: 'Purchases', target: 'purchases' }, { label: 'Add New Product' }];
+    : [{ label: 'Inventory', target: 'inventory' }, { label: 'Add New Product' }];
 
   const breadcrumb = createBreadcrumb(breadcrumbItems, onNavigate);
 
   const backBtn = createButton({
-    text: returnTo === 'add-purchase' ? 'Back to Add Purchase' : 'Back to Purchases',
+    text: returnTo === 'add-purchase' ? 'Back to Add Purchase' : 'Back to Inventory',
     icon: 'arrow-left',
     variant: 'secondary',
     size: 'sm',
     onClick: () => {
       if (onNavigate) {
         if (returnTo === 'add-purchase') onNavigate('purchases', { action: 'add' });
-        else onNavigate('purchases');
+        else onNavigate(exitNav);
       }
     }
   });
@@ -5216,13 +5774,13 @@ function renderAddProductPage(params = {}, onNavigate = null) {
         <div class="form-group">
           <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Category *</label>
           <select class="form-select" id="new-prod-cat">
-            ${catOptions.map(c => `<option value="${c}">${c}</option>`).join('')}
+            ${catOptions.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
           <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Brand</label>
           <select class="form-select" id="new-prod-brand">
-            ${brandOptions.map(b => `<option value="${b}">${b}</option>`).join('')}
+            ${brandOptions.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -5411,7 +5969,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
   formContainer.querySelector('#cancel-add-prod-btn').addEventListener('click', () => {
     if (onNavigate) {
       if (returnTo === 'add-purchase') onNavigate('purchases', { action: 'add' });
-      else onNavigate('purchases');
+      else onNavigate(exitNav);
     }
   });
 
@@ -5477,7 +6035,12 @@ function renderAddProductPage(params = {}, onNavigate = null) {
 
     try {
       const result = store.saveProductDefinition(payload);
-      toast.show({ message: `Product '${name}' created! Continue completing purchase details.`, type: 'success' });
+      toast.show({
+        message: returnTo === 'add-purchase'
+          ? `Product '${name}' created! Continue completing purchase details.`
+          : `Product '${name}' created. Receive a purchase order to add stock.`,
+        type: 'success'
+      });
 
       if (onNavigate) {
         if (returnTo === 'add-purchase' && result && result.product) {
@@ -5491,7 +6054,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
             sellingPrice: sellingPrice
           });
         } else {
-          onNavigate('purchases');
+          onNavigate(exitNav);
         }
       }
     } catch (err) {
@@ -6124,11 +6687,11 @@ function renderOverview(onNavigate) {
       
       <div style="display: flex; flex-direction: column; gap: 0.75rem;">
         ${topSellingList.length > 0 ? topSellingList.map((p, idx) => `
-          <div class="top-selling-item" data-product-name="${p.name}" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); transition: background-color 0.15s ease; ${idx < topSellingList.length - 1 ? 'border-bottom: 1px solid var(--border-color);' : ''}">
+          <div class="top-selling-item" data-product-name="${escapeHtml(p.name)}" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); transition: background-color 0.15s ease; ${idx < topSellingList.length - 1 ? 'border-bottom: 1px solid var(--border-color);' : ''}">
             <div style="display: flex; align-items: center; gap: 0.75rem;">
               <span style="font-weight: 700; font-size: 0.85rem; color: ${idx === 0 ? 'var(--brand-primary)' : 'var(--text-secondary)'}; background: ${idx === 0 ? 'var(--brand-soft)' : 'var(--bg-secondary)'}; width: 24px; height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center;">0${idx + 1}</span>
               <div>
-                <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">${p.name}</div>
+                <div style="font-weight: 600; font-size: 0.875rem; color: var(--text-primary);">${escapeHtml(p.name)}</div>
                 <div style="font-size: 0.75rem; color: var(--text-secondary);">${p.units} sold</div>
               </div>
             </div>
@@ -6222,7 +6785,7 @@ function renderOverview(onNavigate) {
     pageSales.forEach(s => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td style="font-weight: 600; color: var(--text-primary);">${s.customer || 'Walk-in Customer'}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(s.customer || 'Walk-in Customer')}</td>
         <td style="color: var(--text-secondary); font-size: 0.8rem;">${s.date || '-'}</td>
         <td style="color: var(--text-secondary);">${s.itemCount || (s.items ? s.items.length : 1)} item${(s.itemCount || 1) > 1 ? 's' : ''}</td>
         <td style="font-weight: 600; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
@@ -6484,10 +7047,9 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
 
     // Fresh lookup from store
     const productsList = store.data.products || [];
-    let product = productsList.find(p => p.id === productId);
-    if (!product && productsList.length > 0) {
-      product = productsList[0];
-    }
+    // Only resolve an explicitly requested product. Falling back to the first
+    // product would silently show (and allow editing of) the wrong record.
+    const product = productId ? productsList.find(p => p.id === productId) : null;
 
     if (!product) {
       const errDiv = document.createElement('div');
@@ -6533,7 +7095,39 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
         else if (window.appInstance) window.appInstance.navigateTo('inventory');
       }
     });
-    topNavDiv.appendChild(backBtn);
+    // Reactivate action for archived / inactive products.
+    if (product.status === 'Archived' || product.status === 'Inactive') {
+      const headerActions = document.createElement('div');
+      headerActions.style.cssText = 'display: flex; gap: 0.5rem; align-items: center;';
+      const reactivateBtn = createButton({
+        text: 'Reactivate Product',
+        icon: 'rotate-ccw',
+        variant: 'primary',
+        size: 'sm',
+        extraClass: 'reactivate-product-btn',
+        onClick: async () => {
+          const ok = await uiConfirm({
+            title: 'Reactivate product',
+            message: `Reactivate "${product.name}"?\n\nIts existing stock of ${product.totalStock || 0} units stays exactly as it is — no stock is added and no purchase record is created. The product simply becomes sellable again.`,
+            confirmText: 'Reactivate',
+            variant: 'primary'
+          });
+          if (!ok) return;
+          try {
+            store.reactivateProduct(product.id);
+            toast.show({ message: `Product "${product.name}" reactivated.`, type: 'success' });
+            renderPage();
+          } catch (err) {
+            toast.show({ message: err.message, type: 'danger' });
+          }
+        }
+      });
+      headerActions.appendChild(reactivateBtn);
+      headerActions.appendChild(backBtn);
+      topNavDiv.appendChild(headerActions);
+    } else {
+      topNavDiv.appendChild(backBtn);
+    }
     container.appendChild(topNavDiv);
 
     // Normalize Variants
@@ -6553,14 +7147,14 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
         <div>
           <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
             <h2 style="margin: 0; font-size: 1.35rem; font-weight: 700; color: var(--text-primary); line-height: 1.3;">Manage Product</h2>
-            ${product.id ? `<span class="badge badge-secondary" style="font-family: monospace; font-size: 0.75rem; padding: 0.2rem 0.55rem; font-weight: 600;">ID: ${product.id}</span>` : ''}
+            ${product.id ? `<span class="badge badge-secondary" style="font-family: monospace; font-size: 0.75rem; padding: 0.2rem 0.55rem; font-weight: 600;">ID: ${escapeHtml(product.id)}</span>` : ''}
             ${createBadge({ label: product.status || 'Active', variant: (product.status === 'Active' ? 'success' : 'secondary') }).outerHTML}
           </div>
-          <div style="font-size: 1.15rem; font-weight: 600; color: var(--text-primary); margin-top: 0.4rem;">${product.name}</div>
+          <div style="font-size: 1.15rem; font-weight: 600; color: var(--text-primary); margin-top: 0.4rem;">${escapeHtml(product.name)}</div>
           <div style="display: flex; align-items: center; gap: 0.75rem; margin-top: 0.35rem; font-size: 0.825rem; color: var(--text-secondary); flex-wrap: wrap;">
-            <span>Category: <strong style="color: var(--text-primary); font-weight: 600;">${product.category || 'General'}</strong></span>
+            <span>Category: <strong style="color: var(--text-primary); font-weight: 600;">${escapeHtml(product.category || 'General')}</strong></span>
             <span>•</span>
-            <span>Brand: <strong style="color: var(--text-primary); font-weight: 600;">${product.brand || 'Unbranded'}</strong></span>
+            <span>Brand: <strong style="color: var(--text-primary); font-weight: 600;">${escapeHtml(product.brand || 'Unbranded')}</strong></span>
           </div>
         </div>
         <div style="display: flex; align-items: center; gap: 1.25rem; background: var(--bg-secondary); padding: 0.75rem 1.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
@@ -6611,7 +7205,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
               Category
             </label>
             <select id="manage-prod-cat" class="form-select" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
-              ${catOptions.map(c => `<option value="${c}" ${c === product.category ? 'selected' : ''}>${c}</option>`).join('')}
+              ${catOptions.map(c => `<option value="${escapeHtml(c)}" ${c === product.category ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
             </select>
           </div>
           <div class="form-group" style="margin: 0;">
@@ -6619,7 +7213,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
               Brand
             </label>
             <select id="manage-prod-brand" class="form-select" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
-              ${brandOptions.map(b => `<option value="${b}" ${b === product.brand ? 'selected' : ''}>${b}</option>`).join('')}
+              ${brandOptions.map(b => `<option value="${escapeHtml(b)}" ${b === product.brand ? 'selected' : ''}>${escapeHtml(b)}</option>`).join('')}
             </select>
           </div>
           <div class="form-group" style="margin: 0;">
@@ -6629,6 +7223,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
             <select id="manage-prod-status" class="form-select" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
               <option value="Active" ${product.status === 'Active' ? 'selected' : ''}>Active</option>
               <option value="Inactive" ${product.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+              ${product.status === 'Archived' ? `<option value="Archived" selected>Archived (use Reactivate to restore)</option>` : ''}
             </select>
           </div>
         </div>
@@ -6709,7 +7304,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
                   <tr style="border-bottom: 1px solid var(--border-color);">
                     <td style="padding: 0.65rem 0.85rem;">
                       <span class="badge badge-secondary" style="font-weight: 700; font-size: 0.825rem; padding: 0.2rem 0.55rem;">
-                        Size ${v.size}
+                        Size ${escapeHtml(v.size)}
                       </span>
                     </td>
                     <td style="padding: 0.65rem 0.85rem; text-align: right; color: var(--text-secondary); font-size: 0.85rem;">
@@ -6718,7 +7313,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
                     <td style="padding: 0.65rem 0.85rem; text-align: right;">
                       <div style="display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.35rem;">
                         <span style="color: var(--text-secondary); font-size: 0.85rem;">₹</span>
-                        <input type="number" class="form-input manage-variant-price-inp" data-size="${v.size}" placeholder="e.g. 1499" value="${sellVal}" min="0" step="1" style="width: 130px; font-size: 0.85rem; padding: 0.35rem 0.6rem; text-align: right;">
+                        <input type="number" class="form-input manage-variant-price-inp" data-size="${escapeHtml(v.size)}" placeholder="e.g. 1499" value="${sellVal}" min="0" step="1" style="width: 130px; font-size: 0.85rem; padding: 0.35rem 0.6rem; text-align: right;">
                       </div>
                     </td>
                     <td style="padding: 0.65rem 0.85rem; text-align: center;">
@@ -6874,10 +7469,10 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
                   ? 'border-bottom: 1px solid var(--border-color); background: rgba(79, 70, 229, 0.08); transition: background-color 0.2s ease;'
                   : 'border-bottom: 1px solid var(--border-color); transition: background-color 0.2s ease;';
                 return `
-                  <tr style="${rowStyle}" class="variant-stock-row ${isSelectedRow ? 'selected-variant-row' : ''}" data-variant-size="${v.size}">
+                  <tr style="${rowStyle}" class="variant-stock-row ${isSelectedRow ? 'selected-variant-row' : ''}" data-variant-size="${escapeHtml(v.size)}">
                     <td style="padding: 0.65rem 0.85rem;">
                       <span class="badge ${isSelectedRow ? 'badge-primary' : 'badge-secondary'}" style="font-weight: 700; font-size: 0.825rem; padding: 0.2rem 0.55rem;">
-                        ${hasSizes ? `Size ${v.size}` : 'Standard'}
+                        ${hasSizes ? `Size ${escapeHtml(v.size)}` : 'Standard'}
                       </span>
                     </td>
                     <td style="padding: 0.65rem 0.85rem; text-align: center;">
@@ -6888,11 +7483,11 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
                     </td>
                     <td style="padding: 0.65rem 0.85rem; text-align: right;">
                       <div style="display: inline-flex; align-items: center; gap: 0.5rem; justify-content: flex-end;">
-                        <button type="button" class="btn btn-sm btn-secondary quick-add-stock-btn" data-size="${v.size}" style="padding: 0.3rem 0.65rem; font-size: 0.775rem;">
+                        <button type="button" class="btn btn-sm btn-secondary quick-add-stock-btn" data-size="${escapeHtml(v.size)}" style="padding: 0.3rem 0.65rem; font-size: 0.775rem;">
                           <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
                           <span>Add Stock</span>
                         </button>
-                        <button type="button" class="btn btn-sm btn-secondary quick-remove-stock-btn" data-size="${v.size}" style="padding: 0.3rem 0.65rem; font-size: 0.775rem;">
+                        <button type="button" class="btn btn-sm btn-secondary quick-remove-stock-btn" data-size="${escapeHtml(v.size)}" style="padding: 0.3rem 0.65rem; font-size: 0.775rem;">
                           <i data-lucide="minus" style="width: 14px; height: 14px;"></i>
                           <span>Remove Stock</span>
                         </button>
@@ -7055,7 +7650,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
             </button>
           </div>
           <div style="display: none;">
-            <select id="manage-adj-size-select"><option value="${initialSelectedSize}">${initialSelectedSize}</option></select>
+            <select id="manage-adj-size-select"><option value="${escapeHtml(initialSelectedSize)}">${escapeHtml(initialSelectedSize)}</option></select>
             <select id="manage-adj-type-select"><option value="ADD">Add Stock (+)</option></select>
             <input type="number" id="manage-adj-qty-input" value="1" />
             <select id="manage-adj-reason-select"><option value="${ADD_STOCK_REASONS[0]}">${ADD_STOCK_REASONS[0]}</option></select>
@@ -7110,7 +7705,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
                   <i data-lucide="${entry.type === 'ADD' ? 'plus' : 'minus'}" style="width: 12px; height: 12px; margin-right: 3px;"></i>
                   ${entry.type === 'ADD' ? 'Add Stock' : 'Remove Stock'}
                 </span>
-                <span style="font-size: 0.8rem; color: var(--text-secondary);">Size: <strong style="color: var(--text-primary);">${hasSizes ? `Size ${entry.size}` : 'Standard'}</strong></span>
+                <span style="font-size: 0.8rem; color: var(--text-secondary);">Size: <strong style="color: var(--text-primary);">${hasSizes ? `Size ${escapeHtml(entry.size)}` : 'Standard'}</strong></span>
               </div>
               <button type="button" class="btn btn-sm btn-ghost remove-adj-entry-btn" data-entry-id="${entry.id}" title="Remove this adjustment entry" style="color: var(--status-danger); padding: 0.25rem 0.55rem; font-size: 0.775rem; display: flex; align-items: center; gap: 0.35rem;">
                 <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
@@ -7124,8 +7719,8 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
                 <label class="form-label" style="font-size: 0.75rem; margin-bottom: 0.25rem;">Size Variant</label>
                 <select ${index === 0 ? 'id="manage-adj-size-select"' : ''} class="form-input manage-adj-size-select" data-entry-id="${entry.id}" style="font-size: 0.825rem; padding: 0.45rem 0.65rem;">
                   ${variants.map(v => `
-                    <option value="${v.size}" ${v.size === entry.size ? 'selected' : (v.size === initialSelectedSize ? 'selected' : '')}>
-                      ${hasSizes ? `Size ${v.size}` : 'Standard'} (Current: ${v.stock || 0} units)
+                    <option value="${escapeHtml(v.size)}" ${v.size === entry.size ? 'selected' : (v.size === initialSelectedSize ? 'selected' : '')}>
+                      ${hasSizes ? `Size ${escapeHtml(v.size)}` : 'Standard'} (Current: ${v.stock || 0} units)
                     </option>
                   `).join('')}
                 </select>
@@ -7421,7 +8016,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
         }
 
         toast.show({
-          message: `Stock adjusted successfully: ${appliedCount} adjustment${appliedCount > 1 ? 's' : ''} applied for ${product.name} (${updatedSizes.join(', ')}).`,
+          message: `Stock adjusted successfully: ${appliedCount} adjustment${appliedCount > 1 ? 's' : ''} applied for ${escapeHtml(product.name)} (${updatedSizes.join(', ')}).`,
           type: 'success'
         });
 
@@ -7930,7 +8525,7 @@ function renderViewProductPage(params = {}, onNavigate = null) {
                     <tr>
                       <td style="font-weight: 600;">${escapeHtml(po.id)}</td>
                       <td>${escapeHtml(po.supplier || 'Supplier')}</td>
-                      <td>${createBadge({ label: po.status || 'Received', variant: po.status === 'Draft' ? 'warning' : 'success' }).outerHTML}</td>
+                      <td>${createBadge({ label: po.status || 'Received', variant: isPurchaseWaiting(po.status) ? 'info' : 'success' }).outerHTML}</td>
                       <td style="text-align: right;">
                         <button type="button" class="btn btn-sm btn-secondary view-rel-po-btn" data-po-id="${po.id}" title="View Purchase" style="padding: 0.2rem 0.5rem;">
                           <i data-lucide="eye" style="width: 13px; height: 13px;"></i>
@@ -8033,6 +8628,15 @@ function renderViewProductPage(params = {}, onNavigate = null) {
 }
 
 function renderInventory(params = {}, onNavigate = null) {
+  // Direct product creation is reachable only as a step of the Purchases
+  // workflow (which passes returnTo). A bare #inventory?action=add — an old
+  // link or a typed URL — falls through to the inventory list instead of
+  // offering a second way to create a product.
+  if (params && (params.action === 'add' || params.view === 'add')) {
+    if (params.returnTo === 'add-purchase') {
+      return renderAddProductPage(params, onNavigate);
+    }
+  }
   if (params && params.action === 'view') {
     return renderViewProductPage(params, onNavigate);
   }
@@ -8090,7 +8694,14 @@ function renderInventory(params = {}, onNavigate = null) {
   countBadge.id = 'inv-count-badge';
   countBadge.style.cssText = 'display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-secondary);';
   countBadge.innerHTML = `<span>Showing:</span><span class="badge badge-secondary" id="inv-count-num" style="font-weight: 600;">${(store.data.products || []).length} products</span>`;
-  headerDiv.appendChild(countBadge);
+
+  // No "Add Product" action here: products and their size-wise stock enter the
+  // system through the Purchases workflow, so Inventory is a read/manage view
+  // of what purchases and sales have already produced.
+  const invHeaderActions = document.createElement('div');
+  invHeaderActions.style.cssText = 'display: flex; gap: 0.75rem; align-items: center;';
+  invHeaderActions.appendChild(countBadge);
+  headerDiv.appendChild(invHeaderActions);
 
   container.appendChild(headerDiv);
 
@@ -8111,12 +8722,12 @@ function renderInventory(params = {}, onNavigate = null) {
       <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
         <select class="form-select category-filter" style="width: auto; min-width: 135px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           <option value="ALL">All Categories</option>
-          ${categories.map(c => `<option value="${c}">${c}</option>`).join('')}
+          ${categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
         </select>
 
         <select class="form-select brand-filter" style="width: auto; min-width: 130px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           <option value="ALL">All Brands</option>
-          ${allBrands.map(b => `<option value="${b}">${b}</option>`).join('')}
+          ${allBrands.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('')}
         </select>
 
         <select class="form-select status-filter" style="width: auto; min-width: 145px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
@@ -8126,6 +8737,7 @@ function renderInventory(params = {}, onNavigate = null) {
           <option value="LOW" ${selectedStatus === 'LOW' ? 'selected' : ''}>Low Stock</option>
           <option value="OUT" ${selectedStatus === 'OUT' ? 'selected' : ''}>Out of Stock</option>
           <option value="Inactive" ${selectedStatus === 'Inactive' ? 'selected' : ''}>Inactive</option>
+          <option value="Archived" ${selectedStatus === 'Archived' ? 'selected' : ''}>Archived</option>
         </select>
 
         <select class="form-select sort-filter" style="width: auto; min-width: 175px; font-size: 0.85rem; padding: 0.45rem 0.75rem;">
@@ -8278,17 +8890,22 @@ function renderInventory(params = {}, onNavigate = null) {
 
       const stockInfo = getProductStockStatus(p);
 
+      // Archived products are not sellable, so they never satisfy a stock-level
+      // filter; they match only their own Archived option.
+      const notSellable = p.status === 'Inactive' || p.status === 'Archived';
       let matchStat = true;
       if (selectedStatus === 'Active' || selectedStatus === 'IN_STOCK') {
-        matchStat = (p.status !== 'Inactive') && stockInfo.status === 'IN_STOCK';
+        matchStat = !notSellable && stockInfo.status === 'IN_STOCK';
       } else if (selectedStatus === 'PARTIAL_STOCK' || selectedStatus === 'PARTIAL') {
-        matchStat = (p.status !== 'Inactive') && stockInfo.status === 'PARTIAL_STOCK';
+        matchStat = !notSellable && stockInfo.status === 'PARTIAL_STOCK';
       } else if (selectedStatus === 'LOW' || selectedStatus === 'LOW_STOCK') {
-        matchStat = (p.status !== 'Inactive') && stockInfo.status === 'LOW_STOCK';
+        matchStat = !notSellable && stockInfo.status === 'LOW_STOCK';
       } else if (selectedStatus === 'OUT' || selectedStatus === 'OUT_OF_STOCK') {
-        matchStat = (p.status !== 'Inactive') && (stockInfo.status === 'OUT_OF_STOCK' || stockInfo.outOfStockSizes > 0);
+        matchStat = !notSellable && (stockInfo.status === 'OUT_OF_STOCK' || stockInfo.outOfStockSizes > 0);
       } else if (selectedStatus === 'Inactive') {
         matchStat = (p.status === 'Inactive');
+      } else if (selectedStatus === 'Archived' || selectedStatus === 'ARCHIVED') {
+        matchStat = (p.status === 'Archived');
       }
 
       return matchQuery && matchCat && matchBrand && matchStat;
@@ -8350,7 +8967,10 @@ function renderInventory(params = {}, onNavigate = null) {
       const isExpanded = expandedProductIds.has(p.id);
 
       let statusBadge;
-      if (p.status === 'Inactive') {
+      if (p.status === 'Archived') {
+        // Archived products are not sellable; never show them as In Stock.
+        statusBadge = createBadge({ label: 'Archived', variant: 'secondary' });
+      } else if (p.status === 'Inactive') {
         statusBadge = createBadge({ label: 'Inactive', variant: 'secondary' });
       } else if (stockInfo.status === 'OUT_OF_STOCK') {
         statusBadge = createBadge({ label: 'Out of Stock', variant: 'danger' });
@@ -8390,13 +9010,13 @@ function renderInventory(params = {}, onNavigate = null) {
           <div style="display: flex; align-items: center; gap: 0.25rem;">
             ${chevronIcon}
             <div>
-              <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">${p.name}</div>
+              <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">${escapeHtml(p.name)}</div>
               ${hasSizes ? `<div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 2px;">${stockInfo.totalSizes} size variants</div>` : ''}
             </div>
           </div>
         </td>
-        <td style="color: var(--text-secondary);">${p.category || 'General'}</td>
-        <td style="color: var(--text-secondary);">${p.brand || 'Unbranded'}</td>
+        <td style="color: var(--text-secondary);">${escapeHtml(p.category || 'General')}</td>
+        <td style="color: var(--text-secondary);">${escapeHtml(p.brand || 'Unbranded')}</td>
         <td style="font-weight: 600; color: ${totalStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">
           <div>${totalStock} units</div>
           ${stockSubtitle}
@@ -8461,14 +9081,14 @@ function renderInventory(params = {}, onNavigate = null) {
 
       const deleteInvBtn = tr.querySelector('.delete-inv-btn');
       if (deleteInvBtn) {
-        deleteInvBtn.addEventListener('click', (e) => {
+        deleteInvBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const hasHistory = (store.data.sales || []).some(s => (s.items || []).some(it => it.productId === p.id || (it.product && it.product.trim().toLowerCase() === p.name.trim().toLowerCase()))) ||
                              (store.data.purchases || []).some(po => (po.items || []).some(it => it.productId === p.id || (it.product && it.product.trim().toLowerCase() === p.name.trim().toLowerCase())));
           const confirmMsg = hasHistory
             ? `Are you sure you want to delete "${p.name}" (${p.id})?\n\nThis product has transaction history. It will be safely archived to preserve financial records and stock reconciliation, and will no longer be available for new sales.`
             : `Are you sure you want to delete "${p.name}" (${p.id})?\n\nThis will remove the product and all its size variants from inventory.`;
-          const confirmed = confirm(confirmMsg);
+          const confirmed = await uiConfirm({ title: 'Confirm deletion', message: confirmMsg, confirmText: 'Delete', variant: 'danger' });
           if (confirmed) {
             try {
               if (expandedProductIds.has(p.id)) {
@@ -8517,7 +9137,7 @@ function renderInventory(params = {}, onNavigate = null) {
             <tr style="border-bottom: 1px solid var(--border-color);">
               <td style="padding: 0.6rem 0.85rem; font-weight: 600;">
                 <span style="display: inline-block; padding: 0.15rem 0.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.8rem;">
-                  Size ${v.size}
+                  Size ${escapeHtml(v.size)}
                 </span>
               </td>
               <td style="padding: 0.6rem 0.85rem; color: var(--text-secondary); font-size: 0.85rem;">${buyPrice}</td>
@@ -8525,7 +9145,7 @@ function renderInventory(params = {}, onNavigate = null) {
               <td style="padding: 0.6rem 0.85rem; font-weight: 600; font-size: 0.85rem; color: ${vStock === 0 ? 'var(--status-danger)' : 'var(--text-primary)'};">${vStock} units</td>
               <td style="padding: 0.6rem 0.85rem;">${vBadge}</td>
               <td style="padding: 0.6rem 0.85rem; text-align: right;">
-                <button type="button" class="btn btn-sm btn-secondary table-action-btn size-adjust-btn adjust-inv-btn" data-size="${v.size}" title="Adjust Stock" aria-label="Adjust Stock">
+                <button type="button" class="btn btn-sm btn-secondary table-action-btn size-adjust-btn adjust-inv-btn" data-size="${escapeHtml(v.size)}" title="Adjust Stock" aria-label="Adjust Stock">
                   <i data-lucide="sliders"></i>
                   <span class="sr-only">Adjust Stock</span>
                 </button>
@@ -8542,7 +9162,7 @@ function renderInventory(params = {}, onNavigate = null) {
                   <span style="font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--brand-primary);">
                     Size-Wise Inventory Details
                   </span>
-                  <span style="font-size: 0.8rem; color: var(--text-secondary);">&mdash; ${p.name}</span>
+                  <span style="font-size: 0.8rem; color: var(--text-secondary);">&mdash; ${escapeHtml(p.name)}</span>
                 </div>
                 <span style="font-size: 0.75rem; color: var(--text-secondary);">Total Available: <strong>${totalStock} units</strong> across ${variantsList.length} sizes${stockInfo.outOfStockSizes > 0 ? ` (${stockInfo.outOfStockSizes} out of stock)` : ''}</span>
               </div>
@@ -8637,8 +9257,8 @@ function openEditProductModal(product, onSaved) {
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); gap: 0.5rem; background: var(--bg-secondary); padding: 0.65rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
           ${(product.variants || []).map(v => `
             <div>
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 3px;">Size ${v.size}</label>
-              <input type="number" class="form-input variant-price-input" data-size="${v.size}" placeholder="e.g. 599" value="${v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== '' ? v.sellingPrice : (product.sellingPrice || '')}" style="font-size: 0.825rem; padding: 0.35rem 0.55rem;">
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-primary); display: block; margin-bottom: 3px;">Size ${escapeHtml(v.size)}</label>
+              <input type="number" class="form-input variant-price-input" data-size="${escapeHtml(v.size)}" placeholder="e.g. 599" value="${v.sellingPrice !== undefined && v.sellingPrice !== null && v.sellingPrice !== '' ? v.sellingPrice : (product.sellingPrice || '')}" style="font-size: 0.825rem; padding: 0.35rem 0.55rem;">
             </div>
           `).join('')}
         </div>
@@ -8654,7 +9274,7 @@ function openEditProductModal(product, onSaved) {
         <div style="flex: 1; padding-right: 0.75rem;">
           <h3 style="margin: 0; font-size: 1.05rem; font-weight: 600; color: var(--text-primary); line-height: 1.3;">Edit Product Details</h3>
           <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 3px; line-height: 1.3;">
-            Update product details and pricing for ${product.name}
+            Update product details and pricing for ${escapeHtml(product.name)}
           </div>
         </div>
         <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; transition: color 0.15s ease;" title="Close">
@@ -8678,7 +9298,7 @@ function openEditProductModal(product, onSaved) {
               Category
             </label>
             <select id="edit-prod-cat" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
-              ${catOptions.map(c => `<option value="${c}" ${c === product.category ? 'selected' : ''}>${c}</option>`).join('')}
+              ${catOptions.map(c => `<option value="${escapeHtml(c)}" ${c === product.category ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
             </select>
           </div>
           <div class="form-group" style="margin: 0;">
@@ -8686,7 +9306,7 @@ function openEditProductModal(product, onSaved) {
               Brand
             </label>
             <select id="edit-prod-brand" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
-              ${brandOptions.map(b => `<option value="${b}" ${b === product.brand ? 'selected' : ''}>${b}</option>`).join('')}
+              ${brandOptions.map(b => `<option value="${escapeHtml(b)}" ${b === product.brand ? 'selected' : ''}>${escapeHtml(b)}</option>`).join('')}
             </select>
           </div>
         </div>
@@ -8705,6 +9325,7 @@ function openEditProductModal(product, onSaved) {
             <select id="edit-prod-status" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
               <option value="Active" ${product.status === 'Active' ? 'selected' : ''}>Active</option>
               <option value="Inactive" ${product.status === 'Inactive' ? 'selected' : ''}>Inactive</option>
+              ${product.status === 'Archived' ? `<option value="Archived" selected>Archived (use Reactivate to restore)</option>` : ''}
             </select>
           </div>
         </div>
@@ -8864,7 +9485,7 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
           </span>
         </div>
         <select id="adj-size-select" class="form-select" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
-          ${variants.map(v => `<option value="${v.size}" ${v.size === selectedSize ? 'selected' : ''}>Size ${v.size} (${v.stock || 0} units available)</option>`).join('')}
+          ${variants.map(v => `<option value="${escapeHtml(v.size)}" ${v.size === selectedSize ? 'selected' : ''}>Size ${escapeHtml(v.size)} (${v.stock || 0} units available)</option>`).join('')}
         </select>
       </div>
     `;
@@ -8884,7 +9505,7 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
         <div style="flex: 1; padding-right: 0.75rem;">
           <h3 style="margin: 0; font-size: 1.05rem; font-weight: 600; color: var(--text-primary); line-height: 1.3;">Manual Stock Correction / Adjustment</h3>
           <div style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 3px; line-height: 1.3;">
-            ${isSizePreselected ? `Adjusting stock for ${liveProduct.name} (Size ${selectedSize})` : `Adjust stock for ${liveProduct.name}`}
+            ${isSizePreselected ? `Adjusting stock for ${escapeHtml(liveProduct.name)} (Size ${selectedSize})` : `Adjust stock for ${escapeHtml(liveProduct.name)}`}
           </div>
         </div>
         <button type="button" class="modal-close-btn" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; transition: color 0.15s ease;" title="Close">
@@ -8898,11 +9519,11 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
         <!-- Product Overview Box -->
         <div style="padding: 0.65rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-secondary); font-size: 0.825rem;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
-            <div style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px;">${liveProduct.name}</div>
-            ${liveProduct.brand ? `<span style="font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-surface); padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 500;">${liveProduct.brand}</span>` : ''}
+            <div style="font-weight: 600; color: var(--text-primary); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px;">${escapeHtml(liveProduct.name)}</div>
+            ${liveProduct.brand ? `<span style="font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-surface); padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border-color); font-weight: 500;">${escapeHtml(liveProduct.brand)}</span>` : ''}
           </div>
           <div style="display: flex; justify-content: space-between; align-items: center; color: var(--text-secondary); font-size: 0.8rem;">
-            <span>Category: <strong style="color: var(--text-primary); font-weight: 500;">${liveProduct.category || 'General'}</strong></span>
+            <span>Category: <strong style="color: var(--text-primary); font-weight: 500;">${escapeHtml(liveProduct.category || 'General')}</strong></span>
             <span>Total Available: <strong style="color: var(--text-primary); font-weight: 600;">${totalProductStock} units</strong></span>
           </div>
         </div>
@@ -9101,13 +9722,16 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
 
 
 // PURCHASES PAGE
-// PURCHASES PAGE (Draft -> Approved -> Received Workflow)
+// PURCHASES PAGE (Waiting for Receive -> Received Workflow)
 function renderPurchases(params = {}, onNavigate = null) {
   if (params && params.action === 'edit') {
     return renderEditPurchasePage(params, onNavigate);
   }
   if (params && params.action === 'view') {
     return renderViewPurchasePage(params, onNavigate);
+  }
+  if (params && params.action === 'receive') {
+    return renderReceivePurchasePage(params, onNavigate);
   }
   if (params && (params.action === 'add' || params.view === 'add' || params.action === 'add-product' || params.view === 'add-product')) {
     return renderAddPurchasePage(params, onNavigate);
@@ -9143,7 +9767,7 @@ function renderPurchases(params = {}, onNavigate = null) {
   mainCard.className = 'card';
   mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
 
-  let currentFilter = 'all'; // 'all', 'draft', 'approved', 'partially-received', 'received'
+  let currentFilter = 'all'; // 'all', 'waiting', 'partially-received', 'received'
   let searchQuery = '';
   let purCurrentPage = 1;
   let purPageSize = 5;
@@ -9153,8 +9777,7 @@ function renderPurchases(params = {}, onNavigate = null) {
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
       <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;" id="pur-status-filters">
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="all" style="font-weight: 600;">All Purchases</button>
-        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="draft" style="font-weight: 600;">Draft</button>
-        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="approved" style="font-weight: 600;">Approved</button>
+        <button type="button" class="btn btn-sm pur-filter-btn" data-filter="waiting" style="font-weight: 600;">Waiting for Receive</button>
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="partially-received" style="font-weight: 600;">Partially Received</button>
         <button type="button" class="btn btn-sm pur-filter-btn" data-filter="received" style="font-weight: 600;">Received</button>
       </div>
@@ -9199,8 +9822,8 @@ function renderPurchases(params = {}, onNavigate = null) {
       const statusLower = (p.status || 'completed').toLowerCase();
       
       // Filter logic
-      if (currentFilter === 'draft' && statusLower !== 'draft') return false;
-      if (currentFilter === 'approved' && statusLower !== 'approved') return false;
+      // Legacy draft/approved records read as waiting for receipt.
+      if (currentFilter === 'waiting' && !isPurchaseWaiting(p.status)) return false;
       if (currentFilter === 'partially-received' && statusLower !== 'partially received' && statusLower !== 'partially-received') return false;
       if (currentFilter === 'received' && statusLower !== 'received' && statusLower !== 'completed') return false;
 
@@ -9239,106 +9862,59 @@ function renderPurchases(params = {}, onNavigate = null) {
 
       const status = p.status || 'Completed';
       let badgeVariant = 'secondary';
-      if (status === 'Draft') badgeVariant = 'warning';
-      else if (status === 'Approved') badgeVariant = 'info';
+      if (isPurchaseWaiting(status)) badgeVariant = 'info';
       else if (status === 'Partially Received') badgeVariant = 'warning';
-      else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+      else if (isPurchaseReceived(status)) badgeVariant = 'success';
 
       // Calculate total ordered and total received
       const totalOrdered = p.totalQuantity !== undefined ? Number(p.totalQuantity) : (p.items || []).reduce((s, i) => s + Number(i.qty || i.received || 0), 0);
       const totalReceived = p.totalReceived !== undefined ? Number(p.totalReceived) : (p.items || []).reduce((s, i) => s + Number(i.receivedQty !== undefined ? i.receivedQty : (i.received !== undefined ? i.received : (status === 'Completed' || status === 'Received' ? (i.qty || 0) : 0))), 0);
 
-      // Row Actions according to Status:
-      // Draft: Approve, Edit, Delete
-      // Approved: Receive
-      // Partially Received: Receive Remaining
-      // Received: View
-      let actionsHtml = '';
-      if (status === 'Draft') {
-        actionsHtml = `
-          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-primary table-action-btn action-approve-btn" title="Approve" aria-label="Approve">
-              <i data-lucide="check-circle"></i>
-              <span class="sr-only">Approve</span>
-            </button>
+      // Row actions by status:
+      //   Waiting for Receive  -> View, Edit, Receive
+      //   Partially Received   -> View, Edit, Receive Remaining
+      //   Received             -> View only (the order is final)
+      const actionView = `
             <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
               <i data-lucide="eye"></i>
               <span class="sr-only">View</span>
-            </button>
+            </button>`;
+      const actionEdit = `
             <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
               <i data-lucide="pencil"></i>
               <span class="sr-only">Edit</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
-              <i data-lucide="trash-2"></i>
-              <span class="sr-only">Delete</span>
-            </button>
-          </div>
-        `;
-      } else if (status === 'Approved') {
-        actionsHtml = `
-          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="Receive Purchase" aria-label="Receive Purchase">
+            </button>`;
+      const actionReceive = (label) => `
+            <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="${label}" aria-label="${label}">
               <i data-lucide="package-check"></i>
-              <span class="sr-only">Receive Purchase</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
-              <i data-lucide="eye"></i>
-              <span class="sr-only">View</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
-              <i data-lucide="pencil"></i>
-              <span class="sr-only">Edit</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
-              <i data-lucide="trash-2"></i>
-              <span class="sr-only">Delete</span>
-            </button>
+              <span class="sr-only">${label}</span>
+            </button>`;
+
+      let actionsHtml = '';
+      if (isPurchaseWaiting(status)) {
+        actionsHtml = `
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            ${actionReceive('Receive')}${actionView}${actionEdit}
           </div>
         `;
       } else if (status === 'Partially Received') {
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="Receive Remaining" aria-label="Receive Remaining">
-              <i data-lucide="package-check"></i>
-              <span class="sr-only">Receive Remaining</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
-              <i data-lucide="eye"></i>
-              <span class="sr-only">View</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
-              <i data-lucide="pencil"></i>
-              <span class="sr-only">Edit</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
-              <i data-lucide="trash-2"></i>
-              <span class="sr-only">Delete</span>
-            </button>
+            ${actionReceive('Receive Remaining')}${actionView}${actionEdit}
           </div>
         `;
       } else {
+        // Received: view-only.
         actionsHtml = `
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
-              <i data-lucide="eye"></i>
-              <span class="sr-only">View</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-edit-btn" title="Edit" aria-label="Edit">
-              <i data-lucide="pencil"></i>
-              <span class="sr-only">Edit</span>
-            </button>
-            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
-              <i data-lucide="trash-2"></i>
-              <span class="sr-only">Delete</span>
-            </button>
+            ${actionView}
           </div>
         `;
       }
 
       tr.innerHTML = `
         <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${startIdx + index + 1}</td>
-        <td style="font-weight: 600; color: var(--text-primary);">${p.supplier || 'Supplier'}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(p.supplier || 'Supplier')}</td>
         <td style="color: var(--text-secondary);">${p.date || '-'}</td>
         <td style="font-weight: 600; color: var(--text-primary);">
           ${status === 'Partially Received' ? `<span style="color: var(--brand-primary);">${totalReceived}</span> / ${totalOrdered}` : `${totalOrdered} units`}
@@ -9350,26 +9926,7 @@ function renderPurchases(params = {}, onNavigate = null) {
 
 
 
-      // Draft Actions
-      const approveBtn = tr.querySelector('.action-approve-btn');
-      if (approveBtn) {
-        approveBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const confirmed = confirm(`Approve purchase order ${p.id} from "${p.supplier}"?
-
-Status will change to Approved. Stock will remain unchanged until goods are received.`);
-          if (confirmed) {
-            try {
-              store.approvePurchase(p.id);
-              toast.show({ message: `Purchase ${p.id} approved! You can now receive stock.`, type: 'success' });
-              renderPurchasesTable();
-            } catch (err) {
-              toast.show({ message: err.message, type: 'danger' });
-            }
-          }
-        });
-      }
-
+      // Row actions (approval was removed from the workflow).
       const editBtn = tr.querySelector('.action-edit-btn');
       if (editBtn) {
         editBtn.addEventListener('click', (e) => {
@@ -9380,7 +9937,7 @@ Status will change to Approved. Stock will remain unchanged until goods are rece
 
       const deleteBtn = tr.querySelector('.action-delete-btn');
       if (deleteBtn) {
-        deleteBtn.addEventListener('click', (e) => {
+        deleteBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const hasReceived = (p.totalReceived > 0) || (p.status === 'Received' || p.status === 'Partially Received' || p.status === 'Completed');
           let confirmMsg = `Delete purchase order ${p.id}?`;
@@ -9389,7 +9946,7 @@ Status will change to Approved. Stock will remain unchanged until goods are rece
           } else {
             confirmMsg = `Are you sure you want to delete purchase order ${p.id}?\n\nThis action cannot be undone.`;
           }
-          const confirmed = confirm(confirmMsg);
+          const confirmed = await uiConfirm({ title: 'Confirm deletion', message: confirmMsg, confirmText: 'Delete', variant: 'danger' });
           if (confirmed) {
             try {
               store.deletePurchase(p.id);
@@ -9407,7 +9964,7 @@ Status will change to Approved. Stock will remain unchanged until goods are rece
       if (receiveBtn) {
         receiveBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          openReceivePurchaseModal(p, () => renderPurchasesTable());
+          if (onNavigate) onNavigate('purchases', { action: 'receive', purchaseId: p.id });
         });
       }
 
@@ -9484,40 +10041,151 @@ Status will change to Approved. Stock will remain unchanged until goods are rece
 }
 
 // RECEIVE PURCHASE MODAL (Actual Stock Intake & Partial Receipt Support)
-function openReceivePurchaseModal(purchase, onComplete) {
-  const modalOverlay = document.createElement('div');
-  modalOverlay.className = 'modal-overlay';
-  modalOverlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem;';
+// ==========================================
+// DEDICATED RECEIVE PURCHASE PAGE (Separate Page)
+// ==========================================
+function renderReceivePurchasePage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
 
-  const modalBox = document.createElement('div');
-  modalBox.className = 'modal-content card';
-  modalBox.style.cssText = 'max-width: 750px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem;';
+  const container = document.createElement('div');
+  container.className = 'page-container';
 
-  const status = purchase.status || 'Approved';
-  const todayStr = new Date().toISOString().split('T')[0];
+  const purchaseId = params.purchaseId || params.id;
+  const purchase = (store.data.purchases || []).find(p => p.id === purchaseId);
+  // Where Cancel and a successful receipt return to.
+  const returnTo = params.returnTo === 'view' ? 'view' : 'list';
+  const goBack = () => {
+    if (!onNavigate) return;
+    if (returnTo === 'view' && purchase) onNavigate('purchases', { action: 'view', purchaseId: purchase.id });
+    else onNavigate('purchases');
+  };
 
-  modalBox.innerHTML = `
-    <!-- Modal Header -->
-    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+  // Missing purchase error state
+  if (!purchase) {
+    const errorCard = document.createElement('div');
+    errorCard.className = 'card';
+    errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
+    errorCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+        <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
+      </div>
       <div>
-        <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin: 0;">
-          Receive Purchase Order — ${purchase.id}
-        </h3>
-        <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
-          Supplier: <strong>${purchase.supplier}</strong> | Order Date: ${purchase.date}
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Purchase Order Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem; max-width: 440px;">
+          The purchase order with identifier "<strong>${escapeHtml(purchaseId || 'unknown')}</strong>" could not be located or may have been deleted.
         </p>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm close-receive-btn" style="padding: 0.35rem;">
-        <i data-lucide="x" style="width: 18px; height: 18px;"></i>
+      <button type="button" class="btn btn-secondary back-to-list-btn" style="margin-top: 0.5rem; display: inline-flex; align-items: center; gap: 0.4rem;">
+        <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+        <span>Return to Purchases</span>
       </button>
+    `;
+    errorCard.querySelector('.back-to-list-btn').addEventListener('click', () => {
+      if (onNavigate) onNavigate('purchases');
+    });
+    container.appendChild(errorCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  const status = purchase.status || PURCHASE_STATUS_WAITING;
+  const canReceive = isPurchaseReceivable(status);
+
+  let badgeVariant = 'secondary';
+  if (isPurchaseWaiting(status)) badgeVariant = 'info';
+  else if (status === 'Partially Received') badgeVariant = 'warning';
+  else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+
+  // 1. Header (Breadcrumb + Status Badge + Back)
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+
+  const breadcrumbWrap = document.createElement('div');
+  breadcrumbWrap.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;';
+  breadcrumbWrap.appendChild(createBreadcrumb([
+    { label: 'Purchases', target: 'purchases' },
+    { label: `Receive Stock (${purchase.id})` }
+  ], onNavigate));
+  breadcrumbWrap.appendChild(createBadge({ label: status, variant: badgeVariant }));
+  headerDiv.appendChild(breadcrumbWrap);
+
+  const btnBackTop = document.createElement('button');
+  btnBackTop.type = 'button';
+  btnBackTop.className = 'btn btn-secondary btn-sm back-to-list-btn';
+  btnBackTop.innerHTML = `<i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i> <span>Back</span>`;
+  btnBackTop.addEventListener('click', goBack);
+  headerDiv.appendChild(btnBackTop);
+
+  container.appendChild(headerDiv);
+
+  // Status guard: only Approved / Partially Received orders can be received.
+  if (!canReceive) {
+    const blockedCard = document.createElement('div');
+    blockedCard.className = 'card';
+    blockedCard.style.cssText = 'text-align: center; padding: 3rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1rem;';
+    const reason = (status === 'Received' || status === 'Completed')
+      ? `Purchase order ${purchase.id} has already been fully received.`
+      : `Purchase order ${purchase.id} is still a draft. Approve it first, then receive the stock.`;
+    blockedCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; color: var(--text-secondary);">
+        <i data-lucide="package-x" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Stock cannot be received</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem; max-width: 460px;">${escapeHtml(reason)}</p>
+      </div>
+    `;
+    const backBtn = createButton({
+      text: 'Back to Purchases',
+      icon: 'arrow-left',
+      variant: 'secondary',
+      onClick: () => { if (onNavigate) onNavigate('purchases'); }
+    });
+    blockedCard.appendChild(backBtn);
+    container.appendChild(blockedCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // 2. Order summary card
+  const infoCard = document.createElement('div');
+  infoCard.className = 'card';
+  infoCard.style.cssText = 'margin-bottom: 1.25rem; padding: 1.15rem 1.35rem;';
+  infoCard.innerHTML = `
+    <div style="display: flex; flex-wrap: wrap; gap: 2rem; align-items: flex-start;">
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Purchase Order</div>
+        <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary);">${escapeHtml(purchase.id)}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Supplier</div>
+        <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary);">${escapeHtml(purchase.supplier || 'Supplier')}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Order Date</div>
+        <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary);">${escapeHtml(purchase.date || '-')}</div>
+      </div>
+    </div>
+  `;
+  container.appendChild(infoCard);
+
+  // 3. Main intake card
+  const mainCard = document.createElement('div');
+  mainCard.className = 'card';
+  mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+  mainCard.innerHTML = `
+    <div>
+      <h3 class="card-title" style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.3rem 0;">Goods Intake</h3>
+      <p style="font-size: 0.825rem; color: var(--text-secondary); margin: 0;">
+        Verify goods received against ordered quantities. Enter the actual units received now for each size. Only confirmed received units will be added to Inventory.
+      </p>
     </div>
 
-    <!-- Instructions / Status Banner -->
-    <div style="background: var(--bg-secondary); padding: 0.85rem 1.15rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.825rem; color: var(--text-secondary);">
-      Verify goods received against ordered quantities. Enter the actual units received now for each size. Only confirmed received units will be added to Inventory.
-    </div>
-
-    <!-- Items Intake Table -->
     <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
       <table class="admin-table" style="font-size: 0.85rem;">
         <thead>
@@ -9534,38 +10202,25 @@ function openReceivePurchaseModal(purchase, onComplete) {
       </table>
     </div>
 
-    <!-- Receipt Details (Date & Remarks) -->
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
       <div class="form-group">
-        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Receipt Date *</label>
+        <label class="form-label" for="receive-date-input" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Receipt Date *</label>
         <input type="date" class="form-input" id="receive-date-input" value="${todayStr}">
       </div>
       <div class="form-group">
-        <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Delivery Notes / Remarks</label>
+        <label class="form-label" for="receive-notes-input" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Delivery Notes / Remarks</label>
         <input type="text" class="form-input" id="receive-notes-input" placeholder="e.g. Batch verified, quality OK">
       </div>
     </div>
 
-    <!-- Live Receipt Summary -->
-    <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.85rem; font-weight: 600;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; background: var(--bg-surface); padding: 0.75rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-size: 0.85rem; font-weight: 600;">
       <div>Units Receiving Now: <span id="receive-now-total" style="color: var(--brand-primary); font-weight: 700;">0</span></div>
       <div id="receive-status-preview" style="color: var(--status-success);">Status after receipt: Fully Received</div>
     </div>
-
-    <!-- Modal Footer Actions -->
-    <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-      <button type="button" class="btn btn-secondary cancel-receive-btn">Cancel</button>
-      <button type="button" class="btn btn-primary confirm-receive-btn" style="padding: 0.55rem 1.35rem; font-weight: 600;">
-        <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
-        Confirm Receipt & Update Stock
-      </button>
-    </div>
   `;
+  container.appendChild(mainCard);
 
-  modalOverlay.appendChild(modalBox);
-  document.body.appendChild(modalOverlay);
-
-  const tbody = modalBox.querySelector('#receive-items-tbody');
+  const tbody = mainCard.querySelector('#receive-items-tbody');
   const items = purchase.items || [];
   const receiveMap = {};
 
@@ -9573,14 +10228,14 @@ function openReceivePurchaseModal(purchase, onComplete) {
     const ordered = item.qty || 0;
     const alreadyRec = item.receivedQty || 0;
     const outstanding = Math.max(0, ordered - alreadyRec);
-    
+
     // Default receive now to outstanding quantity for 1-click convenience
     receiveMap[index] = outstanding;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="font-weight: 600; color: var(--text-primary);">${item.product}</td>
-      <td><span class="badge badge-secondary">${item.size || 'Standard'}</span></td>
+      <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(item.product)}</td>
+      <td><span class="badge badge-secondary">${escapeHtml(item.size || 'Standard')}</span></td>
       <td style="font-weight: 600;">${ordered} units</td>
       <td style="color: var(--text-secondary);">${alreadyRec} units</td>
       <td style="font-weight: 700; color: ${outstanding > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)'};">
@@ -9616,7 +10271,6 @@ function openReceivePurchaseModal(purchase, onComplete) {
     items.forEach((item, index) => {
       const ordered = item.qty || 0;
       const alreadyRec = item.receivedQty || 0;
-      const outstanding = Math.max(0, ordered - alreadyRec);
       const nowRec = receiveMap[index] || 0;
 
       nowTotal += nowRec;
@@ -9625,8 +10279,8 @@ function openReceivePurchaseModal(purchase, onComplete) {
       }
     });
 
-    modalBox.querySelector('#receive-now-total').textContent = `${nowTotal} units`;
-    const previewEl = modalBox.querySelector('#receive-status-preview');
+    mainCard.querySelector('#receive-now-total').textContent = `${nowTotal} units`;
+    const previewEl = mainCard.querySelector('#receive-status-preview');
     if (nowTotal === 0) {
       previewEl.textContent = 'No units entered to receive';
       previewEl.style.color = 'var(--text-secondary)';
@@ -9641,12 +10295,27 @@ function openReceivePurchaseModal(purchase, onComplete) {
 
   recalculateReceiveSummary();
 
-  const closeModal = () => modalOverlay.remove();
-  modalBox.querySelector('.close-receive-btn').addEventListener('click', closeModal);
-  modalBox.querySelector('.cancel-receive-btn').addEventListener('click', closeModal);
+  // 4. Bottom action bar
+  const bottomBar = document.createElement('div');
+  bottomBar.className = 'card';
+  bottomBar.style.cssText = 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; padding: 1rem 1.25rem; margin-top: 1.25rem;';
+  bottomBar.innerHTML = `
+    <button type="button" class="btn btn-secondary cancel-receive-btn" style="display: inline-flex; align-items: center; gap: 0.4rem; font-weight: 600;">
+      <i data-lucide="arrow-left" style="width: 16px; height: 16px;"></i>
+      <span>Cancel</span>
+    </button>
+    <button type="button" class="btn btn-primary confirm-receive-btn" style="padding: 0.55rem 1.35rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.4rem;">
+      <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+      <span>Confirm Receipt &amp; Update Stock</span>
+    </button>
+  `;
+  container.appendChild(bottomBar);
+
+  bottomBar.querySelector('.cancel-receive-btn').addEventListener('click', goBack);
 
   let isConfirming = false;
-  modalBox.querySelector('.confirm-receive-btn').addEventListener('click', () => {
+  const confirmBtn = bottomBar.querySelector('.confirm-receive-btn');
+  confirmBtn.addEventListener('click', () => {
     if (isConfirming) return;
 
     let nowTotal = 0;
@@ -9657,29 +10326,34 @@ function openReceivePurchaseModal(purchase, onComplete) {
       return;
     }
 
-    const rDate = modalBox.querySelector('#receive-date-input').value;
-    const rNotes = modalBox.querySelector('#receive-notes-input').value.trim();
+    const rDate = mainCard.querySelector('#receive-date-input').value;
+    const rNotes = mainCard.querySelector('#receive-notes-input').value.trim();
+
+    if (!rDate) {
+      toast.show({ message: 'Please select a receipt date.', type: 'danger' });
+      return;
+    }
 
     isConfirming = true;
-    const confirmBtn = modalBox.querySelector('.confirm-receive-btn');
     confirmBtn.disabled = true;
-    confirmBtn.innerHTML = 'Receiving Stock...';
+    confirmBtn.innerHTML = '<span>Receiving Stock...</span>';
 
     try {
       store.receivePurchaseStock(purchase.id, receiveMap, rDate, rNotes);
       toast.show({ message: `Successfully received ${nowTotal} units into Inventory!`, type: 'success' });
-      closeModal();
-      if (onComplete) onComplete();
+      if (onNavigate) onNavigate('purchases', { action: 'view', purchaseId: purchase.id });
     } catch (err) {
       console.error('Receive stock error:', err);
       toast.show({ message: `Error receiving stock: ${err.message}`, type: 'danger' });
       isConfirming = false;
       confirmBtn.disabled = false;
-      confirmBtn.innerHTML = 'Confirm Receipt & Update Stock';
+      confirmBtn.innerHTML = '<i data-lucide="check-circle" style="width: 16px; height: 16px;"></i> <span>Confirm Receipt &amp; Update Stock</span>';
+      if (window.lucide) window.lucide.createIcons();
     }
   });
 
   if (window.lucide) window.lucide.createIcons();
+  return container;
 }
 
 // VIEW PURCHASE DETAILS MODAL
@@ -9694,8 +10368,7 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
 
   const status = purchase.status || 'Completed';
   let badgeVariant = 'secondary';
-  if (status === 'Draft') badgeVariant = 'warning';
-  else if (status === 'Approved') badgeVariant = 'info';
+  if (isPurchaseWaiting(status)) badgeVariant = 'info';
   else if (status === 'Partially Received') badgeVariant = 'warning';
   else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
 
@@ -9722,7 +10395,7 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
     <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.85rem;">
       <div class="kpi-card" style="padding: 0.85rem;">
         <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Supplier</div>
-        <div style="font-size: 1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.2rem;">${purchase.supplier}</div>
+        <div style="font-size: 1rem; font-weight: 700; color: var(--text-primary); margin-top: 0.2rem;">${escapeHtml(purchase.supplier)}</div>
       </div>
       <div class="kpi-card" style="padding: 0.85rem;">
         <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600;">Order Date</div>
@@ -9762,8 +10435,8 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
               const bPrice = item.buyingPrice || item.price || 0;
               return `
                 <tr>
-                  <td style="font-weight: 600; color: var(--text-primary);">${item.product}</td>
-                  <td><span class="badge badge-secondary">${item.size || 'Standard'}</span></td>
+                  <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(item.product)}</td>
+                  <td><span class="badge badge-secondary">${escapeHtml(item.size || 'Standard')}</span></td>
                   <td style="font-weight: 600;">${ord} units</td>
                   <td style="color: var(--text-primary);">${rec} units</td>
                   <td style="font-weight: 700; color: ${out > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)'};">${out} units</td>
@@ -9786,7 +10459,7 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.35rem;">
               <div>
                 <strong>${rh.date}</strong>: Received <strong>${rh.totalReceived} units</strong>
-                ${rh.notes ? ` — <em>${rh.notes}</em>` : ''}
+                ${rh.notes ? ` — <em>${escapeHtml(rh.notes)}</em>` : ''}
               </div>
               <span class="badge badge-success">Stock In</span>
             </div>
@@ -9797,15 +10470,8 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
 
     <!-- Modal Footer Actions -->
     <div style="display: flex; justify-content: flex-end; gap: 0.75rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-      ${status === 'Draft' ? `
-        <button type="button" class="btn btn-ghost modal-delete-btn" style="color: var(--status-danger);">Delete Draft</button>
-        <button type="button" class="btn btn-secondary modal-edit-btn">Edit Draft</button>
-        <button type="button" class="btn btn-primary modal-approve-btn">Approve Purchase</button>
-      ` : `
-        <button type="button" class="btn btn-ghost modal-delete-btn" style="color: var(--status-danger);">Delete Purchase</button>
-      `}
-
-      ${status === 'Approved' ? `
+      ${isPurchaseWaiting(status) ? `
+        <button type="button" class="btn btn-secondary modal-edit-btn">Edit Purchase</button>
         <button type="button" class="btn btn-primary modal-receive-btn">
           <i data-lucide="package-check" style="width: 16px; height: 16px;"></i> Receive Purchase Stock
         </button>
@@ -9828,21 +10494,6 @@ function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
   modalBox.querySelectorAll('.close-view-btn').forEach(b => b.addEventListener('click', closeModal));
 
   // Modal actions handlers
-  const modalApproveBtn = modalBox.querySelector('.modal-approve-btn');
-  if (modalApproveBtn) {
-    modalApproveBtn.addEventListener('click', () => {
-      const confirmed = confirm(`Approve purchase order ${purchase.id}?
-
-Stock will remain unchanged until goods are received.`);
-      if (confirmed) {
-        store.approvePurchase(purchase.id);
-        toast.show({ message: `Purchase ${purchase.id} approved!`, type: 'success' });
-        closeModal();
-        if (onRefresh) onRefresh();
-      }
-    });
-  }
-
   const modalEditBtn = modalBox.querySelector('.modal-edit-btn');
   if (modalEditBtn) {
     modalEditBtn.addEventListener('click', () => {
@@ -9853,7 +10504,7 @@ Stock will remain unchanged until goods are received.`);
 
   const modalDeleteBtn = modalBox.querySelector('.modal-delete-btn');
   if (modalDeleteBtn) {
-    modalDeleteBtn.addEventListener('click', () => {
+    modalDeleteBtn.addEventListener('click', async () => {
       const hasReceived = (purchase.totalReceived > 0) || (purchase.status === 'Received' || purchase.status === 'Partially Received' || purchase.status === 'Completed');
       let confirmMsg = `Delete purchase order ${purchase.id}?`;
       if (hasReceived) {
@@ -9861,7 +10512,7 @@ Stock will remain unchanged until goods are received.`);
       } else {
         confirmMsg = `Are you sure you want to delete purchase order ${purchase.id}?\n\nThis action cannot be undone.`;
       }
-      const confirmed = confirm(confirmMsg);
+      const confirmed = await uiConfirm({ title: 'Confirm deletion', message: confirmMsg, confirmText: 'Delete', variant: 'danger' });
       if (confirmed) {
         try {
           store.deletePurchase(purchase.id);
@@ -9879,16 +10530,14 @@ Stock will remain unchanged until goods are received.`);
   if (modalReceiveBtn) {
     modalReceiveBtn.addEventListener('click', () => {
       closeModal();
-      openReceivePurchaseModal(purchase, () => {
-        if (onRefresh) onRefresh();
-      });
+      if (onNavigate) onNavigate('purchases', { action: 'receive', purchaseId: purchase.id });
     });
   }
 
   if (window.lucide) window.lucide.createIcons();
 }
 
-// ADD PURCHASE PAGE (Manual Product Entry, Save as Draft or Save & Receive Stock)
+// ADD PURCHASE PAGE (Manual Product Entry: Waiting for Receive or Received Product)
 
 // ==========================================
 // DEDICATED PURCHASE EDIT PAGE (Separate Page)
@@ -9936,10 +10585,9 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
     return container;
   }
 
-  const status = purchase.status || 'Draft';
+  const status = purchase.status || PURCHASE_STATUS_WAITING;
   let badgeVariant = 'secondary';
-  if (status === 'Draft') badgeVariant = 'warning';
-  else if (status === 'Approved') badgeVariant = 'info';
+  if (isPurchaseWaiting(status)) badgeVariant = 'info';
   else if (status === 'Partially Received') badgeVariant = 'warning';
   else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
 
@@ -10158,20 +10806,20 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
       <span>Back to Purchases</span>
     </button>
     <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-      ${status === 'Draft' ? `
-        <button type="button" class="btn btn-primary approve-pur-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
-          <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
-          <span>Approve Purchase</span>
+      ${isPurchaseReceivable(status) ? `
+        <button type="button" class="btn btn-primary receive-pur-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+          <i data-lucide="package-check" style="width: 16px; height: 16px;"></i>
+          <span>${status === 'Partially Received' ? 'Receive Remaining Stock' : 'Receive Stock'}</span>
+        </button>
+        <button type="button" class="btn btn-primary edit-pur-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+          <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
+          <span>Edit Purchase</span>
+        </button>
+        <button type="button" class="btn btn-ghost delete-pur-bottom-btn" style="color: var(--status-danger); display: inline-flex; align-items: center; gap: 0.4rem;">
+          <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+          <span>Delete Purchase</span>
         </button>
       ` : ''}
-      <button type="button" class="btn btn-primary edit-pur-bottom-btn" style="display: inline-flex; align-items: center; gap: 0.4rem;">
-        <i data-lucide="pencil" style="width: 16px; height: 16px;"></i>
-        <span>Edit Purchase</span>
-      </button>
-      <button type="button" class="btn btn-ghost delete-pur-bottom-btn" style="color: var(--status-danger); display: inline-flex; align-items: center; gap: 0.4rem;">
-        <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
-        <span>Delete Purchase</span>
-      </button>
     </div>
   `;
 
@@ -10179,23 +10827,23 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
     if (onNavigate) onNavigate('purchases');
   });
 
-  bottomBar.querySelector('.edit-pur-bottom-btn').addEventListener('click', () => {
-    if (onNavigate) onNavigate('purchases', { action: 'edit', purchaseId: purchase.id });
-  });
-
-  const appBtn = bottomBar.querySelector('.approve-pur-btn');
-  if (appBtn) {
-    appBtn.addEventListener('click', () => {
-      const conf = confirm(`Approve purchase order ${purchase.id}?`);
-      if (conf) {
-        store.approvePurchase(purchase.id);
-        toast.show({ message: `Purchase ${purchase.id} approved!`, type: 'success' });
-        if (onNavigate) onNavigate('purchases', { action: 'view', purchaseId: purchase.id });
-      }
+  const editBottomBtn = bottomBar.querySelector('.edit-pur-bottom-btn');
+  if (editBottomBtn) {
+    editBottomBtn.addEventListener('click', () => {
+      if (onNavigate) onNavigate('purchases', { action: 'edit', purchaseId: purchase.id });
     });
   }
 
-  bottomBar.querySelector('.delete-pur-bottom-btn').addEventListener('click', () => {
+  const recvBtn = bottomBar.querySelector('.receive-pur-bottom-btn');
+  if (recvBtn) {
+    recvBtn.addEventListener('click', () => {
+      // returnTo=view so Cancel comes back to this detail page, not the list.
+      if (onNavigate) onNavigate('purchases', { action: 'receive', purchaseId: purchase.id, returnTo: 'view' });
+    });
+  }
+
+  const deleteBottomBtn = bottomBar.querySelector('.delete-pur-bottom-btn');
+  if (deleteBottomBtn) deleteBottomBtn.addEventListener('click', async () => {
     const hasReceived = (purchase.totalReceived > 0) || (status === 'Received' || status === 'Partially Received' || status === 'Completed');
     let confirmMsg = `Delete purchase order ${purchase.id}?`;
     if (hasReceived) {
@@ -10209,7 +10857,7 @@ This action cannot be undone.`;
 
 This action cannot be undone.`;
     }
-    const confirmed = confirm(confirmMsg);
+    const confirmed = await uiConfirm({ title: 'Confirm deletion', message: confirmMsg, confirmText: 'Delete', variant: 'danger' });
     if (confirmed) {
       try {
         store.deletePurchase(purchase.id);
@@ -10266,13 +10914,18 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
     return container;
   }
 
+  // A received purchase is final: stock has already moved against it, so it
+  // is view-only. An old link or a typed URL lands on the detail page.
+  if (isPurchaseReceived(purchase.status)) {
+    return renderViewPurchasePage({ ...params, purchaseId: purchase.id }, onNavigate);
+  }
+
   let hasUnsavedChanges = false;
   const markChanged = () => { hasUnsavedChanges = true; };
 
-  const status = purchase.status || 'Draft';
+  const status = purchase.status || PURCHASE_STATUS_WAITING;
   let badgeVariant = 'secondary';
-  if (status === 'Draft') badgeVariant = 'warning';
-  else if (status === 'Approved') badgeVariant = 'info';
+  if (isPurchaseWaiting(status)) badgeVariant = 'info';
   else if (status === 'Partially Received') badgeVariant = 'warning';
   else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
 
@@ -10654,9 +11307,9 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
     el.addEventListener('input', markChanged);
   });
 
-  mainCard.querySelector('#btn-edit-pur-cancel').addEventListener('click', () => {
+  mainCard.querySelector('#btn-edit-pur-cancel').addEventListener('click', async () => {
     if (hasUnsavedChanges) {
-      const leave = confirm('You have unsaved changes. Are you sure you want to discard them and return to Purchases?');
+      const leave = await uiConfirm({ title: 'Discard unsaved changes?', message: 'You have unsaved changes. Are you sure you want to discard them and return to Purchases?', confirmText: 'Discard changes', variant: 'danger' });
       if (!leave) return;
     }
     if (onNavigate) onNavigate('purchases');
@@ -10746,7 +11399,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
   headerDiv.appendChild(createBreadcrumb([
     { label: 'Purchases', target: 'purchases' },
-    { label: isEditing ? `Edit Draft (${editingPurchase ? editingPurchase.id : 'Purchase'})` : 'Add Purchase' }
+    { label: isEditing ? `Edit Purchase (${editingPurchase ? editingPurchase.id : 'Purchase'})` : 'Add Purchase' }
   ], onNavigate));
   container.appendChild(headerDiv);
 
@@ -10758,9 +11411,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     ? (editingPurchase.supplier || '')
     : '';
 
+  // Purchase date is required, so a new order defaults to today rather than
+  // leaving Save disabled with no visible reason.
+  const todayISO = new Date().toISOString().slice(0, 10);
   const dateVal = editingPurchase
     ? (editingPurchase.date || '')
-    : '';
+    : todayISO;
 
   const notesVal = editingPurchase
     ? (editingPurchase.notes || '')
@@ -10839,7 +11495,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   mainCard.innerHTML = `
     <!-- Product & Brand Auto-suggest Datalists -->
     <datalist id="pur-products-list">
-      ${productsList.map(p => `<option value="${p.name}">`).join('')}
+      ${productsList.map(p => `<option value="${escapeHtml(p.name)}">`).join('')}
     </datalist>
     <datalist id="pur-brands-list">
       ${brandsList.map(b => `<option value="${b}">`).join('')}
@@ -10921,13 +11577,13 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
       <div class="pur-sticky-actions">
         <button type="button" id="btn-cancel-pur" class="btn btn-secondary">Cancel</button>
-        <button type="button" id="btn-save-draft-pur" class="btn btn-secondary" style="font-weight: 600; border: 1px solid var(--brand-primary); color: var(--brand-primary); display: inline-flex; align-items: center; gap: 0.35rem;">
-          <i data-lucide="save" style="width: 15px; height: 15px;"></i>
-          Save as Draft
+        <button type="button" id="btn-wait-receive-pur" class="btn btn-secondary" style="font-weight: 600; border: 1px solid var(--brand-primary); color: var(--brand-primary); display: inline-flex; align-items: center; gap: 0.35rem;">
+          <i data-lucide="clock" style="width: 15px; height: 15px;"></i>
+          Waiting for Receive
         </button>
         <button type="button" id="btn-save-pur" class="btn btn-primary" style="padding: 0.65rem 1.4rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem;">
-          <i data-lucide="check-circle" style="width: 17px; height: 17px;"></i>
-          Save & Receive Stock
+          <i data-lucide="package-check" style="width: 17px; height: 17px;"></i>
+          Received Product
         </button>
       </div>
     </div>
@@ -11013,7 +11669,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
   function updateFormValidity() {
     const isValid = checkFormValidity();
-    const btnDraft = mainCard.querySelector('#btn-save-draft-pur');
+    const btnDraft = mainCard.querySelector('#btn-wait-receive-pur');
     const btnSave = mainCard.querySelector('#btn-save-pur');
     const shouldDisable = !isValid || isSubmitting;
 
@@ -11022,8 +11678,8 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       btnDraft.style.opacity = shouldDisable ? '0.5' : '1';
       btnDraft.style.cursor = shouldDisable ? 'not-allowed' : 'pointer';
       btnDraft.title = isSubmitting
-        ? 'Saving purchase draft...'
-        : (shouldDisable ? 'Fill all required fields to save draft' : 'Save purchase order as Draft');
+        ? 'Saving purchase order...'
+        : (shouldDisable ? 'Fill all required fields to save this purchase' : 'Save the purchase without moving stock yet');
     }
 
     if (btnSave) {
@@ -11193,8 +11849,8 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             </div>
             <div style="display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; min-width: 0;">
               <span class="pur-prod-badge badge badge-primary" style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;">Product #${pIdx + 1}</span>
-              <span class="pur-prod-title-preview" style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${(prod.productName && prod.productName.trim()) ? prod.productName.trim() : 'Untitled Product'}</span>
-              <span class="pur-prod-meta-preview" style="font-size: 0.775rem; color: var(--text-secondary); white-space: nowrap;">(${prod.category ? prod.category : 'No Category'}${prod.brand ? ' · ' + prod.brand : ''})</span>
+              <span class="pur-prod-title-preview" style="font-size: 0.9rem; font-weight: 600; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml((prod.productName && prod.productName.trim()) ? prod.productName.trim() : 'Untitled Product')}</span>
+              <span class="pur-prod-meta-preview" style="font-size: 0.775rem; color: var(--text-secondary); white-space: nowrap;">(${escapeHtml(prod.category ? prod.category : 'No Category')}${escapeHtml(prod.brand ? ' · ' + prod.brand : '')})</span>
             </div>
           </div>
 
@@ -11231,7 +11887,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
               <div class="pur-cat-container" style="position: relative; width: 100%;">
                 <select class="form-select pur-cat-select" style="display: ${isCustomCat ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
                   <option value="" ${!prod.category ? 'selected' : ''}>Select Category *</option>
-                  ${categoriesList.map(c => `<option value="${c}" ${(!isCustomCat && c === prod.category) ? 'selected' : ''}>${c}</option>`).join('')}
+                  ${categoriesList.map(c => `<option value="${escapeHtml(c)}" ${(!isCustomCat && c === prod.category) ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
                   <option value="__CUSTOM__">+ Custom Category...</option>
                 </select>
                 <div class="pur-cat-custom-wrapper" style="display: ${isCustomCat ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
@@ -11320,7 +11976,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
                         <div class="pur-size-container" style="position: relative; width: 100%;">
                           <select class="form-select pur-size-select" style="display: ${isCustomSize ? 'none' : 'block'}; width: 100%;">
                             <option value="" ${!sz.size ? 'selected' : ''}>Select Size *</option>
-                            ${standardSizes.map(s => `<option value="${s}" ${(!isCustomSize && s === sz.size) ? 'selected' : ''}>${s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s}</option>`).join('')}
+                            ${standardSizes.map(s => `<option value="${escapeHtml(s)}" ${(!isCustomSize && s === sz.size) ? 'selected' : ''}>${escapeHtml(s === 'Standard' ? 'Standard (No sizes)' : 'Size ' + s)}</option>`).join('')}
                             <option value="__CUSTOM__">+ Custom Size...</option>
                           </select>
                           <div class="pur-size-custom-wrapper" style="display: ${isCustomSize ? 'flex' : 'none'}; position: relative; width: 100%; align-items: center;">
@@ -11553,21 +12209,34 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         }
       });
 
-      removeProdBtn.addEventListener('click', (e) => {
+      removeProdBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
+
+        // A brand-new card always carries one blank size row, so the row's mere
+        // existence is not "entered data" — look at whether any field is filled.
+        const hasSizeData = Array.isArray(prod.sizes) && prod.sizes.some(sz =>
+          String(sz.size || '').trim() !== '' ||
+          String(sz.qty || '').trim() !== '' ||
+          String(sz.buyingPrice || '').trim() !== '' ||
+          String(sz.sellingPrice || '').trim() !== ''
+        );
 
         const hasEnteredData = Boolean(
           (prod.productName && prod.productName.trim().length > 0) ||
           (prod.brand && prod.brand.trim().length > 0) ||
           (prod.category && prod.category.trim().length > 0) ||
-          (prod.sizes && prod.sizes.length > 0)
+          hasSizeData
         );
 
         if (hasEnteredData) {
           const pNameDisplay = (prod.productName && prod.productName.trim()) ? `"${prod.productName.trim()}"` : 'this product';
-          if (!window.confirm(`Are you sure you want to remove ${pNameDisplay} and all its size entries?`)) {
-            return;
-          }
+          const okRemove = await uiConfirm({
+            title: 'Remove product',
+            message: `Are you sure you want to remove ${pNameDisplay} and all its size entries?`,
+            confirmText: 'Remove',
+            variant: 'danger'
+          });
+          if (!okRemove) return;
         }
 
         productsData.splice(pIdx, 1);
@@ -11857,8 +12526,8 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     return flattened;
   }
 
-  // 1. SAVE AS DRAFT (No Stock Change)
-  mainCard.querySelector('#btn-save-draft-pur').addEventListener('click', () => {
+  // 1. WAITING FOR RECEIVE (saved in full, no stock change, still editable)
+  mainCard.querySelector('#btn-wait-receive-pur').addEventListener('click', () => {
     if (isSubmitting) return;
 
     const validationErr = getFirstValidationError();
@@ -11887,16 +12556,16 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         items: flattenedItems
       }, editingPurchase ? editingPurchase.id : null);
 
-      toast.show({ message: `Purchase order saved as Draft! Inventory stock is unchanged.`, type: 'success' });
+      toast.show({ message: `Purchase saved and waiting for receipt. Inventory stock is unchanged.`, type: 'success' });
       if (onNavigate) onNavigate('purchases');
     } catch (err) {
       isSubmitting = false;
       updateFormValidity();
-      toast.show({ message: err.message || 'Error saving draft purchase.', type: 'danger' });
+      toast.show({ message: err.message || 'Error saving the purchase.', type: 'danger' });
     }
   });
 
-  // 2. SAVE & RECEIVE STOCK (Instant Receive)
+  // 2. RECEIVED PRODUCT (saves and takes the full quantity into stock at once)
   mainCard.querySelector('#btn-save-pur').addEventListener('click', () => {
     if (isSubmitting) return;
 
@@ -11919,23 +12588,17 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       isSubmitting = true;
       updateFormValidity();
 
-      // Save as draft first if editing or new, then receive
-      const draft = store.savePurchaseDraft({
+      // One call: saves the purchase, then takes its full ordered quantity
+      // into stock. Receiving is refused if the order was already received,
+      // so a repeated click cannot add the stock twice.
+      store.savePurchaseAndReceive({
         supplier,
         date,
         notes,
         items: flattenedItems
       }, editingPurchase ? editingPurchase.id : null);
 
-      // Auto approve and receive all
-      store.approvePurchase(draft.id);
-      const receiveMap = {};
-      (draft.items || []).forEach((item, idx) => {
-        receiveMap[idx] = item.qty;
-      });
-      store.receivePurchaseStock(draft.id, receiveMap, date, notes);
-
-      toast.show({ message: `Purchase confirmed and stock received into inventory!`, type: 'success' });
+      toast.show({ message: `Purchase received and stock added to inventory!`, type: 'success' });
       if (onNavigate) onNavigate('purchases');
     } catch (err) {
       isSubmitting = false;
@@ -12030,8 +12693,13 @@ function renderViewSalePage(params = {}, onNavigate = null) {
   });
 
   const finalTotal = sale.totalAmount !== undefined ? Number(sale.totalAmount) : (calculatedSubtotal - calculatedItemDiscount);
-  const paidAmount = sale.paidAmount !== undefined ? Number(sale.paidAmount) : (paymentStatus === 'Paid' || paymentStatus === 'Completed' ? finalTotal : 0);
-  const balanceDue = Math.max(0, finalTotal - paidAmount);
+  // The payment ledger is the single source of truth for what has been
+  // collected; fall back to the old inference only for records without one.
+  store.recalculateSalePayments(sale);
+  const paidAmount = sale.amountPaid !== undefined
+    ? Number(sale.amountPaid)
+    : (sale.paidAmount !== undefined ? Number(sale.paidAmount) : (paymentStatus === 'Paid' || paymentStatus === 'Completed' ? finalTotal : 0));
+  const balanceDue = sale.balanceDue !== undefined ? Number(sale.balanceDue) : Math.max(0, finalTotal - paidAmount);
 
   // 1. Header (Breadcrumb, Status & Action Buttons)
   const headerDiv = document.createElement('div');
@@ -12215,6 +12883,83 @@ function renderViewSalePage(params = {}, onNavigate = null) {
   `;
   container.appendChild(itemsCard);
 
+  // 4b. Payment summary and history
+  store.recalculateSalePayments(sale);
+  const payTotal = Number(sale.totalAmount || 0);
+  const payPaid = Number(sale.amountPaid || 0);
+  const payBalance = Number(sale.balanceDue || 0);
+  const payments = Array.isArray(sale.payments) ? sale.payments : [];
+  const isSettled = payBalance <= 0;
+  const payCard = document.createElement('div');
+  payCard.className = 'card';
+  payCard.style.marginTop = '1.25rem';
+  payCard.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1.15rem;">
+      <div>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+          <i data-lucide="wallet" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+          Payments
+        </h3>
+        <p style="font-size: 0.78rem; color: var(--text-secondary); margin: 0;">What was billed, what has been collected, and what is still owed.</p>
+      </div>
+      ${sale.paymentsNeedReview ? `<span class="badge badge-warning" style="font-weight: 600;">Amount not recorded</span>` : ''}
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 2rem; margin-bottom: 1.15rem;">
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Sale Total</div>
+        <div style="font-size: 1.05rem; font-weight: 700; color: var(--text-primary);">₹${payTotal.toLocaleString('en-IN')}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Amount Paid</div>
+        <div style="font-size: 1.05rem; font-weight: 700; color: var(--status-success);">₹${payPaid.toLocaleString('en-IN')}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Balance Due</div>
+        <div style="font-size: 1.05rem; font-weight: 700; color: ${isSettled ? 'var(--status-success)' : 'var(--status-warning-text)'};">₹${payBalance.toLocaleString('en-IN')}</div>
+      </div>
+    </div>
+
+    ${payments.length > 0 ? `
+      <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+        <table class="admin-table" style="font-size: 0.85rem;">
+          <thead>
+            <tr><th>Date</th><th>Method</th><th style="text-align: right;">Amount</th><th>Note</th></tr>
+          </thead>
+          <tbody>
+            ${payments.map(pm => `
+              <tr>
+                <td style="color: var(--text-secondary);">${escapeHtml(pm.date || '-')}</td>
+                <td>${createBadge({ label: pm.method || 'Cash', variant: 'secondary' }).outerHTML}</td>
+                <td style="text-align: right; font-weight: 700; color: var(--text-primary);">₹${Number(pm.amount || 0).toLocaleString('en-IN')}</td>
+                <td style="color: var(--text-secondary);">${escapeHtml(pm.note || '')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : `
+      <div style="padding: 1.25rem; text-align: center; color: var(--text-secondary); font-size: 0.875rem; border: 1px dashed var(--border-color); border-radius: var(--radius-sm);">
+        No payments recorded against this sale yet.
+      </div>
+    `}
+  `;
+
+  if (!isSettled && sale.status !== 'Cancelled' && sale.status !== 'Failed') {
+    const payActions = document.createElement('div');
+    payActions.style.cssText = 'margin-top: 1.15rem; display: flex; gap: 0.75rem;';
+    payActions.appendChild(createButton({
+      text: 'Record Payment',
+      icon: 'plus',
+      variant: 'primary',
+      size: 'sm',
+      extraClass: 'record-payment-nav-btn',
+      onClick: () => { if (onNavigate) onNavigate('sales', { action: 'payment', saleId: sale.id }); }
+    }));
+    payCard.appendChild(payActions);
+  }
+  container.appendChild(payCard);
+
   // 5. Bottom Sticky Actions Bar
   const bottomBar = document.createElement('div');
   bottomBar.className = 'card';
@@ -12244,12 +12989,12 @@ function renderViewSalePage(params = {}, onNavigate = null) {
     if (onNavigate) onNavigate('sales', { action: 'edit', saleId: sale.id });
   });
 
-  bottomBar.querySelector('.delete-sale-bottom-btn').addEventListener('click', () => {
-    const confirmed = confirm(`Are you sure you want to delete sale "${saleRef}"?
+  bottomBar.querySelector('.delete-sale-bottom-btn').addEventListener('click', async () => {
+    const confirmed = await uiConfirm({ title: 'Confirm deletion', message: `Are you sure you want to delete sale "${saleRef}"?
 
 This will restore deducted inventory quantities and recalculate customer metrics.
 
-This action cannot be undone.`);
+This action cannot be undone.`, confirmText: 'Delete', variant: 'danger' });
     if (confirmed) {
       try {
         store.deleteSale(sale.id);
@@ -12312,6 +13057,7 @@ function renderEditSalePage(params = {}, onNavigate = null) {
   const status = sale.status || 'Paid';
   let badgeVariant = 'secondary';
   if (status === 'Paid' || status === 'Completed') badgeVariant = 'success';
+  else if (status === 'Partial') badgeVariant = 'info';
   else if (status === 'Pending') badgeVariant = 'warning';
   else if (status === 'Cancelled' || status === 'Failed') badgeVariant = 'danger';
 
@@ -12685,9 +13431,9 @@ function renderEditSalePage(params = {}, onNavigate = null) {
     updateTotals();
   });
 
-  mainCard.querySelector('#btn-edit-sale-cancel').addEventListener('click', () => {
+  mainCard.querySelector('#btn-edit-sale-cancel').addEventListener('click', async () => {
     if (hasUnsavedChanges) {
-      const leave = confirm('You have unsaved changes. Are you sure you want to discard them and return to Sales?');
+      const leave = await uiConfirm({ title: 'Discard unsaved changes?', message: 'You have unsaved changes. Are you sure you want to discard them and return to Sales?', confirmText: 'Discard changes', variant: 'danger' });
       if (!leave) return;
     }
     if (onNavigate) onNavigate('sales');
@@ -12761,6 +13507,9 @@ function renderSales(params = {}, onNavigate = null) {
   if (params && params.action === 'view') {
     return renderViewSalePage(params, onNavigate);
   }
+  if (params && params.action === 'payment') {
+    return renderRecordPaymentPage(params, onNavigate);
+  }
   if (params && (params.action === 'add' || params.view === 'add')) {
     return renderAddSalePage(onNavigate);
   }
@@ -12768,7 +13517,8 @@ function renderSales(params = {}, onNavigate = null) {
   const container = document.createElement('div');
   container.className = 'page-container';
 
-  let currentFilter = 'all'; // 'all', 'paid', 'pending'
+  // Reports links here with ?filter=unpaid so the figure leads to the sales behind it.
+  let currentFilter = (params && params.filter) ? String(params.filter) : 'all'; // 'all', 'paid', 'partial', 'pending', 'unpaid'
   let searchQuery = '';
   let salesCurrentPage = 1;
   let salesPageSize = 5;
@@ -12801,7 +13551,9 @@ function renderSales(params = {}, onNavigate = null) {
       <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;" id="sales-status-filters">
         <button type="button" class="btn btn-sm sales-filter-btn" data-filter="all" style="font-weight: 600;">All Sales</button>
         <button type="button" class="btn btn-sm sales-filter-btn" data-filter="paid" style="font-weight: 600;">Paid</button>
+        <button type="button" class="btn btn-sm sales-filter-btn" data-filter="partial" style="font-weight: 600;">Partial</button>
         <button type="button" class="btn btn-sm sales-filter-btn" data-filter="pending" style="font-weight: 600;">Pending</button>
+        <button type="button" class="btn btn-sm sales-filter-btn" data-filter="unpaid" style="font-weight: 600;">Unpaid (Balance Due)</button>
       </div>
 
       <div class="search-input-wrapper" style="max-width: 280px; width: 100%;">
@@ -12844,7 +13596,10 @@ function renderSales(params = {}, onNavigate = null) {
 
       // Status Filter
       if (currentFilter === 'paid' && statusLower !== 'paid' && statusLower !== 'completed') return false;
+      if (currentFilter === 'partial' && statusLower !== 'partial') return false;
       if (currentFilter === 'pending' && statusLower !== 'pending') return false;
+      // Anything still owing money, whatever its status label.
+      if (currentFilter === 'unpaid' && !(Number(s.balanceDue || 0) > 0)) return false;
 
       // Search Query
       if (searchQuery) {
@@ -12883,6 +13638,7 @@ function renderSales(params = {}, onNavigate = null) {
       const status = s.status || 'Paid';
       let badgeVariant = 'secondary';
       if (status === 'Paid' || status === 'Completed') badgeVariant = 'success';
+      else if (status === 'Partial') badgeVariant = 'info';
       else if (status === 'Pending') badgeVariant = 'warning';
       else if (status === 'Failed' || status === 'Cancelled') badgeVariant = 'danger';
 
@@ -12891,16 +13647,28 @@ function renderSales(params = {}, onNavigate = null) {
 
       tr.innerHTML = `
         <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${startIdx + index + 1}</td>
-        <td style="font-weight: 600; color: var(--text-primary);">${saleRef}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(saleRef)}</td>
         <td>
-          <div style="font-weight: 600; color: var(--text-primary);">${custName}</div>
-          ${s.phone ? `<div style="font-size: 0.75rem; color: var(--text-secondary);">${s.phone}</div>` : ''}
+          <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(custName)}</div>
+          ${s.phone ? `<div style="font-size: 0.75rem; color: var(--text-secondary);">${escapeHtml(s.phone)}</div>` : ''}
         </td>
         <td style="color: var(--text-secondary);">${s.date || '-'}</td>
-        <td style="font-weight: 700; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
-        <td>${createBadge({ label: status, variant: badgeVariant }).outerHTML}</td>
+        <td style="font-weight: 700; color: var(--text-primary);">
+          ₹${(s.totalAmount || 0).toLocaleString()}
+          ${Number(s.balanceDue || 0) > 0 ? `<div style="font-size: 0.75rem; font-weight: 600; color: var(--status-warning-text); margin-top: 2px;">₹${Number(s.balanceDue).toLocaleString('en-IN')} due</div>` : ''}
+        </td>
+        <td>
+          ${createBadge({ label: status, variant: badgeVariant }).outerHTML}
+          ${s.paymentsNeedReview ? `<div style="font-size: 0.7rem; font-weight: 600; color: var(--status-warning-text); margin-top: 3px;" title="This sale was recorded as Partial before payment amounts were tracked. Record the amount actually paid.">Amount needs review</div>` : ''}
+        </td>
         <td style="text-align: right;">
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            ${Number(s.balanceDue || 0) > 0 && status !== 'Cancelled' && status !== 'Failed' ? `
+              <button type="button" class="btn btn-sm btn-primary table-action-btn record-payment-btn" data-sale-id="${s.id || ''}" title="Record Payment" aria-label="Record Payment">
+                <i data-lucide="wallet"></i>
+                <span class="sr-only">Record Payment</span>
+              </button>
+            ` : ''}
             <button type="button" class="btn btn-sm btn-secondary table-action-btn view-sale-btn" data-sale-id="${s.id || ''}" title="View" aria-label="View">
               <i data-lucide="eye"></i>
               <span class="sr-only">View</span>
@@ -12919,6 +13687,14 @@ function renderSales(params = {}, onNavigate = null) {
 
 
 
+      const recordPayBtn = tr.querySelector('.record-payment-btn');
+      if (recordPayBtn) {
+        recordPayBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (onNavigate) onNavigate('sales', { action: 'payment', saleId: s.id });
+        });
+      }
+
       tr.querySelector('.view-sale-btn').addEventListener('click', (e) => {
         e.stopPropagation();
         if (onNavigate) onNavigate('sales', { action: 'view', saleId: s.id });
@@ -12935,9 +13711,9 @@ function renderSales(params = {}, onNavigate = null) {
 
       const deleteSaleBtn = tr.querySelector('.delete-sale-btn');
       if (deleteSaleBtn) {
-        deleteSaleBtn.addEventListener('click', (e) => {
+        deleteSaleBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          const confirmed = confirm(`Are you sure you want to delete sale "${saleRef}"?\n\nThis will restore deducted inventory quantities and recalculate customer metrics.\n\nThis action cannot be undone.`);
+          const confirmed = await uiConfirm({ title: 'Confirm deletion', message: `Are you sure you want to delete sale "${saleRef}"?\n\nThis will restore deducted inventory quantities and recalculate customer metrics.\n\nThis action cannot be undone.`, confirmText: 'Delete', variant: 'danger' });
           if (confirmed) {
             try {
               store.deleteSale(s.id);
@@ -13159,6 +13935,11 @@ function renderAddSalePage(onNavigate = null) {
             <option value="Partial">Partial</option>
           </select>
         </div>
+        <div class="form-group" id="sale-amount-paid-group">
+          <label class="form-label" for="sale-amount-paid" style="font-weight: 500;">Amount Paid Now (₹)</label>
+          <input type="number" id="sale-amount-paid" class="form-input" min="0" step="0.01" placeholder="0.00">
+          <div id="sale-balance-hint" style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 0.3rem;">Balance due will be calculated from the final total.</div>
+        </div>
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 0.85rem; background: var(--bg-secondary); padding: 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
@@ -13191,7 +13972,7 @@ function renderAddSalePage(onNavigate = null) {
 
   const itemsContainer = mainCard.querySelector('#sale-items-container');
 
-  function updateSaleSummary() {
+  function updateSaleSummary(source) {
     let subtotal = 0;
     const prods = store.data.products || [];
 
@@ -13263,6 +14044,57 @@ function renderAddSalePage(onNavigate = null) {
     const sumFinalEl = mainCard.querySelector('#summary-final-total');
     if (sumSubtotalEl) sumSubtotalEl.textContent = `₹${subtotal.toLocaleString('en-IN')}`;
     if (sumFinalEl) sumFinalEl.textContent = `₹${finalTotal.toLocaleString('en-IN')}`;
+
+    updatePaymentFields(finalTotal, source);
+  }
+
+  /**
+   * Amount Paid is always visible and kept in step with the status dropdown.
+   *
+   * Picking a status fills the amount (Paid = the full total, Pending = 0),
+   * and typing an amount re-derives the status, so the two can never disagree
+   * and neither control is hidden behind the other.
+   */
+  function updatePaymentFields(finalTotal, source) {
+    const statusEl = mainCard.querySelector('#sale-pay-status');
+    const paidEl = mainCard.querySelector('#sale-amount-paid');
+    const hintEl = mainCard.querySelector('#sale-balance-hint');
+    if (!statusEl || !paidEl) return;
+
+    if (source === 'status') {
+      // The operator chose a status: fill the amount to match.
+      if (statusEl.value === 'Paid') paidEl.value = finalTotal > 0 ? finalTotal : '';
+      else if (statusEl.value === 'Pending') paidEl.value = '0';
+      else if (paidEl.value === '' || Number(paidEl.value) <= 0 || Number(paidEl.value) >= finalTotal) paidEl.value = '';
+    } else if (source === 'amount') {
+      // The operator typed an amount: derive the status from it.
+      const v = parseFloat(paidEl.value);
+      if (!isFinite(v) || v <= 0) statusEl.value = 'Pending';
+      else if (v + 0.005 < finalTotal) statusEl.value = 'Partial';
+      else statusEl.value = 'Paid';
+    } else if (statusEl.value === 'Paid' && (paidEl.value === '' || Number(paidEl.value) !== finalTotal)) {
+      // Totals changed while "Paid" is selected: keep the amount at the total.
+      paidEl.value = finalTotal > 0 ? finalTotal : '';
+    }
+
+    const paid = parseFloat(paidEl.value);
+    if (!hintEl) return;
+
+    if (!isFinite(paid) || paid <= 0) {
+      hintEl.textContent = finalTotal > 0
+        ? `Nothing paid yet — full ₹${finalTotal.toLocaleString('en-IN')} will be outstanding.`
+        : 'Enter how much the customer is paying now.';
+      hintEl.style.color = 'var(--text-secondary)';
+    } else if (paid - finalTotal > 0.005) {
+      hintEl.textContent = `Amount paid cannot exceed the final total of ₹${finalTotal.toLocaleString('en-IN')}.`;
+      hintEl.style.color = 'var(--status-danger)';
+    } else {
+      const bal = Math.round((finalTotal - paid) * 100) / 100;
+      hintEl.textContent = bal > 0
+        ? `Balance due: ₹${bal.toLocaleString('en-IN')} — the sale will be saved as Partial.`
+        : 'Paid in full — no balance outstanding.';
+      hintEl.style.color = bal > 0 ? 'var(--status-warning-text)' : 'var(--status-success)';
+    }
   }
 
   function renderSaleItems() {
@@ -13316,7 +14148,7 @@ function renderAddSalePage(onNavigate = null) {
       } else {
         prodOptionsHtml = searchFilteredProds.map(p => {
           const brandLabel = p.brand ? ` [${p.brand}]` : '';
-          return `<option value="${p.id}" ${p.id === prod.productId ? 'selected' : ''}>${p.name}${brandLabel}</option>`;
+          return `<option value="${p.id}" ${p.id === prod.productId ? 'selected' : ''}>${escapeHtml(p.name)}${escapeHtml(brandLabel)}</option>`;
         }).join('');
       }
 
@@ -13338,7 +14170,7 @@ function renderAddSalePage(onNavigate = null) {
           sizeOptionsHtml = (selectedProd.variants || []).map(v => {
             const isTaken = alreadyChosenInOtherRows.includes(v.size) && v.size !== sz.size;
             const priceTag = v.sellingPrice > 0 ? ` (₹${v.sellingPrice})` : '';
-            return `<option value="${v.size}" ${v.size === sz.size ? 'selected' : ''} ${isTaken ? 'disabled' : ''}>${v.size === 'Standard' ? 'Standard' : 'Size ' + v.size}${priceTag}${isTaken ? ' (Added)' : ''}</option>`;
+            return `<option value="${escapeHtml(v.size)}" ${v.size === sz.size ? 'selected' : ''} ${isTaken ? 'disabled' : ''}>${v.size === 'Standard' ? 'Standard' : 'Size ' + v.size}${priceTag}${isTaken ? ' (Added)' : ''}</option>`;
           }).join('');
         } else {
           sizeOptionsHtml = '<option value="Standard">Standard (No sizes)</option>';
@@ -13390,7 +14222,7 @@ function renderAddSalePage(onNavigate = null) {
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
             <span style="font-size: 0.775rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase; letter-spacing: 0.04em;">Product #${pIdx + 1}</span>
-            <span class="sale-prod-title-preview" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${prod.productName || 'Select Product'}</span>
+            <span class="sale-prod-title-preview" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(prod.productName || 'Select Product')}</span>
           </div>
           <div style="display: flex; align-items: center; gap: 0.6rem;">
             <span class="sale-prod-subtotal" style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); background: var(--bg-secondary); padding: 0.2rem 0.55rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
@@ -13529,7 +14361,7 @@ function renderAddSalePage(onNavigate = null) {
 
             itemEl.innerHTML = `
               <div style="display: flex; align-items: center; gap: 0.35rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                <span style="color: var(--text-primary); font-weight: ${isSelected ? '700' : '500'};">${p.name}${brandStr}</span>
+                <span style="color: var(--text-primary); font-weight: ${isSelected ? '700' : '500'};">${escapeHtml(p.name)}${escapeHtml(brandStr)}</span>
               </div>
               <div style="display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0;">
                 <span style="font-size: 0.75rem; color: var(--brand-primary); font-weight: 600;">₹${priceVal.toLocaleString('en-IN')}</span>
@@ -13591,7 +14423,7 @@ function renderAddSalePage(onNavigate = null) {
           size: (newV && newV.length > 0) ? newV[0].size : 'Standard',
           qty: 1
         }];
-        comboboxInp.value = `${p.name}${p.brand ? ' [' + p.brand + ']' : ''}`;
+        comboboxInp.value = `${escapeHtml(p.name)}${p.brand ? ' [' + p.brand + ']' : ''}`;
         if (prodSelect) {
           prodSelect.value = p.id;
         }
@@ -13800,6 +14632,8 @@ function renderAddSalePage(onNavigate = null) {
   });
 
   mainCard.querySelector('#sale-discount-input').addEventListener('input', updateSaleSummary);
+  mainCard.querySelector('#sale-pay-status').addEventListener('change', () => updateSaleSummary('status'));
+  mainCard.querySelector('#sale-amount-paid').addEventListener('input', () => updateSaleSummary('amount'));
 
   mainCard.querySelector('#btn-cancel-sale').addEventListener('click', () => {
     if (onNavigate) onNavigate('sales');
@@ -13811,9 +14645,20 @@ function renderAddSalePage(onNavigate = null) {
     const payMethod = mainCard.querySelector('#sale-pay-method').value;
     const payStatus = mainCard.querySelector('#sale-pay-status').value;
     const discount = parseFloat(mainCard.querySelector('#sale-discount-input').value) || 0;
+    const amountPaidRaw = mainCard.querySelector('#sale-amount-paid').value;
+    const amountPaid = parseFloat(amountPaidRaw);
 
     if (!custName) {
       toast.show({ message: 'Customer Name is required.', type: 'danger' });
+      return;
+    }
+
+    if (payStatus === 'Partial' && (!isFinite(amountPaid) || amountPaid <= 0)) {
+      toast.show({ message: 'Enter the amount the customer paid, or set the status to Pending.', type: 'danger' });
+      return;
+    }
+    if (isFinite(amountPaid) && amountPaid < 0) {
+      toast.show({ message: 'Amount paid cannot be negative.', type: 'danger' });
       return;
     }
 
@@ -13896,6 +14741,7 @@ function renderAddSalePage(onNavigate = null) {
         customerPhone: custPhone,
         paymentMethod: payMethod,
         paymentStatus: payStatus,
+        amountPaid: payStatus === 'Partial' ? amountPaid : undefined,
         discount: discount,
         items: itemsPayload
       });
@@ -13943,11 +14789,11 @@ function openCustomerDetailsModal(customer, onNavigate = null) {
     <div style="background: var(--bg-secondary); padding: 1rem 1.25rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; font-size: 0.85rem;">
       <div>
         <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Customer Name</div>
-        <div style="font-weight: 700; color: var(--text-primary); margin-top: 0.2rem; font-size: 1rem;">${customer.name}</div>
+        <div style="font-weight: 700; color: var(--text-primary); margin-top: 0.2rem; font-size: 1rem;">${escapeHtml(customer.name)}</div>
       </div>
       <div>
         <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Phone Number</div>
-        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.2rem;">${customer.phone || 'Not Provided'}</div>
+        <div style="font-weight: 600; color: var(--text-primary); margin-top: 0.2rem;">${escapeHtml(customer.phone || 'Not Provided')}</div>
       </div>
       <div>
         <div style="font-size: 0.725rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Orders</div>
@@ -13982,7 +14828,7 @@ function openCustomerDetailsModal(customer, onNavigate = null) {
             ` : customerSales.map((s, idx) => `
               <tr>
                 <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${idx + 1}</td>
-                <td style="font-weight: 600; color: var(--text-primary);">${s.id || s.reference || 'SAL-' + (idx+1)}</td>
+                <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(s.id || s.reference || 'SAL-' + (idx+1))}</td>
                 <td style="color: var(--text-secondary);">${s.date || '-'}</td>
                 <td style="font-weight: 700; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
                 <td>${createBadge({ label: s.status || 'Paid', variant: s.status === 'Paid' ? 'success' : 'warning' }).outerHTML}</td>
@@ -14009,7 +14855,7 @@ function openCustomerDetailsModal(customer, onNavigate = null) {
   });
 
   const modalObj = createModal({
-    title: `Customer Profile — ${customer.name}`,
+    title: `Customer Profile — ${escapeHtml(customer.name)}`,
     bodyElement: modalEl,
     footerButtons: [closeBtn]
   });
@@ -14078,8 +14924,8 @@ function openEditCustomerModal(customer, onSaved = null) {
 
   const deleteModalCustBtn = modal.querySelector('.delete-modal-cust-btn');
   if (deleteModalCustBtn) {
-    deleteModalCustBtn.onclick = () => {
-      const confirmed = confirm(`Are you sure you want to delete customer "${customer.name}" (${customer.id})?\n\nTheir past sales records will be preserved for store reporting.\n\nThis action cannot be undone.`);
+    deleteModalCustBtn.onclick = async () => {
+      const confirmed = await uiConfirm({ title: 'Confirm deletion', message: `Are you sure you want to delete customer "${customer.name}" (${customer.id})?\n\nTheir past sales records will be preserved for store reporting.\n\nThis action cannot be undone.`, confirmText: 'Delete', variant: 'danger' });
       if (confirmed) {
         try {
           store.deleteCustomer(customer.id);
@@ -14172,16 +15018,15 @@ function renderViewCustomerPage(params = {}, onNavigate = null) {
     return container;
   }
 
-  // Find customer sales
-  const customerSales = (store.data.sales || []).filter(s => {
-    const isIdMatch = s.customerId && customer.id && s.customerId === customer.id;
-    const isNameMatch = (s.customer || s.customerName || '').toLowerCase() === (customer.name || '').toLowerCase();
-    const isPhoneMatch = customer.phone && customer.phone !== '-' && s.phone === customer.phone;
-    return isIdMatch || isNameMatch || isPhoneMatch;
-  });
+  // Billed vs collected, from the same store method the customers table uses,
+  // so this page and the list can never show different totals.
+  const summary = store.getCustomerPaymentSummary(customer);
+  const customerSales = summary.sales;
 
-  const totalOrders = customer.ordersCount !== undefined ? customer.ordersCount : customerSales.length;
-  const totalSpend = customer.totalSpend !== undefined ? customer.totalSpend : customerSales.reduce((s, x) => s + (Number(x.totalAmount) || 0), 0);
+  const totalOrders = summary.orders;
+  const totalSpend = summary.totalPurchases;
+  const totalPaid = summary.totalPaid;
+  const outstanding = summary.outstanding;
   const avgOrderValue = totalOrders > 0 ? Math.round(totalSpend / totalOrders) : 0;
 
   // 1. Header (Breadcrumb & Action Buttons)
@@ -14227,8 +15072,16 @@ function renderViewCustomerPage(params = {}, onNavigate = null) {
   kpiGrid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;';
   kpiGrid.innerHTML = `
     <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
-      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Lifetime Spend</div>
-      <div style="font-size: 1.2rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">₹${totalSpend.toLocaleString()}</div>
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Purchases</div>
+      <div id="cust-kpi-purchases" style="font-size: 1.2rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">₹${totalSpend.toLocaleString('en-IN')}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Amount Paid</div>
+      <div id="cust-kpi-paid" style="font-size: 1.2rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;">₹${totalPaid.toLocaleString('en-IN')}</div>
+    </div>
+    <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+      <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Outstanding Due</div>
+      <div id="cust-kpi-outstanding" style="font-size: 1.2rem; font-weight: 700; margin-top: 0.25rem; color: ${outstanding > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">₹${outstanding.toLocaleString('en-IN')}</div>
     </div>
     <div class="kpi-card" style="padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
       <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Orders Completed</div>
@@ -14294,28 +15147,39 @@ function renderViewCustomerPage(params = {}, onNavigate = null) {
       <table class="admin-table" style="font-size: 0.85rem;">
         <thead>
           <tr>
-            <th style="width: 6%; text-align: center;">S.No</th>
-            <th style="width: 20%;">Sale Reference</th>
-            <th style="width: 16%;">Date</th>
-            <th style="width: 16%; text-align: center;">Units</th>
-            <th style="width: 18%;">Total Amount</th>
-            <th style="width: 14%;">Payment Status</th>
-            <th style="width: 10%; text-align: right;">Action</th>
+            <th style="width: 5%; text-align: center;">S.No</th>
+            <th style="width: 16%;">Sale Reference</th>
+            <th style="width: 13%;">Date</th>
+            <th style="width: 9%; text-align: center;">Units</th>
+            <th style="width: 13%; text-align: right;">Total Amount</th>
+            <th style="width: 13%; text-align: right;">Amount Paid</th>
+            <th style="width: 13%; text-align: right;">Outstanding Due</th>
+            <th style="width: 11%;">Payment Status</th>
+            <th style="width: 7%; text-align: right;">Action</th>
           </tr>
         </thead>
         <tbody>
           ${customerSales.length === 0 ? `
-            <tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No purchases on record for this customer.</td></tr>
-          ` : customerSales.map((s, idx) => {
+            <tr><td colspan="9" style="text-align: center; color: var(--text-secondary); padding: 2rem;">No purchases on record for this customer.</td></tr>
+          ` : customerSales.map((row, idx) => {
+            const s = row.sale;
             const sUnits = (s.items || []).reduce((sum, item) => sum + (Number(item.qty || item.quantity || 1) || 0), 0);
+            // Colour follows the ledger, not the label: anything still owing
+            // reads as outstanding even if the sale is labelled otherwise.
+            const payVariant = row.balanceDue <= 0 ? 'success' : (row.amountPaid > 0 ? 'warning' : 'danger');
             return `
               <tr>
                 <td style="text-align: center; color: var(--text-secondary); font-weight: 600;">${idx + 1}</td>
-                <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(s.id || s.reference || 'SAL')}</td>
-                <td style="color: var(--text-secondary);">${escapeHtml(s.date || '—')}</td>
+                <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(row.reference)}</td>
+                <td style="color: var(--text-secondary);">${escapeHtml(row.date || '—')}</td>
                 <td style="text-align: center; font-weight: 600;">${sUnits} units</td>
-                <td style="font-weight: 700; color: var(--brand-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
-                <td>${createBadge({ label: s.status || 'Paid', variant: (s.status === 'Paid' || s.status === 'Completed') ? 'success' : 'warning' }).outerHTML}</td>
+                <td style="font-weight: 700; color: var(--brand-primary); text-align: right;">₹${row.totalAmount.toLocaleString('en-IN')}</td>
+                <td style="font-weight: 600; color: var(--status-success); text-align: right;">₹${row.amountPaid.toLocaleString('en-IN')}</td>
+                <td style="font-weight: 700; text-align: right; color: ${row.balanceDue > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">₹${row.balanceDue.toLocaleString('en-IN')}</td>
+                <td>
+                  ${createBadge({ label: row.status, variant: payVariant }).outerHTML}
+                  ${row.needsReview ? `<div style="font-size: 0.7rem; color: var(--status-warning-text); font-weight: 600; margin-top: 2px;">Amount needs review</div>` : ''}
+                </td>
                 <td style="text-align: right;">
                   <button type="button" class="btn btn-sm btn-secondary table-action-btn view-rel-sale-btn" data-sale-id="${s.id}" title="View Sale" aria-label="View Sale">
                     <i data-lucide="eye"></i>
@@ -14326,6 +15190,15 @@ function renderViewCustomerPage(params = {}, onNavigate = null) {
             `;
           }).join('')}
         </tbody>
+        <tfoot>
+          <tr style="background: var(--bg-surface); font-weight: 700;">
+            <td colspan="4" style="text-align: right; color: var(--text-secondary);">Totals</td>
+            <td style="text-align: right; color: var(--brand-primary);">₹${totalSpend.toLocaleString('en-IN')}</td>
+            <td style="text-align: right; color: var(--status-success);">₹${totalPaid.toLocaleString('en-IN')}</td>
+            <td style="text-align: right; color: ${outstanding > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">₹${outstanding.toLocaleString('en-IN')}</td>
+            <td colspan="2"></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   `;
@@ -14369,12 +15242,12 @@ function renderViewCustomerPage(params = {}, onNavigate = null) {
     if (onNavigate) onNavigate('customers', { action: 'edit', customerId: customer.id });
   });
 
-  bottomBar.querySelector('.delete-cust-bottom-btn').addEventListener('click', () => {
-    const confirmed = confirm(`Are you sure you want to delete customer "${customer.name}" (${customer.id})?
+  bottomBar.querySelector('.delete-cust-bottom-btn').addEventListener('click', async () => {
+    const confirmed = await uiConfirm({ title: 'Confirm deletion', message: `Are you sure you want to delete customer "${customer.name}" (${customer.id})?
 
 Their past sales records will be preserved for store reporting.
 
-This action cannot be undone.`);
+This action cannot be undone.`, confirmText: 'Delete', variant: 'danger' });
     if (confirmed) {
       try {
         store.deleteCustomer(customer.id);
@@ -14439,7 +15312,7 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
   headerDiv.appendChild(createBreadcrumb([
     { label: 'Customers', target: 'customers' },
-    { label: `Edit Customer (${customer.name})` }
+    { label: `Edit Customer (${escapeHtml(customer.name)})` }
   ], onNavigate));
   container.appendChild(headerDiv);
 
@@ -14449,7 +15322,7 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
   kpiCard.innerHTML = `
     <div class="card" style="padding: 1rem 1.25rem;">
       <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Customer ID</div>
-      <div style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem; font-family: monospace;">${customer.id}</div>
+      <div style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-top: 0.25rem; font-family: monospace;">${escapeHtml(customer.id)}</div>
     </div>
     <div class="card" style="padding: 1rem 1.25rem;">
       <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Total Orders</div>
@@ -14458,10 +15331,13 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
     <div class="card" style="padding: 1rem 1.25rem;">
       <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Lifetime Spend</div>
       <div style="font-size: 1.15rem; font-weight: 700; color: var(--brand-primary); margin-top: 0.25rem;">₹${(customer.totalSpend || 0).toLocaleString()}</div>
+      <div style="font-size: 0.775rem; font-weight: 600; margin-top: 0.2rem; color: ${Number(customer.outstanding || 0) > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)'};">
+        ${Number(customer.outstanding || 0) > 0 ? `₹${Number(customer.outstanding).toLocaleString('en-IN')} outstanding` : 'No dues outstanding'}
+      </div>
     </div>
     <div class="card" style="padding: 1rem 1.25rem;">
       <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Last Purchase</div>
-      <div style="font-size: 1.15rem; font-weight: 600; color: var(--text-secondary); margin-top: 0.25rem;">${customer.lastPurchase || '—'}</div>
+      <div style="font-size: 1.15rem; font-weight: 600; color: var(--text-secondary); margin-top: 0.25rem;">${escapeHtml(customer.lastPurchase || '—')}</div>
     </div>
   `;
   container.appendChild(kpiCard);
@@ -14532,9 +15408,9 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
     el.addEventListener('input', markChanged);
   });
 
-  mainCard.querySelector('#btn-cust-cancel').addEventListener('click', () => {
+  mainCard.querySelector('#btn-cust-cancel').addEventListener('click', async () => {
     if (hasUnsavedChanges) {
-      const leave = confirm('You have unsaved changes. Are you sure you want to discard them and return to Customers?');
+      const leave = await uiConfirm({ title: 'Discard unsaved changes?', message: 'You have unsaved changes. Are you sure you want to discard them and return to Customers?', confirmText: 'Discard changes', variant: 'danger' });
       if (!leave) return;
     }
     if (onNavigate) onNavigate('customers');
@@ -14648,12 +15524,14 @@ function renderCustomers(params = {}, onNavigate = null) {
       <table class="admin-table" style="font-size: 0.875rem;">
         <thead>
           <tr>
-            <th style="width: 6%; text-align: center;">S.No</th>
-            <th style="width: 26%;">Customer Name</th>
-            <th style="width: 20%;">Phone Number</th>
-            <th style="width: 16%;">Total Purchases</th>
-            <th style="width: 18%;">Total Amount Spent</th>
-            <th style="width: 14%; text-align: right;">Actions</th>
+            <th style="width: 5%; text-align: center;">S.No</th>
+            <th style="width: 19%;">Customer Name</th>
+            <th style="width: 14%;">Phone Number</th>
+            <th style="width: 9%; text-align: center;">Orders</th>
+            <th style="width: 15%; text-align: right;">Total Purchases</th>
+            <th style="width: 15%; text-align: right;">Total Paid</th>
+            <th style="width: 14%; text-align: right;">Outstanding Due</th>
+            <th style="width: 9%; text-align: right;">Actions</th>
           </tr>
         </thead>
         <tbody id="cust-table-tbody"></tbody>
@@ -14701,7 +15579,7 @@ function renderCustomers(params = {}, onNavigate = null) {
     if (countLabel) countLabel.textContent = filtered.length;
 
     if (filtered.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No customers found matching search.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary); padding: 2.5rem 1rem;">No customers found matching search.</td></tr>`;
       if (paginationInfo) paginationInfo.textContent = 'Showing 0 of 0 customers';
       if (paginationNav) paginationNav.innerHTML = '';
       if (paginationContainer) paginationContainer.style.display = 'none';
@@ -14724,15 +15602,21 @@ function renderCustomers(params = {}, onNavigate = null) {
 
     pageCustomers.forEach((c, index) => {
       const globalIndex = startIdx + index + 1;
+      // Same source of truth as the customer view page, so the two agree.
+      const summary = store.getCustomerPaymentSummary(c);
       const tr = document.createElement('tr');
       tr.style.cssText = 'transition: background-color 0.15s ease;';
 
       tr.innerHTML = `
         <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${globalIndex}</td>
-        <td style="font-weight: 600; color: var(--text-primary);">${c.name}</td>
-        <td style="color: var(--text-secondary);">${c.phone || '-'}</td>
-        <td style="font-weight: 600; color: var(--text-primary);">${c.ordersCount || 0} purchases</td>
-        <td style="font-weight: 700; color: var(--brand-primary);">₹${(c.totalSpend || 0).toLocaleString()}</td>
+        <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(c.name)}</td>
+        <td style="color: var(--text-secondary);">${escapeHtml(c.phone || '-')}</td>
+        <td style="font-weight: 600; color: var(--text-primary); text-align: center;">${summary.orders}</td>
+        <td style="font-weight: 700; color: var(--brand-primary); text-align: right;">₹${summary.totalPurchases.toLocaleString('en-IN')}</td>
+        <td style="font-weight: 600; color: var(--status-success); text-align: right;">₹${summary.totalPaid.toLocaleString('en-IN')}</td>
+        <td style="font-weight: 700; text-align: right; color: ${summary.outstanding > 0 ? 'var(--status-danger)' : 'var(--text-secondary)'};">
+          ₹${summary.outstanding.toLocaleString('en-IN')}
+        </td>
         <td style="text-align: right;">
           <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
             <button type="button" class="btn btn-sm btn-secondary table-action-btn view-cust-btn" title="View" aria-label="View">
@@ -14766,9 +15650,9 @@ function renderCustomers(params = {}, onNavigate = null) {
 
       const deleteCustBtn = tr.querySelector('.delete-cust-btn');
       if (deleteCustBtn) {
-        deleteCustBtn.addEventListener('click', (e) => {
+        deleteCustBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          const confirmed = confirm(`Are you sure you want to delete customer "${c.name}" (${c.id})?\n\nTheir past sales records will be preserved for store reporting.\n\nThis action cannot be undone.`);
+          const confirmed = await uiConfirm({ title: 'Confirm deletion', message: `Are you sure you want to delete customer "${c.name}" (${c.id})?\n\nTheir past sales records will be preserved for store reporting.\n\nThis action cannot be undone.`, confirmText: 'Delete', variant: 'danger' });
           if (confirmed) {
             try {
               store.deleteCustomer(c.id);
@@ -14958,6 +15842,35 @@ function renderReports(onNavigate = null) {
   }));
   container.appendChild(profitGrid);
 
+  // Cash position: revenue is what was billed, collected is what actually came in.
+  const payTotals = store.getPaymentTotals();
+  const cashGrid = document.createElement('div');
+  cashGrid.className = 'kpi-grid';
+  cashGrid.style.marginTop = '1.25rem';
+  cashGrid.appendChild(createMetricCard({
+    label: 'Cash Collected',
+    value: `₹${payTotals.collected.toLocaleString('en-IN')}`,
+    subtext: `<span style="color: var(--text-secondary);">Payments actually received</span>`,
+    icon: 'wallet',
+    variant: 'success'
+  }));
+  cashGrid.appendChild(createMetricCard({
+    label: 'Outstanding Receivables',
+    value: `₹${payTotals.outstanding.toLocaleString('en-IN')}`,
+    subtext: `<span style="color: var(--text-secondary);">${payTotals.unpaidCount} sale${payTotals.unpaidCount === 1 ? '' : 's'} awaiting payment${payTotals.unpaidCount > 0 ? ' — click to collect' : ''}</span>`,
+    icon: 'hourglass',
+    variant: payTotals.outstanding > 0 ? 'warning' : 'default',
+    // Route straight from the figure to the sales that make it up.
+    onClick: payTotals.unpaidCount > 0 && onNavigate ? () => onNavigate('sales', { filter: 'unpaid' }) : null
+  }));
+  cashGrid.appendChild(createMetricCard({
+    label: 'Collection Rate',
+    value: `${payTotals.revenue > 0 ? Math.round((payTotals.collected / payTotals.revenue) * 1000) / 10 : 100}%`,
+    subtext: `<span style="color: var(--text-secondary);">of ₹${payTotals.revenue.toLocaleString('en-IN')} billed</span>`,
+    icon: 'percent'
+  }));
+  container.appendChild(cashGrid);
+
   // Cross-Module Data Reconciliation Card
   const reconCard = document.createElement('div');
   reconCard.className = 'card';
@@ -15027,6 +15940,458 @@ function renderReports(onNavigate = null) {
   return container;
 }
 
+// ==========================================
+// RECORD PAYMENT PAGE (Separate Page)
+// ==========================================
+function renderRecordPaymentPage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+
+  const container = document.createElement('div');
+  container.className = 'page-container';
+
+  const saleId = params.saleId || params.id;
+  const sale = (store.data.sales || []).find(s => s.id === saleId || s.reference === saleId);
+  const goBack = () => { if (onNavigate) onNavigate('sales', { action: 'view', saleId }); };
+
+  if (!sale) {
+    const errorCard = document.createElement('div');
+    errorCard.className = 'card';
+    errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
+    errorCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+        <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Sale Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">The sale "<strong>${escapeHtml(saleId || 'unknown')}</strong>" could not be located.</p>
+      </div>
+    `;
+    const back = createButton({ text: 'Back to Sales', icon: 'arrow-left', variant: 'secondary', onClick: () => { if (onNavigate) onNavigate('sales'); } });
+    errorCard.appendChild(back);
+    container.appendChild(errorCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  store.recalculateSalePayments(sale);
+
+  const total = Number(sale.totalAmount || 0);
+  const paid = Number(sale.amountPaid || 0);
+  const balance = Number(sale.balanceDue || 0);
+
+  // Header
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+  const crumbWrap = document.createElement('div');
+  crumbWrap.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;';
+  crumbWrap.appendChild(createBreadcrumb([
+    { label: 'Sales', target: 'sales' },
+    { label: `Record Payment (${sale.id})` }
+  ], onNavigate));
+  crumbWrap.appendChild(createBadge({
+    label: sale.status || 'Pending',
+    variant: (sale.status === 'Paid' || sale.status === 'Completed') ? 'success' : (sale.status === 'Partial' ? 'info' : 'warning')
+  }));
+  headerDiv.appendChild(crumbWrap);
+  const btnBack = document.createElement('button');
+  btnBack.type = 'button';
+  btnBack.className = 'btn btn-secondary btn-sm back-to-sale-btn';
+  btnBack.innerHTML = `<i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i> <span>Back</span>`;
+  btnBack.addEventListener('click', goBack);
+  headerDiv.appendChild(btnBack);
+  container.appendChild(headerDiv);
+
+  // Settled state
+  if (balance <= 0) {
+    const doneCard = document.createElement('div');
+    doneCard.className = 'card';
+    doneCard.style.cssText = 'text-align: center; padding: 3rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1rem;';
+    doneCard.innerHTML = `
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(34,197,94,0.12); display: flex; align-items: center; justify-content: center; color: var(--status-success);">
+        <i data-lucide="check-circle" style="width: 28px; height: 28px;"></i>
+      </div>
+      <div>
+        <h2 style="font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin: 0 0 0.5rem 0;">Nothing left to collect</h2>
+        <p style="color: var(--text-secondary); margin: 0; font-size: 0.9rem;">Sale ${escapeHtml(sale.id)} is fully settled at ₹${total.toLocaleString('en-IN')}.</p>
+      </div>
+    `;
+    doneCard.appendChild(createButton({ text: 'Back to Sale', icon: 'arrow-left', variant: 'secondary', onClick: goBack }));
+    container.appendChild(doneCard);
+    if (window.lucide) window.lucide.createIcons();
+    return container;
+  }
+
+  // Money summary
+  const sumCard = document.createElement('div');
+  sumCard.className = 'card';
+  sumCard.style.cssText = 'margin-bottom: 1.25rem; padding: 1.15rem 1.35rem;';
+  sumCard.innerHTML = `
+    <div style="display: flex; flex-wrap: wrap; gap: 2rem;">
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Customer</div>
+        <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary);">${escapeHtml(sale.customer || sale.customerName || 'Walk-in Customer')}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Sale Total</div>
+        <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-primary);">₹${total.toLocaleString('en-IN')}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Already Paid</div>
+        <div style="font-size: 0.95rem; font-weight: 700; color: var(--status-success);">₹${paid.toLocaleString('en-IN')}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Outstanding</div>
+        <div id="pay-outstanding" style="font-size: 0.95rem; font-weight: 700; color: var(--status-warning-text);">₹${balance.toLocaleString('en-IN')}</div>
+      </div>
+    </div>
+  `;
+  container.appendChild(sumCard);
+
+  // Payment form
+  const formCard = document.createElement('div');
+  formCard.className = 'card';
+  formCard.innerHTML = `
+    <div style="padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1.25rem;">
+      <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+        <i data-lucide="wallet" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        Record a Payment
+      </h3>
+      <p style="font-size: 0.78rem; color: var(--text-secondary); margin: 0;">Recording a payment updates the balance only. Stock is never affected.</p>
+    </div>
+
+    <form id="record-payment-form" novalidate style="display: flex; flex-direction: column; gap: 1.25rem; max-width: 720px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+        <div class="form-group">
+          <label class="form-label" for="payment-amount-input" style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">Amount (₹) *</label>
+          <input type="number" class="form-input" id="payment-amount-input" min="0" step="0.01" value="${balance}" data-max="${balance}">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="payment-method-select" style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">Payment Method</label>
+          <select class="form-select" id="payment-method-select">
+            <option value="Cash">Cash</option>
+            <option value="UPI">UPI</option>
+            <option value="Card">Card</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="payment-date-input" style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">Payment Date</label>
+          <input type="date" class="form-input" id="payment-date-input" value="${new Date().toISOString().split('T')[0]}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="payment-note-input" style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">Note</label>
+        <input type="text" class="form-input" id="payment-note-input" placeholder="e.g. second instalment, collected in store">
+      </div>
+
+      <div id="payment-preview" style="font-size: 0.85rem; color: var(--text-secondary);"></div>
+
+      <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+        <button type="submit" class="btn btn-primary record-payment-btn" style="padding: 0.55rem 1.35rem; font-weight: 600;">Record Payment</button>
+        <button type="button" class="btn btn-secondary cancel-payment-btn">Cancel</button>
+        <span id="payment-error" style="display: none; font-size: 0.8rem; color: var(--status-danger); font-weight: 500;"></span>
+      </div>
+    </form>
+  `;
+  container.appendChild(formCard);
+
+  const amountEl = formCard.querySelector('#payment-amount-input');
+  const previewEl = formCard.querySelector('#payment-preview');
+  const errEl = formCard.querySelector('#payment-error');
+
+  const updatePreview = () => {
+    const amt = parseFloat(amountEl.value);
+    if (!isFinite(amt) || amt <= 0) {
+      previewEl.textContent = 'Enter an amount to see the remaining balance.';
+      previewEl.style.color = 'var(--text-secondary)';
+      return;
+    }
+    if (amt - balance > 0.005) {
+      previewEl.textContent = `That is more than the ₹${balance.toLocaleString('en-IN')} outstanding.`;
+      previewEl.style.color = 'var(--status-danger)';
+      return;
+    }
+    const left = Math.round((balance - amt) * 100) / 100;
+    previewEl.textContent = left <= 0
+      ? 'This payment settles the sale in full — status becomes Paid.'
+      : `Remaining after this payment: ₹${left.toLocaleString('en-IN')} — status stays Partial.`;
+    previewEl.style.color = left <= 0 ? 'var(--status-success)' : 'var(--status-warning-text)';
+  };
+  amountEl.addEventListener('input', updatePreview);
+  updatePreview();
+
+  formCard.querySelector('.cancel-payment-btn').addEventListener('click', goBack);
+
+  formCard.querySelector('#record-payment-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    errEl.style.display = 'none';
+    errEl.textContent = '';
+    try {
+      store.recordSalePayment(sale.id, {
+        amount: parseFloat(amountEl.value),
+        method: formCard.querySelector('#payment-method-select').value,
+        date: formCard.querySelector('#payment-date-input').value,
+        note: formCard.querySelector('#payment-note-input').value
+      });
+      toast.show({ message: 'Payment recorded.', type: 'success' });
+      if (onNavigate) onNavigate('sales', { action: 'view', saleId: sale.id });
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'inline';
+      toast.show({ message: err.message, type: 'danger' });
+    }
+  });
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
+// ==========================================
+// EDIT PROFILE PAGE (opened from the topbar profile)
+// ------------------------------------------
+// Section-card layout over the SAME storeInfo fields and the SAME
+// store.updateStoreInfo() validation. No new fields, no new palette.
+// The app has no authentication, password or avatar-upload support, so
+// there is deliberately no Security section and no photo upload here.
+// ==========================================
+function renderProfilePage(params = {}, onNavigate = null) {
+  if (typeof params === 'function') {
+    onNavigate = params;
+    params = {};
+  }
+
+  const container = document.createElement('div');
+  container.className = 'page-container profile-page';
+  // Centred reading column on wide screens; full width once it no longer fits.
+  container.style.cssText = 'max-width: 960px; margin: 0 auto; width: 100%;';
+
+  const info = store.getStoreInfo();
+  const initialsOf = (name) => (name || 'S')
+    .split(/\s+/).filter(Boolean).slice(0, 2)
+    .map(w => w[0].toUpperCase()).join('') || 'S';
+
+  let hasUnsavedChanges = false;
+  let isSubmitting = false;
+  const markChanged = () => { hasUnsavedChanges = true; };
+
+  const leavePage = async (target) => {
+    if (hasUnsavedChanges) {
+      const leave = await uiConfirm({
+        title: 'Discard unsaved changes?',
+        message: 'You have unsaved changes to your profile. Are you sure you want to discard them?',
+        confirmText: 'Discard changes',
+        cancelText: 'Keep editing',
+        variant: 'danger'
+      });
+      if (!leave) return;
+    }
+    if (onNavigate) onNavigate(target || 'overview');
+  };
+
+  // ---------------------------------------------- 1. Page header
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+
+  const headerText = document.createElement('div');
+  headerText.style.cssText = 'min-width: 0;';
+  headerText.appendChild(createBreadcrumb([
+    { label: 'Profile', target: 'profile' },
+    { label: 'Edit Profile' }
+  ], onNavigate));
+  const headerDesc = document.createElement('p');
+  headerDesc.style.cssText = 'font-size: 0.85rem; color: var(--text-secondary); margin: 0.4rem 0 0 0; max-width: 60ch;';
+  headerDesc.textContent = 'Update your account information. These details appear in the admin header and sidebar.';
+  headerText.appendChild(headerDesc);
+  headerDiv.appendChild(headerText);
+
+  const btnBack = document.createElement('button');
+  btnBack.type = 'button';
+  btnBack.className = 'btn btn-secondary btn-sm profile-back-btn';
+  btnBack.innerHTML = `<i data-lucide="arrow-left" style="width: 14px; height: 14px;"></i> <span>Back</span>`;
+  btnBack.addEventListener('click', () => leavePage('overview'));
+  headerDiv.appendChild(btnBack);
+  container.appendChild(headerDiv);
+
+  // ---------------------------------------------- 2. Profile summary
+  const idCard = document.createElement('div');
+  idCard.className = 'card profile-summary-card';
+  idCard.style.cssText = 'margin-bottom: 1.25rem; padding: 1.35rem 1.5rem;';
+  idCard.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap;">
+      <div id="profile-avatar" aria-hidden="true" style="width: 64px; height: 64px; border-radius: 50%; background-color: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.4rem; letter-spacing: 0.02em; flex-shrink: 0;">
+        ${escapeHtml(initialsOf(info.ownerName))}
+      </div>
+      <div style="min-width: 0; display: flex; flex-direction: column; gap: 0.2rem;">
+        <div id="profile-display-name" style="font-size: 1.25rem; font-weight: 700; color: var(--text-primary); line-height: 1.25;">${escapeHtml(info.ownerName || 'Store Owner')}</div>
+        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+          <span id="profile-display-role" class="badge badge-secondary" style="font-weight: 600;">${escapeHtml(info.ownerRole || 'Store Owner')}</span>
+        </div>
+        <div id="profile-display-store" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.15rem;">
+          ${escapeHtml(info.name || '')}${info.branch ? ' — ' + escapeHtml(info.branch) : ''}
+        </div>
+      </div>
+    </div>
+  `;
+  container.appendChild(idCard);
+
+  // ---------------------------------------------- 3. The form
+  const form = document.createElement('form');
+  form.id = 'profile-details-form';
+  form.noValidate = true;
+  form.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+
+  // One field definition drives markup, population and error placement.
+  // The form is noValidate, so `required` is advisory for assistive tech only —
+  // the app's own validation still decides what is allowed to save.
+  const field = ({ id, label, value, placeholder, required, type = 'text', help }) => `
+    <div class="form-group">
+      <label class="form-label" for="${id}">${escapeHtml(label)}${required ? ' <span aria-hidden="true" style="color: var(--status-danger);">*</span>' : ''}</label>
+      <input type="${type}" class="form-input" id="${id}" value="${escapeHtml(value || '')}" placeholder="${escapeHtml(placeholder || '')}" autocomplete="off" aria-describedby="${id}-error"${required ? ' required aria-required="true"' : ''}>
+      ${help ? `<div style="font-size: 0.75rem; color: var(--text-secondary);">${escapeHtml(help)}</div>` : ''}
+      <div class="field-error" id="${id}-error" data-error-for="${id}" role="alert" style="display: none; font-size: 0.75rem; font-weight: 500; color: var(--status-danger);"></div>
+    </div>
+  `;
+
+  const sectionCard = ({ icon, title, description, body }) => `
+    <section class="card profile-section-card" style="padding: 1.25rem 1.5rem;">
+      <div style="padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1.15rem;">
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.2rem; font-size: 1rem;">
+          <i data-lucide="${icon}" style="width: 17px; height: 17px; color: var(--brand-primary);"></i>
+          ${escapeHtml(title)}
+        </h3>
+        <p style="font-size: 0.78rem; color: var(--text-secondary); margin: 0;">${escapeHtml(description)}</p>
+      </div>
+      <div class="profile-field-grid">
+        ${body}
+      </div>
+    </section>
+  `;
+
+  form.innerHTML = `
+    ${sectionCard({
+      icon: 'user',
+      title: 'Personal Information',
+      description: 'Your name and role as they appear in the admin header.',
+      body: field({ id: 'store-owner-name', label: 'Owner Name', value: info.ownerName, placeholder: 'e.g. Suresh Menon', required: true })
+          + field({ id: 'store-owner-role', label: 'Owner Role', value: info.ownerRole, placeholder: 'e.g. Store Owner' })
+    })}
+
+    ${sectionCard({
+      icon: 'store',
+      title: 'Store Information',
+      description: 'The store identity and contact details shown in the sidebar and on reports.',
+      body: field({ id: 'store-name-input', label: 'Store Name', value: info.name, placeholder: 'e.g. Apex Fashion Store', required: true })
+          + field({ id: 'store-branch-input', label: 'Branch', value: info.branch, placeholder: 'e.g. Main Street Branch #01' })
+          + field({ id: 'store-email-input', label: 'Store Email', value: info.email, placeholder: 'e.g. manager@apexfashion.com', type: 'email' })
+          + field({ id: 'store-phone-input', label: 'Store Phone', value: info.phone, placeholder: 'e.g. +91 98765 43210', type: 'tel' })
+          + `<div style="grid-column: 1 / -1;">${field({ id: 'store-address-input', label: 'Store Address', value: info.address, placeholder: 'e.g. 124 Commerce Avenue, Fashion District' })}</div>`
+    })}
+
+    <div class="card profile-form-footer" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; padding: 1rem 1.5rem;">
+      <span id="store-details-error" style="display: none; font-size: 0.82rem; color: var(--status-danger); font-weight: 500;"></span>
+      <div style="display: flex; gap: 0.75rem; margin-left: auto; flex-wrap: wrap;">
+        <button type="button" class="btn btn-secondary profile-cancel-btn">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="save-store-details-btn" style="padding: 0.55rem 1.4rem; font-weight: 600;">Save Changes</button>
+      </div>
+    </div>
+  `;
+  container.appendChild(form);
+
+  const errEl = form.querySelector('#store-details-error');
+  const saveBtn = form.querySelector('#save-store-details-btn');
+
+  const fieldIds = ['store-owner-name', 'store-owner-role', 'store-email-input', 'store-phone-input', 'store-address-input', 'store-name-input', 'store-branch-input'];
+
+  const clearErrors = () => {
+    errEl.style.display = 'none';
+    errEl.textContent = '';
+    form.querySelectorAll('.field-error').forEach(el => { el.style.display = 'none'; el.textContent = ''; });
+    fieldIds.forEach(id => {
+      const el = form.querySelector('#' + id);
+      if (el) { el.style.borderColor = ''; el.removeAttribute('aria-invalid'); }
+    });
+  };
+
+  /** Put the message under the field it belongs to; fall back to the footer. */
+  const showError = (message) => {
+    const map = [
+      [/owner name/i, 'store-owner-name'],
+      [/store name/i, 'store-name-input'],
+      [/email/i, 'store-email-input']
+    ];
+    const hit = map.find(([re]) => re.test(message));
+    if (hit) {
+      const target = form.querySelector(`[data-error-for="${hit[1]}"]`);
+      const input = form.querySelector('#' + hit[1]);
+      if (target) { target.textContent = message; target.style.display = 'block'; }
+      if (input) {
+        input.style.borderColor = 'var(--status-danger)';
+        input.setAttribute('aria-invalid', 'true');
+        input.focus();
+      }
+      return;
+    }
+    errEl.textContent = message;
+    errEl.style.display = 'inline';
+  };
+
+  form.querySelectorAll('input').forEach(el => el.addEventListener('input', markChanged));
+  form.querySelector('.profile-cancel-btn').addEventListener('click', () => leavePage('overview'));
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+    clearErrors();
+
+    // Values are read, never cleared — a failed save leaves every input intact.
+    const payload = {
+      ownerName: form.querySelector('#store-owner-name').value,
+      ownerRole: form.querySelector('#store-owner-role').value,
+      name: form.querySelector('#store-name-input').value,
+      branch: form.querySelector('#store-branch-input').value,
+      phone: form.querySelector('#store-phone-input').value,
+      email: form.querySelector('#store-email-input').value,
+      address: form.querySelector('#store-address-input').value
+    };
+
+    // Nothing to write when every value already matches what is stored.
+    // updateStoreInfo() trims, so compare trimmed values.
+    const trim = v => String(v === undefined || v === null ? '' : v).trim();
+    const unchanged = Object.keys(payload).every(k => trim(payload[k]) === trim(info[k]));
+    if (unchanged) {
+      hasUnsavedChanges = false;
+      toast.show({ message: 'No changes to save.' });
+      return;
+    }
+
+    isSubmitting = true;
+    saveBtn.disabled = true;
+    const originalLabel = saveBtn.textContent;
+    saveBtn.textContent = 'Saving...';
+
+    try {
+      store.updateStoreInfo(payload);
+      hasUnsavedChanges = false;
+      toast.show({ message: 'Profile updated.', type: 'success' });
+      // Re-render so the header, sidebar and summary pick up the change.
+      if (window.appInstance) window.appInstance.render();
+    } catch (err) {
+      showError(err.message);
+      toast.show({ message: err.message, type: 'danger' });
+      isSubmitting = false;
+      saveBtn.disabled = false;
+      saveBtn.textContent = originalLabel;
+    }
+  });
+
+  if (window.lucide) window.lucide.createIcons();
+  return container;
+}
+
 // SETTINGS PAGE
 function renderSettings(onThemeToggle, onNavigate = null) {
   const container = document.createElement('div');
@@ -15053,10 +16418,6 @@ function renderSettings(onThemeToggle, onNavigate = null) {
       <button class="btn btn-secondary btn-sm" id="settings-theme-toggle-btn">
         <i data-lucide="${currentTheme === 'dark' ? 'sun' : 'moon'}" style="width: 16px; height: 16px;"></i> Toggle Theme
       </button>
-    </div>
-    <div style="margin-top: 1rem;">
-      <h3 class="card-title" style="margin-bottom: 0.5rem;">Store Details</h3>
-      <p style="font-size: 0.85rem; color: var(--text-secondary);">${data.storeInfo.name} — ${data.storeInfo.branch}</p>
     </div>
   `;
 
@@ -15254,7 +16615,7 @@ function renderSettings(onThemeToggle, onNavigate = null) {
     }
   }
 
-  function handleDeleteCatalogItem(type, item) {
+  async function handleDeleteCatalogItem(type, item) {
     let usage;
     if (type === 'category') usage = store.checkCategoryUsage(item);
     else if (type === 'brand') usage = store.checkBrandUsage(item);
@@ -15273,7 +16634,12 @@ function renderSettings(onThemeToggle, onNavigate = null) {
 
     const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
     const confirmMsg = `Are you sure you want to delete ${type} "${item}" from the catalog?\n\nThis option is not currently in use and will be permanently removed.`;
-    const confirmed = (typeof window.confirm === 'function') ? window.confirm(confirmMsg) : true;
+    const confirmed = await uiConfirm({
+      title: `Delete ${type}`,
+      message: confirmMsg,
+      confirmText: 'Delete',
+      variant: 'danger'
+    });
     if (!confirmed) return;
 
     let res;
@@ -15507,7 +16873,8 @@ class MasterWebAdminApp {
       }
     }
 
-    const validNavIds = [...NAV_ITEMS.map(i => i.id), 'manage-product'];
+    // 'profile' is reachable from the topbar, not the sidebar nav.
+    const validNavIds = [...NAV_ITEMS.map(i => i.id), 'manage-product', 'profile'];
     const targetNavId = validNavIds.includes(navId) ? navId : 'overview';
 
     this.activeNavId = targetNavId;
@@ -15551,7 +16918,12 @@ class MasterWebAdminApp {
     this.appEl.innerHTML = '';
 
     const effectiveActiveId = this.activeNavId === 'manage-product' ? 'inventory' : this.activeNavId;
-    const activeItem = NAV_ITEMS.find(item => item.id === effectiveActiveId) || NAV_ITEMS[0];
+    // Profile has no sidebar entry, so give the topbar its own title.
+    // The topbar carries the page title, so the profile page itself does not
+    // repeat it — it shows a breadcrumb and description instead.
+    const activeItem = this.activeNavId === 'profile'
+      ? { id: 'profile', label: 'Edit Profile' }
+      : (NAV_ITEMS.find(item => item.id === effectiveActiveId) || NAV_ITEMS[0]);
 
     const layout = document.createElement('div');
     layout.className = 'app-layout';
@@ -15562,7 +16934,7 @@ class MasterWebAdminApp {
     const mainContent = document.createElement('main');
     mainContent.className = 'main-content';
 
-    const topbar = createTopbar(activeItem.label, this.toggleTheme);
+    const topbar = createTopbar(activeItem.label, this.toggleTheme, this.navigateTo);
     mainContent.appendChild(topbar);
 
     let pageView;
@@ -15576,6 +16948,7 @@ class MasterWebAdminApp {
       case 'customers': pageView = renderCustomers(this.navParams, this.navigateTo); break;
       case 'reports': pageView = renderReports(this.navigateTo); break;
       case 'settings': pageView = renderSettings(this.toggleTheme, this.navigateTo); break;
+      case 'profile': pageView = renderProfilePage(this.navParams, this.navigateTo); break;
       default: pageView = renderOverview(this.navigateTo);
     }
 

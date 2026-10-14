@@ -180,7 +180,7 @@
         // 10. Required Field Validation
         const supplierInp = pageEl.querySelector('#pur-supplier');
         supplierInp.value = ''; // trigger validation error
-        const saveDraftBtn = pageEl.querySelector('#btn-save-draft-pur');
+        const saveDraftBtn = pageEl.querySelector('#btn-wait-receive-pur');
         saveDraftBtn.click();
 
         recordTest('Validation: Saving with empty supplier is blocked',
@@ -231,7 +231,7 @@
 
         const createdDraft = store.data.purchases.find(p => p.supplier === 'Redesign Test Supplier Ltd');
         recordTest('Workflow: Save as Draft creates purchase draft without modifying stock',
-          !!createdDraft && createdDraft.status === 'Draft' && navigatedTo === 'purchases',
+          !!createdDraft && createdDraft.status === 'Waiting for Receive' && navigatedTo === 'purchases',
           `Draft ID: ${createdDraft ? createdDraft.id : 'none'}, Status: ${createdDraft ? createdDraft.status : 'none'}`
         );
 
