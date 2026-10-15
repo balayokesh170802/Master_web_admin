@@ -7039,7 +7039,6 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
 
   const container = document.createElement('div');
   container.className = 'page-container product-management-page';
-  container.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%; max-width: 100%; margin: 0; box-sizing: border-box;';
 
   const productId = (params && (params.id || params.productId)) || null;
   const requestedSize = (params && (params.size || params.variantSize)) || null;
@@ -9809,8 +9808,8 @@ function renderPurchases(params = {}, onNavigate = null) {
             <th style="width: 13%;">Date</th>
             <th style="width: 16%;">Units (Rec / Ord)</th>
             <th style="width: 14%;">Total Cost</th>
-            <th style="width: 13%;">Status</th>
-            <th style="width: 18%; text-align: right;">Actions</th>
+            <th style="width: 12%;">Status</th>
+            <th style="min-width: 180px; width: 180px; text-align: right;">Actions</th>
           </tr>
         </thead>
         <tbody id="pur-table-tbody"></tbody>
@@ -9884,7 +9883,7 @@ function renderPurchases(params = {}, onNavigate = null) {
       // Row actions by status:
       //   Waiting for Receive  -> Receive, View, Edit, Delete
       //   Partially Received   -> Receive Remaining, View, Edit, Delete
-      //   Received             -> View, Delete
+      //   Received             -> View, Edit, Delete
       const actionView = `
             <button type="button" class="btn btn-sm btn-secondary table-action-btn action-view-btn" title="View" aria-label="View">
               <i data-lucide="eye"></i>
@@ -9895,38 +9894,29 @@ function renderPurchases(params = {}, onNavigate = null) {
               <i data-lucide="pencil"></i>
               <span class="sr-only">Edit</span>
             </button>`;
+      const actionDelete = `
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
+              <i data-lucide="trash-2"></i>
+              <span class="sr-only">Delete</span>
+            </button>`;
       const actionReceive = (label) => `
             <button type="button" class="btn btn-sm btn-primary table-action-btn action-receive-btn" title="${label}" aria-label="${label}">
               <i data-lucide="package-check"></i>
               <span class="sr-only">${label}</span>
             </button>`;
-      const actionDelete = `
-            <button type="button" class="btn btn-sm btn-ghost table-action-btn action-delete-btn" title="Delete" aria-label="Delete" style="color: var(--status-danger);">
-              <i data-lucide="trash-2"></i>
-              <span class="sr-only">Delete</span>
-            </button>`;
 
-      let actionsHtml = '';
+      let receiveBtnHtml = '';
       if (isPurchaseWaiting(status)) {
-        actionsHtml = `
-          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            ${actionReceive('Receive')}${actionView}${actionEdit}${actionDelete}
-          </div>
-        `;
+        receiveBtnHtml = actionReceive('Receive');
       } else if (status === 'Partially Received') {
-        actionsHtml = `
-          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            ${actionReceive('Receive Remaining')}${actionView}${actionEdit}${actionDelete}
-          </div>
-        `;
-      } else {
-        // Received: view, edit (with stock reconciliation), and delete.
-        actionsHtml = `
-          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
-            ${actionView}${actionEdit}${actionDelete}
-          </div>
-        `;
+        receiveBtnHtml = actionReceive('Receive Remaining');
       }
+
+      const actionsHtml = `
+        <div style="display: flex; gap: 0.35rem; justify-content: flex-end; align-items: center; flex-wrap: nowrap;" class="row-actions-box">
+          ${receiveBtnHtml}${actionView}${actionEdit}${actionDelete}
+        </div>
+      `;
 
       tr.innerHTML = `
         <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${startIdx + index + 1}</td>
@@ -9937,17 +9927,19 @@ function renderPurchases(params = {}, onNavigate = null) {
         </td>
         <td style="font-weight: 700; color: var(--text-primary);">₹${(p.totalAmount || 0).toLocaleString()}</td>
         <td>${createBadge({ label: status, variant: badgeVariant }).outerHTML}</td>
-        <td>${actionsHtml}</td>
+        <td style="text-align: right; white-space: nowrap; width: 180px;">${actionsHtml}</td>
       `;
 
-
-
-      // Row actions (approval was removed from the workflow).
+      // Row actions
       const editBtn = tr.querySelector('.action-edit-btn');
       if (editBtn) {
         editBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          if (onNavigate) onNavigate('purchases', { action: 'edit', purchaseId: p.id });
+          if (onNavigate) {
+            onNavigate('purchases', { action: 'edit', purchaseId: p.id });
+          } else if (window.appInstance && window.appInstance.navigateTo) {
+            window.appInstance.navigateTo('purchases', { action: 'edit', purchaseId: p.id });
+          }
         });
       }
 
@@ -9955,21 +9947,98 @@ function renderPurchases(params = {}, onNavigate = null) {
       if (deleteBtn) {
         deleteBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          const hasReceived = (p.totalReceived > 0) || (p.status === 'Received' || p.status === 'Partially Received' || p.status === 'Completed');
-          let confirmMsg = `Delete purchase order ${p.id}?`;
-          if (hasReceived) {
-            confirmMsg = `Are you sure you want to delete purchase order ${p.id} from "${p.supplier || 'Supplier'}"?\n\nThis order has received stock. Deleting it will reverse the received quantities from inventory and log stock reversal movements.\n\nThis action cannot be undone.`;
+          const itemsList = Array.isArray(p.items) ? p.items : [];
+          const totalReceivedAll = itemsList.reduce((s, i) => s + Math.max(0, Number(i.receivedQty !== undefined ? i.receivedQty : (i.received || 0))), 0);
+          const hasReceivedStock = totalReceivedAll > 0 || p.status === 'Received' || p.status === 'Partially Received' || p.status === 'Completed';
+
+          if (hasReceivedStock) {
+            // Check if any received item has currentStock < receivedQty (which would leave negative / incorrect inventory)
+            let shortageIssue = null;
+            for (const item of itemsList) {
+              const recQty = Math.max(0, Number(item.receivedQty !== undefined ? item.receivedQty : (item.received !== undefined ? item.received : (p.status === 'Completed' || p.status === 'Received' ? (item.qty || 0) : 0))));
+              if (recQty > 0) {
+                const prod = (store.data.products || []).find(pr =>
+                  pr.id === item.productId ||
+                  (pr.name && item.product && pr.name.trim().toLowerCase() === item.product.trim().toLowerCase()) ||
+                  (pr.name && item.productName && pr.name.trim().toLowerCase() === item.productName.trim().toLowerCase())
+                );
+                if (prod) {
+                  let variant = null;
+                  let extractedSize = item.size || '';
+                  if (!extractedSize && item.sku) {
+                    const parts = String(item.sku).split('-');
+                    if (parts.length > 1) extractedSize = parts[parts.length - 1];
+                  }
+                  const targetSize = (extractedSize || 'Standard').trim().toUpperCase();
+                  if (item.sku) {
+                    variant = (prod.variants || []).find(v => v.sku && v.sku.toUpperCase() === item.sku.toUpperCase());
+                  }
+                  if (!variant) {
+                    variant = (prod.variants || []).find(v => (v.size || 'Standard').trim().toUpperCase() === targetSize);
+                  }
+                  if (!variant && Array.isArray(prod.variants) && prod.variants.length > 0) {
+                    variant = prod.variants[0];
+                  }
+                  const currentStock = variant ? Number(variant.stock || 0) : Number(prod.totalStock || prod.stock || 0);
+                  if (currentStock < recQty) {
+                    shortageIssue = {
+                      productName: prod.name,
+                      size: variant ? variant.size : 'Standard',
+                      currentStock,
+                      receivedQty: recQty
+                    };
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (shortageIssue) {
+              await uiConfirm({
+                title: 'Cannot Delete Received Order',
+                message: `Purchase order "${p.id}" cannot be deleted because product "${shortageIssue.productName}" (${shortageIssue.size}) only has ${shortageIssue.currentStock} units in stock, but this purchase received ${shortageIssue.receivedQty} units. Deleting it would leave inventory quantities negative or incorrect because units have already been sold.`,
+                confirmText: 'OK',
+                variant: 'secondary',
+                singleButton: true
+              });
+              return;
+            }
+
+            const confirmMsg = `Are you sure you want to delete purchase order "${p.id}" from "${p.supplier || 'Supplier'}"?\n\nThis order has received stock into inventory. Deleting it will reverse the received quantities from physical stock and record stock reversal movements.\n\nThis action cannot be undone.`;
+            const confirmed = await uiConfirm({
+              title: `Delete purchase order ${p.id}?`,
+              message: confirmMsg,
+              confirmText: 'Delete',
+              cancelText: 'Cancel',
+              variant: 'danger'
+            });
+            if (confirmed) {
+              try {
+                store.deletePurchase(p.id);
+                toast.show({ message: `Purchase order ${p.id} deleted and inventory reconciled.`, type: 'info' });
+                renderPurchasesTable();
+              } catch (err) {
+                toast.show({ message: err.message, type: 'danger' });
+              }
+            }
           } else {
-            confirmMsg = `Are you sure you want to delete purchase order ${p.id}?\n\nThis action cannot be undone.`;
-          }
-          const confirmed = await uiConfirm({ title: 'Confirm deletion', message: confirmMsg, confirmText: 'Delete', variant: 'danger' });
-          if (confirmed) {
-            try {
-              store.deletePurchase(p.id);
-              toast.show({ message: `Purchase order ${p.id} deleted.`, type: 'info' });
-              renderPurchasesTable();
-            } catch (err) {
-              toast.show({ message: err.message, type: 'danger' });
+            // Unreceived / Waiting for Receive
+            const confirmMsg = `Are you sure you want to delete purchase order "${p.id}" from "${p.supplier || 'Supplier'}"?\n\nThis purchase has not been received into stock. This action cannot be undone.`;
+            const confirmed = await uiConfirm({
+              title: `Delete purchase order ${p.id}?`,
+              message: confirmMsg,
+              confirmText: 'Delete',
+              cancelText: 'Cancel',
+              variant: 'danger'
+            });
+            if (confirmed) {
+              try {
+                store.deletePurchase(p.id);
+                toast.show({ message: `Purchase order ${p.id} deleted.`, type: 'info' });
+                renderPurchasesTable();
+              } catch (err) {
+                toast.show({ message: err.message, type: 'danger' });
+              }
             }
           }
         });
@@ -9980,7 +10049,11 @@ function renderPurchases(params = {}, onNavigate = null) {
       if (receiveBtn) {
         receiveBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          if (onNavigate) onNavigate('purchases', { action: 'receive', purchaseId: p.id });
+          if (onNavigate) {
+            onNavigate('purchases', { action: 'receive', purchaseId: p.id });
+          } else if (window.appInstance && window.appInstance.navigateTo) {
+            window.appInstance.navigateTo('purchases', { action: 'receive', purchaseId: p.id });
+          }
         });
       }
 
@@ -9989,8 +10062,13 @@ function renderPurchases(params = {}, onNavigate = null) {
       if (viewBtn) {
         viewBtn.addEventListener('click', (e) => {
           e.stopPropagation();
-          if (onNavigate) onNavigate('purchases', { action: 'view', purchaseId: p.id });
-          else openViewPurchaseModal(p, onNavigate, () => renderPurchasesTable());
+          if (onNavigate) {
+            onNavigate('purchases', { action: 'view', purchaseId: p.id });
+          } else if (window.appInstance && window.appInstance.navigateTo) {
+            window.appInstance.navigateTo('purchases', { action: 'view', purchaseId: p.id });
+          } else {
+            openViewPurchaseModal(p, onNavigate, () => renderPurchasesTable());
+          }
         });
       }
 
@@ -10866,7 +10944,63 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
 
   const deleteBottomBtn = bottomBar.querySelector('.delete-pur-bottom-btn');
   if (deleteBottomBtn) deleteBottomBtn.addEventListener('click', async () => {
-    const hasReceived = (purchase.totalReceived > 0) || (status === 'Received' || status === 'Partially Received' || status === 'Completed');
+    const itemsList = Array.isArray(purchase.items) ? purchase.items : [];
+    const totalReceivedAll = itemsList.reduce((s, i) => s + Math.max(0, Number(i.receivedQty !== undefined ? i.receivedQty : (i.received || 0))), 0);
+    const hasReceived = (totalReceivedAll > 0) || (status === 'Received' || status === 'Partially Received' || status === 'Completed');
+
+    if (hasReceived) {
+      let shortageIssue = null;
+      for (const item of itemsList) {
+        const recQty = Math.max(0, Number(item.receivedQty !== undefined ? item.receivedQty : (item.received !== undefined ? item.received : (status === 'Completed' || status === 'Received' ? (item.qty || 0) : 0))));
+        if (recQty > 0) {
+          const prod = (store.data.products || []).find(pr =>
+            pr.id === item.productId ||
+            (pr.name && item.product && pr.name.trim().toLowerCase() === item.product.trim().toLowerCase()) ||
+            (pr.name && item.productName && pr.name.trim().toLowerCase() === item.productName.trim().toLowerCase())
+          );
+          if (prod) {
+            let variant = null;
+            let extractedSize = item.size || '';
+            if (!extractedSize && item.sku) {
+              const parts = String(item.sku).split('-');
+              if (parts.length > 1) extractedSize = parts[parts.length - 1];
+            }
+            const targetSize = (extractedSize || 'Standard').trim().toUpperCase();
+            if (item.sku) {
+              variant = (prod.variants || []).find(v => v.sku && v.sku.toUpperCase() === item.sku.toUpperCase());
+            }
+            if (!variant) {
+              variant = (prod.variants || []).find(v => (v.size || 'Standard').trim().toUpperCase() === targetSize);
+            }
+            if (!variant && Array.isArray(prod.variants) && prod.variants.length > 0) {
+              variant = prod.variants[0];
+            }
+            const currentStock = variant ? Number(variant.stock || 0) : Number(prod.totalStock || prod.stock || 0);
+            if (currentStock < recQty) {
+              shortageIssue = {
+                productName: prod.name,
+                size: variant ? variant.size : 'Standard',
+                currentStock,
+                receivedQty: recQty
+              };
+              break;
+            }
+          }
+        }
+      }
+
+      if (shortageIssue) {
+        await uiConfirm({
+          title: 'Cannot Delete Received Order',
+          message: `Purchase order "${purchase.id}" cannot be deleted because product "${shortageIssue.productName}" (${shortageIssue.size}) only has ${shortageIssue.currentStock} units in stock, but this purchase received ${shortageIssue.receivedQty} units. Deleting it would leave inventory quantities negative or incorrect because units have already been sold.`,
+          confirmText: 'OK',
+          variant: 'secondary',
+          singleButton: true
+        });
+        return;
+      }
+    }
+
     let confirmMsg = `Delete purchase order ${purchase.id}?`;
     if (hasReceived) {
       confirmMsg = `Are you sure you want to delete purchase order ${purchase.id} from "${purchase.supplier || 'Supplier'}"?
@@ -10935,6 +11069,7 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
     if (window.lucide) window.lucide.createIcons();
     return container;
   }
+
 
   let hasUnsavedChanges = false;
   const markChanged = () => { hasUnsavedChanges = true; };
@@ -16182,8 +16317,6 @@ function renderProfilePage(params = {}, onNavigate = null) {
 
   const container = document.createElement('div');
   container.className = 'page-container profile-page';
-  // Centred reading column on wide screens; full width once it no longer fits.
-  container.style.cssText = 'max-width: 960px; margin: 0 auto; width: 100%;';
 
   const info = store.getStoreInfo();
   const initialsOf = (name) => (name || 'S')
@@ -16210,7 +16343,7 @@ function renderProfilePage(params = {}, onNavigate = null) {
 
   // ---------------------------------------------- 1. Page header
   const headerDiv = document.createElement('div');
-  headerDiv.style.cssText = 'display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
+  headerDiv.style.cssText = 'display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 1rem;';
 
   const headerText = document.createElement('div');
   headerText.style.cssText = 'min-width: 0;';
@@ -16235,7 +16368,7 @@ function renderProfilePage(params = {}, onNavigate = null) {
   // ---------------------------------------------- 2. Profile summary
   const idCard = document.createElement('div');
   idCard.className = 'card profile-summary-card';
-  idCard.style.cssText = 'margin-bottom: 1.25rem; padding: 1.35rem 1.5rem;';
+  idCard.style.cssText = 'padding: 1.35rem 1.5rem;';
   idCard.innerHTML = `
     <div style="display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap;">
       <div id="profile-avatar" aria-hidden="true" style="width: 64px; height: 64px; border-radius: 50%; background-color: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.4rem; letter-spacing: 0.02em; flex-shrink: 0;">
@@ -16258,7 +16391,7 @@ function renderProfilePage(params = {}, onNavigate = null) {
   const form = document.createElement('form');
   form.id = 'profile-details-form';
   form.noValidate = true;
-  form.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem;';
+  form.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem;';
 
   // One field definition drives markup, population and error placement.
   // The form is noValidate, so `required` is advisory for assistive tech only —

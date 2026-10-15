@@ -1044,10 +1044,11 @@
         });
         const purContainer = renderPurchases();
         const purReceiveBtns = purContainer.querySelectorAll('.action-receive-btn');
+        const purEditBtns = purContainer.querySelectorAll('.action-edit-btn');
         const purDeleteBtns = purContainer.querySelectorAll('.action-delete-btn');
-        recordTest('Delete-Actions', 'Purchases table renders Receive and Delete in row actions',
-          purReceiveBtns.length > 0 && purDeleteBtns.length > 0,
-          `Receive buttons: ${purReceiveBtns.length}, delete buttons: ${purDeleteBtns.length}`
+        recordTest('Delete-Actions', 'Purchases table renders Receive, Edit, and Delete on waiting rows',
+          purReceiveBtns.length > 0 && purEditBtns.length > 0 && purDeleteBtns.length > 0,
+          `Receive buttons: ${purReceiveBtns.length}, edit buttons: ${purEditBtns.length}, delete buttons: ${purDeleteBtns.length}`
         );
 
         // 4.2 Sales table action buttons include .delete-sale-btn

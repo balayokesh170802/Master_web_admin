@@ -611,6 +611,7 @@ body {
   gap: 0.35rem;
   justify-content: flex-end;
   align-items: center;
+  flex-wrap: nowrap;
 }
 
 .table-action-btn {
@@ -938,16 +939,22 @@ body {
 }
 
 
-/* Edit Profile — section field grid.
+/* Edit Profile — layout & section field grid.
+   Full width with natural scroll breathing room.
    Two columns from tablet up, single column on phones. */
+.profile-page {
+  padding-bottom: 3rem;
+}
+
 .profile-field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem 1.25rem;
+  gap: 1.25rem 1.5rem;
 }
 
 @media (max-width: 640px) {
   .profile-field-grid {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
 }
