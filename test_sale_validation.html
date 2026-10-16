@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test Add Sale Validation Behavior</title>
+  <link rel="stylesheet" href="./src/styles/typography.css">
+  <link rel="stylesheet" href="./src/styles/theme.css">
+  <link rel="stylesheet" href="./src/styles/main.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body style="background: var(--bg-base); color: var(--text-primary); padding: 1.5rem; font-family: sans-serif;">
+  <div id="results" style="margin-bottom: 2rem;">
+    <h2>Add Sale Validation Acceptance Test Suite</h2>
+    <div id="summary" style="font-weight: 700; font-size: 1.1rem; margin: 1rem 0;">Running tests...</div>
+    <ul id="test-list" style="list-style: none; padding: 0;"></ul>
+  </div>
+  <div id="app" style="max-width: 1200px; margin: 0 auto;"></div>
+
+  <script src="./src/App.js"></script>
+  <script>
+    window.testResults = [];
+
+    function recordTest(name, passed, details = '') {
+      const res = { name, passed, details };
+      window.testResults.push(res);
+      const li = document.createElement('li');
+      li.style.padding = '0.4rem 0.6rem';
+      li.style.marginBottom = '0.35rem';
+      li.style.borderRadius = '4px';
+      li.style.fontSize = '0.9rem';
+      if (passed) {
+        li.style.background = 'rgba(22, 163, 74, 0.15)';
+        li.style.color = '#16a34a';
+        li.innerHTML = `<strong>[PASS]</strong> ${escapeHtml(name)} ${details ? `<span style="color: var(--text-secondary); font-size: 0.8rem;">(${escapeHtml(details)})</span>` : ''}`;
+      } else {
+        li.style.background = 'rgba(239, 68, 68, 0.15)';
+        li.style.color = '#ef4444';
+        li.innerHTML = `<strong>[FAIL]</strong> ${escapeHtml(name)} ${details ? `<span style="color: #ef4444; font-size: 0.8rem;">— ${escapeHtml(details)}</span>` : ''}`;
+      }
+      document.getElementById('test-list').appendChild(li);
+    }
+
+    async function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function runAllTests() {
+      try {
+        store.loadSampleData();
+
+        let currentNavRoute = null;
+        const page = renderAddSalePage((route) => { currentNavRoute = route; });
+        const appContainer = document.getElementById('app');
+        appContainer.innerHTML = '';
+        appContainer.appendChild(page);
+
+        const btnComplete = page.querySelector('#btn-complete-sale');
+
+        // Helper accessors for current DOM elements
+        const getCustInput = () => page.querySelector('#sale-cust-name');
+        const getCustError = () => page.querySelector('#sale-cust-name-error');
+        const getFirstCard = () => page.querySelector('.sale-product-section');
+        const getComboboxInput = () => getFirstCard().querySelector('.sale-combobox-input');
+        const getProdError = () => getFirstCard().querySelector('.sale-prod-error');
+        const getProdSelect = () => getFirstCard().querySelector('.sale-prod-select');
+        const getFirstSizeRow = () => getFirstCard().querySelector('.sale-size-row');
+        const getSizeSelect = () => getFirstSizeRow().querySelector('.sale-size-select');
+        const getSizeError = () => getFirstSizeRow().querySelector('.sale-size-error');
+        const getQtyInput = () => getFirstSizeRow().querySelector('.sale-qty-input');
+        const getQtyError = () => getFirstSizeRow().querySelector('.sale-qty-error');
+        const getPayStatus = () => page.querySelector('#sale-pay-status');
+        const getAmountPaid = () => page.querySelector('#sale-amount-paid');
+        const getAmountPaidError = () => page.querySelector('#sale-amount-paid-error');
+        const getDiscountInput = () => page.querySelector('#sale-discount-input');
+        const getDiscountError = () => page.querySelector('#sale-discount-error');
+
+        // -------------------------------------------------------------
+        // Test 1: Button is ALWAYS enabled on initial load
+        // -------------------------------------------------------------
+        recordTest(
+          '1a: "Complete Sale" button is ENABLED on initial page load',
+          btnComplete && btnComplete.disabled === false,
+          `disabled: ${btnComplete ? btnComplete.disabled : 'no button'}`
+        );
+
+        recordTest(
+          '1b: "Complete Sale" button is visually active (opacity 1, pointer cursor)',
+          btnComplete && window.getComputedStyle(btnComplete).cursor === 'pointer',
+          `cursor: ${btnComplete ? window.getComputedStyle(btnComplete).cursor : ''}`
+        );
+
+        const initialInvalids = page.querySelectorAll('.is-invalid');
+        recordTest(
+          '1c: No fields are marked .is-invalid before user clicks Complete Sale',
+          initialInvalids.length === 0,
+          `invalids count: ${initialInvalids.length}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 2: Validation on click - Missing Customer Name
+        // -------------------------------------------------------------
+        getCustInput().value = '';
+        btnComplete.click();
+        await sleep(100);
+
+        recordTest(
+          '2a: Submission is blocked and user remains on Add Sale page when required info is missing',
+          currentNavRoute === null,
+          `navigated: ${currentNavRoute}`
+        );
+
+        recordTest(
+          '2b: "Complete Sale" button remains ENABLED after failed validation',
+          btnComplete.disabled === false,
+          `disabled: ${btnComplete.disabled}`
+        );
+
+        recordTest(
+          '2c: Missing Customer Name is highlighted with .is-invalid',
+          getCustInput().classList.contains('is-invalid'),
+          `classes: ${getCustInput().className}`
+        );
+
+        recordTest(
+          '2d: Inline validation message "Customer Name is required." is displayed directly below',
+          getCustError() && getCustError().style.display !== 'none' && getCustError().textContent.trim() === 'Customer Name is required.',
+          `error text: "${getCustError() ? getCustError().textContent.trim() : ''}"`
+        );
+
+        recordTest(
+          '2e: Keyboard focus is automatically placed on the first missing field (Customer Name)',
+          document.activeElement === getCustInput(),
+          `activeElement id: ${document.activeElement ? document.activeElement.id : 'none'}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 3: Real-time Error Clearance for Customer Name
+        // -------------------------------------------------------------
+        getCustInput().value = 'Rohan Verma';
+        getCustInput().dispatchEvent(new Event('input', { bubbles: true }));
+
+        recordTest(
+          '3a: Typing valid Customer Name immediately clears .is-invalid class',
+          !getCustInput().classList.contains('is-invalid'),
+          `classes: ${getCustInput().className}`
+        );
+
+        recordTest(
+          '3b: Typing valid Customer Name immediately hides the inline error message',
+          getCustError().style.display === 'none',
+          `display: ${getCustError().style.display}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 4: Missing Product validation
+        // -------------------------------------------------------------
+        getProdSelect().value = '';
+        getProdSelect().dispatchEvent(new Event('change', { bubbles: true }));
+        getComboboxInput().value = '';
+
+        btnComplete.click();
+        await sleep(100);
+
+        recordTest(
+          '4a: Missing product highlights combobox input with .is-invalid',
+          getComboboxInput().classList.contains('is-invalid'),
+          `classes: ${getComboboxInput().className}`
+        );
+
+        recordTest(
+          '4b: Missing product displays inline error "Product is required."',
+          getProdError() && getProdError().style.display !== 'none' && getProdError().textContent.trim() === 'Product is required.',
+          `error text: "${getProdError() ? getProdError().textContent.trim() : ''}"`
+        );
+
+        recordTest(
+          '4c: Automatically focuses the product combobox when product is missing',
+          document.activeElement === getComboboxInput(),
+          `activeElement: ${document.activeElement ? document.activeElement.className : 'none'}`
+        );
+
+        // Select a product
+        const prods = store.data.products || [];
+        const testProd = prods.find(p => p.variants && p.variants.length > 1 && p.variants[0].stock > 10) || prods[0];
+        getProdSelect().value = testProd.id;
+        getProdSelect().dispatchEvent(new Event('change', { bubbles: true }));
+
+        recordTest(
+          '4d: Selecting a product clears .is-invalid from combobox',
+          !getComboboxInput().classList.contains('is-invalid'),
+          `classes: ${getComboboxInput().className}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 5: Missing Size validation
+        // -------------------------------------------------------------
+        getSizeSelect().value = '';
+        btnComplete.click();
+        await sleep(100);
+
+        recordTest(
+          '5a: Empty size selection highlights select with .is-invalid',
+          getSizeSelect().classList.contains('is-invalid'),
+          `classes: ${getSizeSelect().className}`
+        );
+
+        recordTest(
+          '5b: Empty size selection shows "Size is required."',
+          getSizeError() && getSizeError().style.display !== 'none' && getSizeError().textContent.trim() === 'Size is required.',
+          `error text: "${getSizeError() ? getSizeError().textContent.trim() : ''}"`
+        );
+
+        // Restore size
+        const validSize = testProd.variants[0].size;
+        getSizeSelect().value = validSize;
+        getSizeSelect().dispatchEvent(new Event('change', { bubbles: true }));
+
+        recordTest(
+          '5c: Selecting valid size immediately clears .is-invalid and hides size error',
+          !getSizeSelect().classList.contains('is-invalid') && getSizeError().style.display === 'none',
+          `is-invalid: ${getSizeSelect().classList.contains('is-invalid')}, display: ${getSizeError().style.display}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 6: Missing Quantity validation
+        // -------------------------------------------------------------
+        getQtyInput().value = '';
+        getQtyInput().dispatchEvent(new Event('input', { bubbles: true }));
+        btnComplete.click();
+        await sleep(100);
+
+        recordTest(
+          '6a: Empty quantity highlights input with .is-invalid',
+          getQtyInput().classList.contains('is-invalid'),
+          `classes: ${getQtyInput().className}`
+        );
+
+        recordTest(
+          '6b: Empty quantity displays "Quantity is required."',
+          getQtyError() && getQtyError().style.display !== 'none' && getQtyError().textContent.trim() === 'Quantity is required.',
+          `error text: "${getQtyError() ? getQtyError().textContent.trim() : ''}"`
+        );
+
+        recordTest(
+          '6c: Automatically focuses the Quantity input when quantity is missing',
+          document.activeElement === getQtyInput(),
+          `activeElement: ${document.activeElement ? document.activeElement.className : 'none'}`
+        );
+
+        // Zero / negative quantity
+        getQtyInput().value = '0';
+        getQtyInput().dispatchEvent(new Event('input', { bubbles: true }));
+        btnComplete.click();
+        await sleep(100);
+
+        recordTest(
+          '6d: Quantity <= 0 displays "Quantity must be greater than 0."',
+          getQtyError() && getQtyError().style.display !== 'none' && getQtyError().textContent.trim() === 'Quantity must be greater than 0.',
+          `error text: "${getQtyError() ? getQtyError().textContent.trim() : ''}"`
+        );
+
+        // -------------------------------------------------------------
+        // Test 7: Available Stock validation
+        // -------------------------------------------------------------
+        const availStock = testProd.variants[0].stock;
+        getQtyInput().value = String(availStock + 50);
+        getQtyInput().dispatchEvent(new Event('input', { bubbles: true }));
+        btnComplete.click();
+        await sleep(100);
+
+        recordTest(
+          '7a: Quantity exceeding stock highlights Quantity with .is-invalid',
+          getQtyInput().classList.contains('is-invalid'),
+          `classes: ${getQtyInput().className}`
+        );
+
+        recordTest(
+          '7b: Shows clear inline error: "Only X units are available."',
+          getQtyError() && getQtyError().style.display !== 'none' && getQtyError().textContent.trim() === `Only ${availStock} units are available.`,
+          `error text: "${getQtyError() ? getQtyError().textContent.trim() : ''}"`
+        );
+
+        // Enter valid quantity within stock
+        getQtyInput().value = '2';
+        getQtyInput().dispatchEvent(new Event('input', { bubbles: true }));
+
+        recordTest(
+          '7c: Entering quantity within available stock clears .is-invalid and hides error',
+          !getQtyInput().classList.contains('is-invalid') && getQtyError().style.display === 'none',
+          `is-invalid: ${getQtyInput().classList.contains('is-invalid')}, display: ${getQtyError().style.display}`
+        );
+
+        // -------------------------------------------------------------
+        // Test 8: Accordion Collapse and Auto-Expansion on Error
+        // -------------------------------------------------------------
+        const cardHeader = getFirstCard().querySelector('.sale-accordion-header');
+        const cardBody = getFirstCard().querySelector('.sale-product-body');
+
+        // Collapse the card
+        cardHeader.click();
+        await sleep(50);
+
+        recordTest(
+          '8a: Product card can be collapsed by clicking accordion header',
+          getFirstCard().classList.contains('collapsed') && cardBody.style.display === 'none',
+          `collapsed: ${getFirstCard().classList.contains('collapsed')}, display: ${cardBody.style.display}`
+        );
+
+        // Introduce an error inside the collapsed card
+        getQtyInput().value = '';
+        getQtyInput().dispatchEvent(new Event('input', { bubbles: true }));
+
+        // Click Complete Sale while card is collapsed
+        btnComplete.click();
+        await sleep(100);
+
+        recordTest(
+          '8b: Collapsed card is AUTOMATICALLY EXPANDED when an error occurs inside it',
+          getFirstCard().classList.contains('expanded') && !getFirstCard().classList.contains('collapsed') && cardBody.style.display === 'block',
+          `expanded: ${getFirstCard().classList.contains('expanded')}, display: ${cardBody.style.display}`
+        );
+
+        recordTest(
+          '8c: Keyboard focus is placed on the missing field inside the auto-expanded card',
+          document.activeElement === getQtyInput(),
+          `activeElement: ${document.activeElement ? document.activeElement.className : 'none'}`
+        );
+
+        // Fix quantity
+        getQtyInput().value = '2';
+        getQtyInput().dispatchEvent(new Event('input', { bubbles: true }));
+
+        // -------------------------------------------------------------
+        // Test 9: Payment Validation
+        // -------------------------------------------------------------
+        // Partial payment without amount
+        getPayStatus().value = 'Partial';
+        getAmountPaid().value = '';
+        btnComplete.click();
+        await sleep(100);
+
+        recordTest(
+          '9a: Partial payment without amount paid highlights input with .is-invalid',
+          getAmountPaid().classList.contains('is-invalid'),
+          `classes: ${getAmountPaid().className}`
+        );
+
+        recordTest(
+          '9b: Partial payment displays "Amount paid is required for partial payment."',
+          getAmountPaidError() && getAmountPaidError().style.display !== 'none' && getAmountPaidError().textContent.trim() === 'Amount paid is required for partial payment.',
+          `error text: "${getAmountPaidError() ? getAmountPaidError().textContent.trim() : ''}"`
+        );
+
+        // Negative discount
+        getDiscountInput().value = '-50';
+        btnComplete.click();
+        await sleep(100);
+
+        recordTest(
+          '9c: Negative discount displays "Discount cannot be negative."',
+          getDiscountError() && getDiscountError().style.display !== 'none' && getDiscountError().textContent.trim() === 'Discount cannot be negative.',
+          `error text: "${getDiscountError() ? getDiscountError().textContent.trim() : ''}"`
+        );
+
+        // Fix discount and payment
+        getDiscountInput().value = '0';
+        getDiscountInput().dispatchEvent(new Event('input', { bubbles: true }));
+        getPayStatus().value = 'Paid';
+        getPayStatus().dispatchEvent(new Event('change', { bubbles: true }));
+
+        // -------------------------------------------------------------
+        // Test 10: Complete Sale Successful Workflow
+        // -------------------------------------------------------------
+        const initialSalesCount = (store.data.sales || []).length;
+        const initialStock = testProd.variants[0].stock;
+
+        btnComplete.click();
+        await sleep(150);
+
+        const newSalesCount = (store.data.sales || []).length;
+        const updatedProd = (store.data.products || []).find(p => p.id === testProd.id);
+        const updatedStock = updatedProd.variants[0].stock;
+
+        recordTest(
+          '10a: Valid form successfully creates sale record',
+          newSalesCount === initialSalesCount + 1,
+          `sales count before: ${initialSalesCount}, after: ${newSalesCount}`
+        );
+
+        recordTest(
+          '10b: Inventory stock correctly decremented by 2 units',
+          updatedStock === initialStock - 2,
+          `stock before: ${initialStock}, after: ${updatedStock}`
+        );
+
+        recordTest(
+          '10c: Successfully navigates to "sales" list upon completion',
+          currentNavRoute === 'sales',
+          `navigated to: ${currentNavRoute}`
+        );
+
+        // -------------------------------------------------------------
+        // Final Summary
+        // -------------------------------------------------------------
+        const passed = window.testResults.filter(t => t.passed).length;
+        const total = window.testResults.length;
+        const failed = total - passed;
+
+        const summaryEl = document.getElementById('summary');
+        summaryEl.setAttribute('data-passed', passed);
+        summaryEl.setAttribute('data-failed', failed);
+        summaryEl.setAttribute('data-total', total);
+
+        if (failed === 0) {
+          summaryEl.style.color = '#16a34a';
+          summaryEl.textContent = `ALL ${total} ACCEPTANCE TESTS PASSED!`;
+        } else {
+          summaryEl.style.color = '#ef4444';
+          summaryEl.textContent = `${failed} OF ${total} TESTS FAILED!`;
+        }
+
+      } catch (err) {
+        console.error('Test suite uncaught error:', err);
+        const summaryEl = document.getElementById('summary');
+        summaryEl.style.color = '#ef4444';
+        summaryEl.textContent = 'TEST SUITE ERROR: ' + err.message;
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', runAllTests);
+  </script>
+</body>
+</html>

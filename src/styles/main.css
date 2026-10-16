@@ -816,10 +816,25 @@ body {
   white-space: nowrap;
 }
 
+.form-input.is-invalid,
+.form-select.is-invalid {
+  border-color: var(--status-danger, #ef4444) !important;
+  box-shadow: 0 0 0 1px var(--status-danger, #ef4444);
+}
+
 .pur-size-table td {
   padding: 0.4rem 0.6rem;
   border-bottom: 1px solid var(--border-color);
-  vertical-align: middle;
+  vertical-align: top;
+}
+
+.pur-size-table .field-error,
+.field-error {
+  font-size: 0.725rem;
+  line-height: 1.25;
+  color: var(--status-danger, #ef4444);
+  margin-top: 3px;
+  font-weight: 500;
 }
 
 .pur-size-table tr:last-child td {

@@ -11662,10 +11662,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
         <div class="form-group">
           <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Supplier <span style="color: #ef4444;">*</span></label>
           <input type="text" id="pur-supplier" class="form-input" placeholder="e.g. Apex Apparel Ltd" value="${supplierVal}">
+          <div id="pur-supplier-error" class="field-error" style="display: none;"></div>
         </div>
         <div class="form-group">
           <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Purchase Date <span style="color: #ef4444;">*</span></label>
           <input type="date" id="pur-date" class="form-input" value="${dateVal}">
+          <div id="pur-date-error" class="field-error" style="display: none;"></div>
         </div>
         <div class="form-group" style="grid-column: 1 / -1;">
           <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Notes (Optional)</label>
@@ -11771,75 +11773,26 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     return null;
   }
 
-  function checkFormValidity() {
-    const supplierEl = mainCard.querySelector('#pur-supplier');
-    const dateEl = mainCard.querySelector('#pur-date');
-    const supplier = (supplierEl ? supplierEl.value : supplierVal).trim();
-    const date = (dateEl ? dateEl.value : dateVal).trim();
-
-    if (!supplier) return false;
-    if (!date) return false;
-    if (!productsData || productsData.length === 0) return false;
-
-    for (let pIdx = 0; pIdx < productsData.length; pIdx++) {
-      const prod = productsData[pIdx];
-      const nameErr = validateProductName(prod, productsData);
-      if (nameErr || prod.nameError) return false;
-
-      const cat = (prod.category || '').trim();
-      if (!cat) return false;
-
-      if (!prod.sizes || prod.sizes.length === 0) return false;
-
-      const seenSizes = new Set();
-      for (let sIdx = 0; sIdx < prod.sizes.length; sIdx++) {
-        const sz = prod.sizes[sIdx];
-        const sVal = (sz.size || '').trim();
-        if (!sVal) return false;
-        const lower = sVal.toLowerCase();
-        if (seenSizes.has(lower)) return false;
-        seenSizes.add(lower);
-
-        const q = parseInt(sz.qty, 10);
-        if (isNaN(q) || q <= 0) return false;
-
-        const rawBuy = sz.buyingPrice;
-        if (rawBuy === '' || rawBuy === null || rawBuy === undefined) return false;
-        const bp = parseFloat(rawBuy);
-        if (isNaN(bp) || bp < 0) return false;
-
-        const rawSell = sz.sellingPrice;
-        if (rawSell === '' || rawSell === null || rawSell === undefined) return false;
-        const sp = parseFloat(rawSell);
-        if (isNaN(sp) || sp < 0) return false;
-      }
-    }
-
-    return true;
-  }
-
   function updateFormValidity() {
-    const isValid = checkFormValidity();
     const btnDraft = mainCard.querySelector('#btn-wait-receive-pur');
     const btnSave = mainCard.querySelector('#btn-save-pur');
-    const shouldDisable = !isValid || isSubmitting;
 
     if (btnDraft) {
-      btnDraft.disabled = shouldDisable;
-      btnDraft.style.opacity = shouldDisable ? '0.5' : '1';
-      btnDraft.style.cursor = shouldDisable ? 'not-allowed' : 'pointer';
+      btnDraft.disabled = Boolean(isSubmitting);
+      btnDraft.style.opacity = isSubmitting ? '0.7' : '1';
+      btnDraft.style.cursor = isSubmitting ? 'not-allowed' : 'pointer';
       btnDraft.title = isSubmitting
         ? 'Saving purchase order...'
-        : (shouldDisable ? 'Fill all required fields to save this purchase' : 'Save the purchase without moving stock yet');
+        : 'Save the purchase without moving stock yet';
     }
 
     if (btnSave) {
-      btnSave.disabled = shouldDisable;
-      btnSave.style.opacity = shouldDisable ? '0.5' : '1';
-      btnSave.style.cursor = shouldDisable ? 'not-allowed' : 'pointer';
+      btnSave.disabled = Boolean(isSubmitting);
+      btnSave.style.opacity = isSubmitting ? '0.7' : '1';
+      btnSave.style.cursor = isSubmitting ? 'not-allowed' : 'pointer';
       btnSave.title = isSubmitting
         ? 'Processing purchase...'
-        : (shouldDisable ? 'Fill all required fields to receive stock' : 'Save purchase and receive stock');
+        : 'Save purchase and receive stock';
     }
   }
 
@@ -12047,6 +12000,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
                     <i data-lucide="list" style="width: 13px; height: 13px;"></i>
                   </button>
                 </div>
+                <div class="pur-cat-error field-error" style="display: none;"></div>
               </div>
             </div>
             <div class="form-group" style="margin: 0;">
@@ -12136,19 +12090,23 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
                               <i data-lucide="list" style="width: 13px; height: 13px;"></i>
                             </button>
                           </div>
+                          <div class="pur-size-error field-error" style="display: none;"></div>
                         </div>
                       </td>
                       <td>
                         <input type="number" class="form-input pur-qty-input" min="1" placeholder="Qty *" value="${qtyDisplay}" style="font-weight: 600;">
+                        <div class="pur-qty-error field-error" style="display: none;"></div>
                       </td>
                       <td>
                         <input type="number" class="form-input pur-buying-input" min="0" step="any" placeholder="0.00" value="${buyDisplay}" style="font-weight: 600;">
+                        <div class="pur-buying-error field-error" style="display: none;"></div>
                       </td>
                       <td>
                         <input type="text" class="form-input pur-cost-display pur-cost-accent" placeholder="—" value="${costDisplayVal}" readonly style="font-weight: 700; background: var(--bg-secondary);">
                       </td>
                       <td>
                         <input type="number" class="form-input pur-selling-input" min="0" step="any" placeholder="0.00" value="${sellDisplay}" style="font-weight: 600;">
+                        <div class="pur-selling-error field-error" style="display: none;"></div>
                       </td>
                       <td>
                         <input type="text" class="form-input pur-value-display pur-selling-accent" placeholder="—" value="${valueDisplayVal}" readonly style="font-weight: 700; background: var(--bg-secondary);">
@@ -12216,6 +12174,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             nameErrorEl.textContent = err;
             nameErrorEl.style.display = 'block';
           }
+          nameInp.classList.add('is-invalid');
           nameInp.style.borderColor = 'var(--status-danger, #ef4444)';
         } else {
           prod.nameError = null;
@@ -12223,6 +12182,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             nameErrorEl.textContent = '';
             nameErrorEl.style.display = 'none';
           }
+          nameInp.classList.remove('is-invalid');
           nameInp.style.borderColor = '';
         }
         updateFormValidity();
@@ -12238,30 +12198,30 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           titlePreview.textContent = trimmed || 'Untitled Product';
         }
 
-        if (prod.nameError) {
-          if (!val) {
+        if (trimmed) {
+          const err = validateProductName(prod, productsData);
+          if (!err) {
             prod.nameError = null;
             if (nameErrorEl) {
               nameErrorEl.textContent = '';
               nameErrorEl.style.display = 'none';
             }
+            nameInp.classList.remove('is-invalid');
             nameInp.style.borderColor = '';
           } else {
-            const err = validateProductName(prod, productsData);
-            if (!err) {
-              prod.nameError = null;
-              if (nameErrorEl) {
-                nameErrorEl.textContent = '';
-                nameErrorEl.style.display = 'none';
-              }
-              nameInp.style.borderColor = '';
-            } else {
-              prod.nameError = err;
-              if (nameErrorEl) {
-                nameErrorEl.textContent = err;
-                nameErrorEl.style.display = 'block';
-              }
+            prod.nameError = err;
+            if (nameErrorEl) {
+              nameErrorEl.textContent = err;
+              nameErrorEl.style.display = 'block';
             }
+            nameInp.classList.add('is-invalid');
+            nameInp.style.borderColor = 'var(--status-danger, #ef4444)';
+          }
+        } else {
+          prod.nameError = null;
+          if (nameErrorEl) {
+            nameErrorEl.textContent = '';
+            nameErrorEl.style.display = 'none';
           }
         }
 
@@ -12325,12 +12285,23 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           prod.isCustomCategory = false;
           prod.category = e.target.value;
         }
+        if (prod.category && prod.category.trim()) {
+          const catErrEl = sectionEl.querySelector('.pur-cat-error');
+          if (catErrEl) { catErrEl.textContent = ''; catErrEl.style.display = 'none'; }
+          catSel.classList.remove('is-invalid');
+          catCustomInp.classList.remove('is-invalid');
+        }
         updateMetaPreview();
         updateFormValidity();
       });
 
       catCustomInp.addEventListener('input', (e) => {
         prod.category = e.target.value;
+        if (prod.category && prod.category.trim()) {
+          const catErrEl = sectionEl.querySelector('.pur-cat-error');
+          if (catErrEl) { catErrEl.textContent = ''; catErrEl.style.display = 'none'; }
+          catCustomInp.classList.remove('is-invalid');
+        }
         updateMetaPreview();
         updateFormValidity();
       });
@@ -12453,11 +12424,22 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             sz.isCustomSize = false;
             sz.size = e.target.value;
           }
+          if (sz.size && sz.size.trim()) {
+            const errEl = sizeRowEl.querySelector('.pur-size-error');
+            if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+            sizeSel.classList.remove('is-invalid');
+            sizeCustomInp.classList.remove('is-invalid');
+          }
           updateSummaries();
         });
 
         sizeCustomInp.addEventListener('input', (e) => {
           sz.size = e.target.value;
+          if (sz.size && sz.size.trim()) {
+            const errEl = sizeRowEl.querySelector('.pur-size-error');
+            if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+            sizeCustomInp.classList.remove('is-invalid');
+          }
           updateSummaries();
         });
 
@@ -12477,16 +12459,34 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
 
         qtyInp.addEventListener('input', (e) => {
           sz.qty = e.target.value;
+          const q = parseInt(sz.qty, 10);
+          if (sz.qty !== '' && !isNaN(q) && q > 0) {
+            const errEl = sizeRowEl.querySelector('.pur-qty-error');
+            if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+            qtyInp.classList.remove('is-invalid');
+          }
           updateSummaries();
         });
 
         buyInp.addEventListener('input', (e) => {
           sz.buyingPrice = e.target.value;
+          const bp = parseFloat(sz.buyingPrice);
+          if (sz.buyingPrice !== '' && !isNaN(bp) && bp >= 0) {
+            const errEl = sizeRowEl.querySelector('.pur-buying-error');
+            if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+            buyInp.classList.remove('is-invalid');
+          }
           updateSummaries();
         });
 
         sellInp.addEventListener('input', (e) => {
           sz.sellingPrice = e.target.value;
+          const sp = parseFloat(sz.sellingPrice);
+          if (sz.sellingPrice !== '' && !isNaN(sp) && sp >= 0) {
+            const errEl = sizeRowEl.querySelector('.pur-selling-error');
+            if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+            sellInp.classList.remove('is-invalid');
+          }
           updateSummaries();
         });
 
@@ -12507,13 +12507,30 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   // Wire top purchase order inputs
   const supplierInput = mainCard.querySelector('#pur-supplier');
   const dateInput = mainCard.querySelector('#pur-date');
+  const supplierErrEl = mainCard.querySelector('#pur-supplier-error');
+  const dateErrEl = mainCard.querySelector('#pur-date-error');
+
   if (supplierInput) {
-    supplierInput.addEventListener('input', updateFormValidity);
-    supplierInput.addEventListener('change', updateFormValidity);
+    const clearSupplierErr = () => {
+      if (supplierInput.value.trim()) {
+        supplierInput.classList.remove('is-invalid');
+        if (supplierErrEl) { supplierErrEl.textContent = ''; supplierErrEl.style.display = 'none'; }
+      }
+      updateFormValidity();
+    };
+    supplierInput.addEventListener('input', clearSupplierErr);
+    supplierInput.addEventListener('change', clearSupplierErr);
   }
   if (dateInput) {
-    dateInput.addEventListener('input', updateFormValidity);
-    dateInput.addEventListener('change', updateFormValidity);
+    const clearDateErr = () => {
+      if (dateInput.value.trim()) {
+        dateInput.classList.remove('is-invalid');
+        if (dateErrEl) { dateErrEl.textContent = ''; dateErrEl.style.display = 'none'; }
+      }
+      updateFormValidity();
+    };
+    dateInput.addEventListener('input', clearDateErr);
+    dateInput.addEventListener('change', clearDateErr);
   }
 
   renderPurchaseItems();
@@ -12546,92 +12563,227 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     if (onNavigate) onNavigate('purchases');
   });
 
-  function getFirstValidationError() {
+  function expandProductCard(cardEl, prod) {
+    if (!cardEl) return;
+    if (prod) prod.isExpanded = true;
+    cardEl.classList.remove('collapsed');
+    cardEl.classList.add('expanded');
+    const bodyEl = cardEl.querySelector('.pur-accordion-body');
+    const chevron = cardEl.querySelector('.pur-chevron-icon');
+    if (bodyEl) bodyEl.style.display = 'flex';
+    if (chevron) chevron.style.transform = 'rotate(0deg)';
+  }
+
+  function validateAllPurchaseFields() {
+    let firstError = null;
+
+    function markError(inputEl, errEl, message, cardEl, prod) {
+      if (inputEl) {
+        inputEl.classList.add('is-invalid');
+        inputEl.style.borderColor = 'var(--status-danger, #ef4444)';
+      }
+      if (errEl) {
+        errEl.textContent = message;
+        errEl.style.display = 'block';
+      }
+      if (cardEl) {
+        expandProductCard(cardEl, prod);
+      }
+      if (!firstError) {
+        firstError = { inputEl, errEl, message, cardEl, prod };
+      }
+    }
+
+    function clearError(inputEl, errEl) {
+      if (inputEl) {
+        inputEl.classList.remove('is-invalid');
+        inputEl.style.borderColor = '';
+      }
+      if (errEl) {
+        errEl.textContent = '';
+        errEl.style.display = 'none';
+      }
+    }
+
+    // 1. Supplier
     const supplierEl = mainCard.querySelector('#pur-supplier');
+    const supplierErrEl = mainCard.querySelector('#pur-supplier-error');
+    const supplierVal = (supplierEl ? supplierEl.value : '').trim();
+    if (!supplierVal) {
+      markError(supplierEl, supplierErrEl, 'Supplier is required.', null, null);
+    } else {
+      clearError(supplierEl, supplierErrEl);
+    }
+
+    // 2. Purchase Date
     const dateEl = mainCard.querySelector('#pur-date');
-    const supplier = (supplierEl ? supplierEl.value : '').trim();
-    const date = (dateEl ? dateEl.value : '').trim();
+    const dateErrEl = mainCard.querySelector('#pur-date-error');
+    const dateVal = (dateEl ? dateEl.value : '').trim();
+    if (!dateVal) {
+      markError(dateEl, dateErrEl, 'Purchase date is required.', null, null);
+    } else {
+      clearError(dateEl, dateErrEl);
+    }
 
-    if (!supplier) {
-      return { message: 'Supplier name is required.', focusEl: supplierEl };
-    }
-    if (!date) {
-      return { message: 'Purchase date is required.', focusEl: dateEl };
-    }
+    // 3. Products
     if (!productsData || productsData.length === 0) {
-      return { message: 'At least one product is required.', focusEl: null };
+      const addProdBtn = mainCard.querySelector('#btn-add-pur-product');
+      if (!firstError) {
+        firstError = { inputEl: addProdBtn, errEl: null, message: 'At least one product is required.', cardEl: null, prod: null };
+      }
+    } else {
+      for (let pIdx = 0; pIdx < productsData.length; pIdx++) {
+        const prod = productsData[pIdx];
+        const cardEl = itemsContainer.querySelector(`[data-product-id="${prod.id}"]`);
+
+        // Product Name
+        const nameInput = cardEl ? cardEl.querySelector('.pur-name-input') : null;
+        if (nameInput && nameInput.value !== undefined) prod.productName = nameInput.value;
+        const nameErrEl = cardEl ? cardEl.querySelector('.pur-name-error') : null;
+        const pTrimmed = (prod.productName || '').trim();
+
+        if (!pTrimmed) {
+          prod.nameError = 'Product name is required.';
+          markError(nameInput, nameErrEl, 'Product name is required.', cardEl, prod);
+        } else if (pTrimmed.length > 100) {
+          prod.nameError = 'Product name must not exceed 100 characters.';
+          markError(nameInput, nameErrEl, 'Product name must not exceed 100 characters.', cardEl, prod);
+        } else {
+          const dupErr = validateProductName(prod, productsData);
+          if (dupErr) {
+            prod.nameError = dupErr;
+            markError(nameInput, nameErrEl, dupErr, cardEl, prod);
+          } else {
+            prod.nameError = null;
+            clearError(nameInput, nameErrEl);
+          }
+        }
+
+        // Category
+        const catSel = cardEl ? cardEl.querySelector('.pur-cat-select') : null;
+        const catCustomInp = cardEl ? cardEl.querySelector('.pur-cat-custom-input') : null;
+        const catErrEl = cardEl ? cardEl.querySelector('.pur-cat-error') : null;
+        const activeCatInput = prod.isCustomCategory ? catCustomInp : catSel;
+        if (activeCatInput && activeCatInput.value !== undefined) prod.category = activeCatInput.value;
+        const catVal = (prod.category || '').trim();
+
+        if (!catVal) {
+          markError(activeCatInput, catErrEl, 'Category is required.', cardEl, prod);
+        } else {
+          clearError(activeCatInput, catErrEl);
+          if (catSel) clearError(catSel, null);
+          if (catCustomInp) clearError(catCustomInp, null);
+        }
+
+        // Sizes
+        if (!prod.sizes || prod.sizes.length === 0) {
+          const addSizeBtn = cardEl ? cardEl.querySelector('.pur-add-size-btn') : null;
+          markError(addSizeBtn, null, 'At least one size entry is required.', cardEl, prod);
+        } else {
+          const seenSizes = new Set();
+          for (let sIdx = 0; sIdx < prod.sizes.length; sIdx++) {
+            const sz = prod.sizes[sIdx];
+            const sizeRowEl = cardEl ? cardEl.querySelector(`[data-size-id="${sz.id}"]`) : null;
+            if (!sizeRowEl) continue;
+
+            const sizeSel = sizeRowEl.querySelector('.pur-size-select');
+            const sizeCustomInp = sizeRowEl.querySelector('.pur-size-custom-input');
+            const sizeErrEl = sizeRowEl.querySelector('.pur-size-error');
+            const activeSizeInput = sz.isCustomSize ? sizeCustomInp : sizeSel;
+            if (activeSizeInput && activeSizeInput.value !== undefined) sz.size = activeSizeInput.value;
+            const sVal = (sz.size || '').trim();
+
+            // Size / Variant
+            if (!sVal) {
+              markError(activeSizeInput, sizeErrEl, 'Size is required.', cardEl, prod);
+            } else {
+              const lower = sVal.toLowerCase();
+              if (seenSizes.has(lower)) {
+                markError(activeSizeInput, sizeErrEl, 'Duplicate size. Each variant must be unique.', cardEl, prod);
+              } else {
+                seenSizes.add(lower);
+                clearError(activeSizeInput, sizeErrEl);
+                if (sizeSel) clearError(sizeSel, null);
+                if (sizeCustomInp) clearError(sizeCustomInp, null);
+              }
+            }
+
+            // Quantity
+            const qtyInp = sizeRowEl.querySelector('.pur-qty-input');
+            const qtyErrEl = sizeRowEl.querySelector('.pur-qty-error');
+            if (qtyInp && qtyInp.value !== undefined) sz.qty = qtyInp.value;
+            const rawQty = sz.qty;
+            if (rawQty === '' || rawQty === null || rawQty === undefined || String(rawQty).trim() === '') {
+              markError(qtyInp, qtyErrEl, 'Quantity is required.', cardEl, prod);
+            } else {
+              const q = parseInt(rawQty, 10);
+              if (isNaN(q) || q <= 0) {
+                markError(qtyInp, qtyErrEl, 'Quantity must be greater than 0.', cardEl, prod);
+              } else {
+                clearError(qtyInp, qtyErrEl);
+              }
+            }
+
+            // Buying Price
+            const buyInp = sizeRowEl.querySelector('.pur-buying-input');
+            const buyErrEl = sizeRowEl.querySelector('.pur-buying-error');
+            if (buyInp && buyInp.value !== undefined) sz.buyingPrice = buyInp.value;
+            const rawBuy = sz.buyingPrice;
+            if (rawBuy === '' || rawBuy === null || rawBuy === undefined || String(rawBuy).trim() === '') {
+              markError(buyInp, buyErrEl, 'Buying price is required.', cardEl, prod);
+            } else {
+              const bp = parseFloat(rawBuy);
+              if (isNaN(bp) || bp < 0) {
+                markError(buyInp, buyErrEl, 'Buying price cannot be negative.', cardEl, prod);
+              } else {
+                clearError(buyInp, buyErrEl);
+              }
+            }
+
+            // Selling Price
+            const sellInp = sizeRowEl.querySelector('.pur-selling-input');
+            const sellErrEl = sizeRowEl.querySelector('.pur-selling-error');
+            if (sellInp && sellInp.value !== undefined) sz.sellingPrice = sellInp.value;
+            const rawSell = sz.sellingPrice;
+            if (rawSell === '' || rawSell === null || rawSell === undefined || String(rawSell).trim() === '') {
+              markError(sellInp, sellErrEl, 'Selling price is required.', cardEl, prod);
+            } else {
+              const sp = parseFloat(rawSell);
+              if (isNaN(sp) || sp < 0) {
+                markError(sellInp, sellErrEl, 'Selling price cannot be negative.', cardEl, prod);
+              } else {
+                clearError(sellInp, sellErrEl);
+              }
+            }
+          }
+        }
+      }
     }
 
-    for (let pIdx = 0; pIdx < productsData.length; pIdx++) {
-      const prod = productsData[pIdx];
-      const pNum = pIdx + 1;
-      const nameErr = validateProductName(prod, productsData);
-      const cardEl = itemsContainer.querySelector(`[data-product-id="${prod.id}"]`);
-
-      if (nameErr) {
-        prod.nameError = nameErr;
-        if (cardEl) {
-          const errEl = cardEl.querySelector('.pur-name-error');
-          const inpEl = cardEl.querySelector('.pur-name-input');
-          if (errEl) { errEl.textContent = nameErr; errEl.style.display = 'block'; }
-          if (inpEl) { inpEl.style.borderColor = 'var(--status-danger, #ef4444)'; }
-          return { message: `Product #${pNum}: ${nameErr}`, focusEl: inpEl };
-        }
-        return { message: `Product #${pNum}: ${nameErr}`, focusEl: null };
+    if (firstError) {
+      if (firstError.cardEl && firstError.prod) {
+        expandProductCard(firstError.cardEl, firstError.prod);
       }
-
-      const pName = (prod.productName || '').trim();
-      const pCat = (prod.category || '').trim();
-      if (!pCat) {
-        const catSelEl = cardEl ? cardEl.querySelector('.pur-cat-select') : null;
-        return { message: `Product #${pNum} (${pName}): Category is required.`, focusEl: catSelEl };
-      }
-
-      if (!prod.sizes || prod.sizes.length === 0) {
-        return { message: `Product #${pNum} (${pName}): At least one size entry is required.`, focusEl: null };
-      }
-
-      const seenSizes = new Set();
-      for (let sIdx = 0; sIdx < prod.sizes.length; sIdx++) {
-        const sz = prod.sizes[sIdx];
-        const sNum = sIdx + 1;
-        const sVal = (sz.size || '').trim();
-        const sizeRowEl = cardEl ? cardEl.querySelector(`[data-size-id="${sz.id}"]`) : null;
-
-        if (!sVal) {
-          const szSel = sizeRowEl ? sizeRowEl.querySelector('.pur-size-select') : null;
-          return { message: `Product #${pNum} (${pName}), Size #${sNum}: Size / Variant is required.`, focusEl: szSel };
+      setTimeout(() => {
+        if (firstError.inputEl) {
+          firstError.inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (typeof firstError.inputEl.focus === 'function') {
+            firstError.inputEl.focus({ preventScroll: true });
+          }
+          if (typeof firstError.inputEl.select === 'function' && firstError.inputEl.type !== 'date') {
+            try { firstError.inputEl.select(); } catch (_) {}
+          }
         }
+      }, 50);
 
-        const lower = sVal.toLowerCase();
-        if (seenSizes.has(lower)) {
-          return { message: `Product #${pNum} (${pName}): Duplicate size "${sVal}". Each variant must be unique.`, focusEl: null };
-        }
-        seenSizes.add(lower);
-
-        const q = parseInt(sz.qty, 10);
-        if (isNaN(q) || q <= 0) {
-          const qtyInp = sizeRowEl ? sizeRowEl.querySelector('.pur-qty-input') : null;
-          return { message: `Product #${pNum} (${pName}), Size "${sVal}": Quantity must be a positive number greater than 0.`, focusEl: qtyInp };
-        }
-
-        const rawBuy = sz.buyingPrice;
-        const bp = parseFloat(rawBuy);
-        if (rawBuy === '' || rawBuy === null || rawBuy === undefined || isNaN(bp) || bp < 0) {
-          const buyInp = sizeRowEl ? sizeRowEl.querySelector('.pur-buying-input') : null;
-          return { message: `Product #${pNum} (${pName}), Size "${sVal}": Buying Price must be a valid non-negative number.`, focusEl: buyInp };
-        }
-
-        const rawSell = sz.sellingPrice;
-        const sp = parseFloat(rawSell);
-        if (rawSell === '' || rawSell === null || rawSell === undefined || isNaN(sp) || sp < 0) {
-          const sellInp = sizeRowEl ? sizeRowEl.querySelector('.pur-selling-input') : null;
-          return { message: `Product #${pNum} (${pName}), Size "${sVal}": Selling Price must be a valid non-negative number.`, focusEl: sellInp };
-        }
-      }
+      toast.show({
+        message: firstError.message || 'Please complete all required fields.',
+        type: 'danger'
+      });
+      return false;
     }
 
-    return null;
+    return true;
   }
 
   function validateAndGetFlattenedItems() {
@@ -12681,14 +12833,8 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   mainCard.querySelector('#btn-wait-receive-pur').addEventListener('click', () => {
     if (isSubmitting) return;
 
-    const validationErr = getFirstValidationError();
-    if (validationErr) {
-      toast.show({ message: validationErr.message, type: 'danger' });
-      if (validationErr.focusEl && typeof validationErr.focusEl.focus === 'function') {
-        validationErr.focusEl.focus();
-      }
-      return;
-    }
+    const isValid = validateAllPurchaseFields();
+    if (!isValid) return;
 
     const supplier = mainCard.querySelector('#pur-supplier').value.trim();
     const date = mainCard.querySelector('#pur-date').value;
@@ -12720,14 +12866,8 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
   mainCard.querySelector('#btn-save-pur').addEventListener('click', () => {
     if (isSubmitting) return;
 
-    const validationErr = getFirstValidationError();
-    if (validationErr) {
-      toast.show({ message: validationErr.message, type: 'danger' });
-      if (validationErr.focusEl && typeof validationErr.focusEl.focus === 'function') {
-        validationErr.focusEl.focus();
-      }
-      return;
-    }
+    const isValid = validateAllPurchaseFields();
+    if (!isValid) return;
 
     const supplier = mainCard.querySelector('#pur-supplier').value.trim();
     const date = mainCard.querySelector('#pur-date').value;
@@ -13991,8 +14131,7 @@ function renderAddSalePage(onNavigate = null) {
     let p = null;
     if (defaultProductId) {
       p = prods.find(x => x.id === defaultProductId);
-    }
-    if (!p) {
+    } else if (defaultProductId !== '') {
       const usedIds = new Set(productsData.map(pd => pd.productId));
       p = prods.find(x => !usedIds.has(x.id)) || prods[0];
     }
@@ -14000,7 +14139,7 @@ function renderAddSalePage(onNavigate = null) {
     const pBrand = p ? (p.brand || '').trim() : '';
     const pCat = p ? (p.category || 'General') : 'General';
     const hasVariants = p && Array.isArray(p.variants) && p.variants.length > 0;
-    const defaultSize = hasVariants ? p.variants[0].size : 'Standard';
+    const defaultSize = hasVariants ? p.variants[0].size : (p ? 'Standard' : '');
 
     return {
       id: 'sprod_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
@@ -14009,6 +14148,7 @@ function renderAddSalePage(onNavigate = null) {
       brand: pBrand,
       category: pCat,
       searchQuery: '',
+      isExpanded: true,
       sizes: [
         {
           id: 'ssize_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
@@ -14032,6 +14172,7 @@ function renderAddSalePage(onNavigate = null) {
         <div class="form-group">
           <label class="form-label" style="font-weight: 500;">Customer Name <span style="color: #ef4444;">*</span></label>
           <input type="text" id="sale-cust-name" class="form-input" placeholder="e.g. Sneha Patel" value="Walk-in Customer">
+          <div id="sale-cust-name-error" class="field-error" style="display: none;"></div>
         </div>
         <div class="form-group">
           <label class="form-label" style="font-weight: 500;">Phone Number</label>
@@ -14089,6 +14230,7 @@ function renderAddSalePage(onNavigate = null) {
         <div class="form-group" id="sale-amount-paid-group">
           <label class="form-label" for="sale-amount-paid" style="font-weight: 500;">Amount Paid Now (₹)</label>
           <input type="number" id="sale-amount-paid" class="form-input" min="0" step="0.01" placeholder="0.00">
+          <div id="sale-amount-paid-error" class="field-error" style="display: none;"></div>
           <div id="sale-balance-hint" style="font-size: 0.775rem; color: var(--text-secondary); margin-top: 0.3rem;">Balance due will be calculated from the final total.</div>
         </div>
       </div>
@@ -14099,9 +14241,12 @@ function renderAddSalePage(onNavigate = null) {
           <span style="color: var(--text-secondary);">Subtotal:</span>
           <strong id="summary-subtotal" style="color: var(--text-primary);">₹0</strong>
         </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem;">
-          <span style="color: var(--text-secondary);">Discount (₹):</span>
-          <input type="number" id="sale-discount-input" class="form-input" min="0" value="0" style="width: 90px; padding: 0.25rem 0.5rem; text-align: right; font-size: 0.85rem;">
+        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem;">
+            <span style="color: var(--text-secondary);">Discount (₹):</span>
+            <input type="number" id="sale-discount-input" class="form-input" min="0" value="0" style="width: 90px; padding: 0.25rem 0.5rem; text-align: right; font-size: 0.85rem;">
+          </div>
+          <div id="sale-discount-error" class="field-error" style="display: none; text-align: right;"></div>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 1.1rem; font-weight: 700; color: var(--text-primary); border-top: 1px solid var(--border-color); padding-top: 0.65rem; margin-top: 0.25rem;">
           <span>Final Total:</span>
@@ -14159,18 +14304,23 @@ function renderAddSalePage(onNavigate = null) {
           const qtyInp = sizeRowEl.querySelector('.sale-qty-input');
           if (qtyInp) {
             if (isOver) {
-              qtyInp.style.borderColor = '#ef4444';
-              qtyInp.style.background = 'rgba(239,68,68,0.08)';
-              qtyInp.style.color = '#ef4444';
-            } else {
+              qtyInp.classList.add('is-invalid');
+              qtyInp.style.borderColor = 'var(--status-danger, #ef4444)';
+            } else if (q > 0) {
+              qtyInp.classList.remove('is-invalid');
               qtyInp.style.borderColor = '';
               qtyInp.style.background = '';
               qtyInp.style.color = '';
             }
           }
           if (errEl) {
-            errEl.textContent = details.availStock === 0 ? 'Out of stock' : `Max: ${details.availStock}`;
-            errEl.style.display = isOver ? 'block' : 'none';
+            if (isOver) {
+              errEl.textContent = details.availStock === 0 ? 'Out of stock.' : `Only ${details.availStock} units are available.`;
+              errEl.style.display = 'block';
+            } else if (q > 0) {
+              errEl.textContent = '';
+              errEl.style.display = 'none';
+            }
           }
         }
       });
@@ -14262,19 +14412,16 @@ function renderAddSalePage(onNavigate = null) {
     productsData.forEach((prod, pIdx) => {
       let candidateProducts = prods;
 
-      if (!prod.productId && candidateProducts.length > 0) {
-        prod.productId = candidateProducts[0].id;
-        prod.productName = candidateProducts[0].name;
-        prod.category = candidateProducts[0].category || 'General';
-      }
-
-      const selectedProd = prods.find(p => p.id === prod.productId) || null;
+      const selectedProd = prod.productId ? (prods.find(p => p.id === prod.productId) || null) : null;
       if (selectedProd) {
         prod.productName = selectedProd.name;
         prod.category = selectedProd.category || 'General';
         if (!prod.brand && selectedProd.brand) {
           prod.brand = selectedProd.brand.trim();
         }
+      } else {
+        prod.productName = '';
+        prod.category = '—';
       }
 
       const hasSizes = selectedProd && Array.isArray(selectedProd.variants) && selectedProd.variants.length > 0 && selectedProd.variants.some(v => v.size && v.size !== 'Standard');
@@ -14297,7 +14444,7 @@ function renderAddSalePage(onNavigate = null) {
       if (searchFilteredProds.length === 0) {
         prodOptionsHtml = '<option value="" disabled>No products match</option>';
       } else {
-        prodOptionsHtml = searchFilteredProds.map(p => {
+        prodOptionsHtml = '<option value="" ' + (!prod.productId ? 'selected' : '') + '>Select Product</option>' + searchFilteredProds.map(p => {
           const brandLabel = p.brand ? ` [${p.brand}]` : '';
           return `<option value="${p.id}" ${p.id === prod.productId ? 'selected' : ''}>${escapeHtml(p.name)}${escapeHtml(brandLabel)}</option>`;
         }).join('');
@@ -14318,21 +14465,25 @@ function renderAddSalePage(onNavigate = null) {
         const alreadyChosenInOtherRows = (prod.sizes || []).filter(s => s.id !== sz.id).map(s => s.size);
         let sizeOptionsHtml = '';
         if (hasSizes) {
-          sizeOptionsHtml = (selectedProd.variants || []).map(v => {
+          const hasEmpty = !sz.size;
+          sizeOptionsHtml = `<option value="" ${hasEmpty ? 'selected' : ''} disabled>Select size</option>` + (selectedProd.variants || []).map(v => {
             const isTaken = alreadyChosenInOtherRows.includes(v.size) && v.size !== sz.size;
             const priceTag = v.sellingPrice > 0 ? ` (₹${v.sellingPrice})` : '';
             return `<option value="${escapeHtml(v.size)}" ${v.size === sz.size ? 'selected' : ''} ${isTaken ? 'disabled' : ''}>${v.size === 'Standard' ? 'Standard' : 'Size ' + v.size}${priceTag}${isTaken ? ' (Added)' : ''}</option>`;
           }).join('');
-        } else {
+        } else if (selectedProd) {
           sizeOptionsHtml = '<option value="Standard">Standard (No sizes)</option>';
+        } else {
+          sizeOptionsHtml = '<option value="">Select product first</option>';
         }
 
         return `
-          <div class="sale-size-row" data-size-id="${sz.id}" style="display: grid; grid-template-columns: 1.4fr 1.1fr 1.2fr 1fr 1.2fr 30px; gap: 0.55rem; align-items: center;">
+          <div class="sale-size-row" data-size-id="${sz.id}" style="display: grid; grid-template-columns: 1.4fr 1.1fr 1.2fr 1fr 1.2fr 30px; gap: 0.55rem; align-items: start;">
             <div class="form-group" style="margin: 0;">
               <select class="form-select sale-size-select" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;" ${!hasSizes ? 'disabled' : ''}>
                 ${sizeOptionsHtml}
               </select>
+              <div class="sale-size-error field-error" style="display: none;"></div>
             </div>
 
             <div class="form-group" style="margin: 0;">
@@ -14344,9 +14495,9 @@ function renderAddSalePage(onNavigate = null) {
             </div>
 
             <div class="form-group" style="margin: 0; position: relative;">
-              <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${sz.qty}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; text-align: center; box-sizing: border-box; ${isOverStock ? 'border-color: #ef4444; background: rgba(239,68,68,0.08); color: #ef4444;' : ''}">
-              <div class="sale-qty-error" style="color: #ef4444; font-size: 0.7rem; position: absolute; left: 0; right: 0; top: 32px; text-align: center; display: ${isOverStock ? 'block' : 'none'}; white-space: nowrap; pointer-events: none; z-index: 1;">
-                ${availStock === 0 ? 'Out of stock' : `Max: ${availStock}`}
+              <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${sz.qty !== undefined && sz.qty !== null ? sz.qty : ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; text-align: center; box-sizing: border-box; ${isOverStock ? 'border-color: #ef4444; background: rgba(239,68,68,0.08); color: #ef4444;' : ''}">
+              <div class="sale-qty-error field-error" style="font-size: 0.7rem; text-align: center; display: ${isOverStock ? 'block' : 'none'};">
+                ${availStock === 0 ? 'Out of stock.' : `Only ${availStock} units are available.`}
               </div>
             </div>
 
@@ -14354,7 +14505,7 @@ function renderAddSalePage(onNavigate = null) {
               <input type="text" class="form-input sale-total-display" value="₹${lineTotal.toLocaleString('en-IN')}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 700; text-align: right; background: var(--bg-secondary); color: var(--brand-primary); box-sizing: border-box;">
             </div>
 
-            <div style="display: flex; justify-content: center; align-items: center;">
+            <div style="display: flex; justify-content: center; align-items: center; height: 32px;">
               <button type="button" class="btn btn-ghost sale-remove-size-btn" title="Remove size" style="height: 28px; width: 28px; padding: 0; color: var(--status-danger); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); cursor: pointer;">
                 <i data-lucide="trash-2" style="width: 14px; height: 14px;"></i>
               </button>
@@ -14369,9 +14520,12 @@ function renderAddSalePage(onNavigate = null) {
       sectionEl.style.cssText = 'display: flex; flex-direction: column; gap: 0.5rem; padding: 0.65rem 0.85rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-surface);';
 
       sectionEl.innerHTML = `
-        <!-- Product Section Header: Product #, Title Preview, Subtotal, Remove Product -->
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;">
+        <!-- Product Section Accordion Header: Product #, Title Preview, Subtotal, Remove Product -->
+        <div class="sale-accordion-header" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; cursor: pointer; user-select: none;">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <div class="sale-chevron-icon" style="transform: ${prod.isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)'}; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--text-secondary); transition: transform 0.15s ease;">
+              <i data-lucide="chevron-down" style="width: 16px; height: 16px;"></i>
+            </div>
             <span style="font-size: 0.775rem; font-weight: 700; color: var(--brand-primary); text-transform: uppercase; letter-spacing: 0.04em;">Product #${pIdx + 1}</span>
             <span class="sale-prod-title-preview" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(prod.productName || 'Select Product')}</span>
           </div>
@@ -14385,69 +14539,94 @@ function renderAddSalePage(onNavigate = null) {
           </div>
         </div>
 
-        <!-- Scrollable wrapper for compact product inputs & size grid -->
-        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
-          <div style="min-width: 680px; display: flex; flex-direction: column; gap: 0.45rem;">
-            <!-- Horizontal Product Details Row: Product Name (Searchable Combobox), Brand, Category -->
-            <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.55rem; align-items: end;">
-              <div class="form-group" style="margin: 0; position: relative;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
-                <div class="sale-combobox-container" style="position: relative; width: 100%;">
-                  <input type="text" class="form-input sale-combobox-input" placeholder="Search or select product..." autocomplete="off" spellcheck="false" value="${selectedProd ? `${selectedProd.name}${selectedProd.brand ? ' [' + selectedProd.brand + ']' : ''}` : ''}" style="width: 100%; height: 32px; padding: 0.25rem 1.85rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; cursor: pointer; text-overflow: ellipsis; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);" title="Click to search or select product">
-                  <div class="sale-combobox-chevron" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-secondary); display: flex; align-items: center;">
-                    <i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i>
+        <!-- ACCORDION BODY (Expanded / Collapsed) -->
+        <div class="sale-product-body" style="display: ${prod.isExpanded ? 'block' : 'none'};">
+          <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
+            <div style="min-width: 680px; display: flex; flex-direction: column; gap: 0.45rem;">
+              <!-- Horizontal Product Details Row: Product Name (Searchable Combobox), Brand, Category -->
+              <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.55rem; align-items: start;">
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
+                  <div class="sale-combobox-container" style="position: relative; width: 100%;">
+                    <input type="text" class="form-input sale-combobox-input" placeholder="Search or select product..." autocomplete="off" spellcheck="false" value="${selectedProd ? `${selectedProd.name}${selectedProd.brand ? ' [' + selectedProd.brand + ']' : ''}` : ''}" style="width: 100%; height: 32px; padding: 0.25rem 1.85rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; cursor: pointer; text-overflow: ellipsis; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);" title="Click to search or select product">
+                    <div class="sale-combobox-chevron" style="position: absolute; right: 8px; top: 16px; transform: translateY(-50%); pointer-events: none; color: var(--text-secondary); display: flex; align-items: center;">
+                      <i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i>
+                    </div>
+                    <select class="form-select sale-prod-select" style="display: none;">
+                      ${prodOptionsHtml}
+                    </select>
+                    <div class="sale-combobox-menu" style="display: none; position: absolute; top: 34px; left: 0; right: 0; max-height: 220px; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: 1000; padding: 0.25rem 0;"></div>
+                    <div class="sale-prod-error field-error" style="display: none;"></div>
                   </div>
-                  <select class="form-select sale-prod-select" style="display: none;">
-                    ${prodOptionsHtml}
+                </div>
+
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Brand</label>
+                  <select class="form-select sale-brand-select" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
+                    ${brandOptionsHtml}
                   </select>
-                  <div class="sale-combobox-menu" style="display: none; position: absolute; top: calc(100% + 2px); left: 0; right: 0; max-height: 220px; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: 1000; padding: 0.25rem 0;"></div>
+                </div>
+
+                <div class="form-group" style="margin: 0;">
+                  <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Category</label>
+                  <input type="text" class="form-input sale-cat-display" value="${prod.category || '—'}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; background: var(--bg-secondary); color: var(--text-secondary); box-sizing: border-box;" title="${prod.category || ''}">
                 </div>
               </div>
 
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Brand</label>
-                <select class="form-select sale-brand-select" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
-                  ${brandOptionsHtml}
-                </select>
+              <!-- Size-wise Entries Subheader & Actions -->
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.4rem; border-top: 1px dashed var(--border-color); margin-top: 0.35rem;">
+                <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); display: flex; align-items: center; gap: 0.35rem;">
+                  <i data-lucide="layers" style="width: 12px; height: 12px; color: var(--brand-primary);"></i>
+                  <span>Size-wise Sales Entries</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.4rem;">
+                  <button type="button" class="btn btn-secondary btn-sm sale-add-size-btn" style="height: 24px; padding: 0 0.55rem; font-size: 0.72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; border-color: var(--brand-primary); color: var(--brand-primary); background: transparent; cursor: pointer;">
+                    <i data-lucide="plus" style="width: 12px; height: 12px;"></i> Add Size
+                  </button>
+                </div>
               </div>
 
-              <div class="form-group" style="margin: 0;">
-                <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Category</label>
-                <input type="text" class="form-input sale-cat-display" value="${prod.category || '—'}" readonly style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; background: var(--bg-secondary); color: var(--text-secondary); box-sizing: border-box;" title="${prod.category || ''}">
+              <!-- Size Column Headers -->
+              <div style="display: grid; grid-template-columns: 1.4fr 1.1fr 1.2fr 1fr 1.2fr 30px; gap: 0.55rem; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); padding: 0.1rem 0;">
+                <div>Size / Variant <span style="color: #ef4444;">*</span></div>
+                <div style="text-align: center;">Available Stock</div>
+                <div style="text-align: right;">Selling Price (₹)</div>
+                <div style="text-align: center;">Quantity <span style="color: #ef4444;">*</span></div>
+                <div style="text-align: right;">Total (₹)</div>
+                <div></div>
               </div>
-            </div>
 
-            <!-- Size-wise Entries Subheader & Actions -->
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding-top: 0.4rem; border-top: 1px dashed var(--border-color);">
-              <div style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); display: flex; align-items: center; gap: 0.35rem;">
-                <i data-lucide="layers" style="width: 12px; height: 12px; color: var(--brand-primary);"></i>
-                <span>Size-wise Sales Entries</span>
+              <!-- Size Rows Container -->
+              <div class="sale-sizes-container" style="display: flex; flex-direction: column; gap: 0.35rem;">
+                ${sizeRowsHtml}
               </div>
-              <div style="display: flex; align-items: center; gap: 0.4rem;">
-                <button type="button" class="btn btn-secondary btn-sm sale-add-size-btn" style="height: 24px; padding: 0 0.55rem; font-size: 0.72rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem; border-color: var(--brand-primary); color: var(--brand-primary); background: transparent; cursor: pointer;">
-                  <i data-lucide="plus" style="width: 12px; height: 12px;"></i> Add Size
-                </button>
-              </div>
-            </div>
 
-            <!-- Size Column Headers -->
-            <div style="display: grid; grid-template-columns: 1.4fr 1.1fr 1.2fr 1fr 1.2fr 30px; gap: 0.55rem; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); padding: 0.1rem 0;">
-              <div>Size / Variant <span style="color: #ef4444;">*</span></div>
-              <div style="text-align: center;">Available Stock</div>
-              <div style="text-align: right;">Selling Price (₹)</div>
-              <div style="text-align: center;">Quantity <span style="color: #ef4444;">*</span></div>
-              <div style="text-align: right;">Total (₹)</div>
-              <div></div>
             </div>
-
-            <!-- Size Rows Container -->
-            <div class="sale-sizes-container" style="display: flex; flex-direction: column; gap: 0.35rem;">
-              ${sizeRowsHtml}
-            </div>
-
           </div>
         </div>
       `;
+
+      // Wire up Accordion Toggle
+      const headerEl = sectionEl.querySelector('.sale-accordion-header');
+      if (headerEl) {
+        headerEl.addEventListener('click', (e) => {
+          if (e.target.closest('.sale-remove-product-btn')) return;
+          prod.isExpanded = !prod.isExpanded;
+          const bodyEl = sectionEl.querySelector('.sale-product-body');
+          const chevron = sectionEl.querySelector('.sale-chevron-icon');
+          if (prod.isExpanded) {
+            sectionEl.classList.remove('collapsed');
+            sectionEl.classList.add('expanded');
+            if (bodyEl) bodyEl.style.display = 'block';
+            if (chevron) chevron.style.transform = 'rotate(0deg)';
+          } else {
+            sectionEl.classList.remove('expanded');
+            sectionEl.classList.add('collapsed');
+            if (bodyEl) bodyEl.style.display = 'none';
+            if (chevron) chevron.style.transform = 'rotate(-90deg)';
+          }
+        });
+      }
 
       const comboboxContainer = sectionEl.querySelector('.sale-combobox-container');
       const comboboxInp = sectionEl.querySelector('.sale-combobox-input');
@@ -14575,6 +14754,9 @@ function renderAddSalePage(onNavigate = null) {
           qty: 1
         }];
         comboboxInp.value = `${escapeHtml(p.name)}${p.brand ? ' [' + p.brand + ']' : ''}`;
+        comboboxInp.classList.remove('is-invalid');
+        const prodErrEl = sectionEl.querySelector('.sale-prod-error');
+        if (prodErrEl) { prodErrEl.textContent = ''; prodErrEl.style.display = 'none'; }
         if (prodSelect) {
           prodSelect.value = p.id;
         }
@@ -14661,6 +14843,16 @@ function renderAddSalePage(onNavigate = null) {
             size: (newV && newV.length > 0) ? newV[0].size : 'Standard',
             qty: 1
           }];
+        } else {
+          prod.productId = '';
+          prod.productName = '';
+          prod.brand = '';
+          prod.category = '—';
+          prod.sizes = [{
+            id: 'ssize_' + Date.now() + '_1',
+            size: '',
+            qty: 1
+          }];
         }
         renderSaleItems();
         updateSaleSummary();
@@ -14743,13 +14935,28 @@ function renderAddSalePage(onNavigate = null) {
 
         sizeSel.addEventListener('change', (e) => {
           sz.size = e.target.value;
+          if (sz.size && sz.size.trim()) {
+            sizeSel.classList.remove('is-invalid');
+            const errEl = sizeRowEl.querySelector('.sale-size-error');
+            if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+          }
           renderSaleItems();
           updateSaleSummary();
         });
 
         qtyInp.addEventListener('input', (e) => {
-          const val = parseInt(e.target.value, 10);
-          sz.qty = isNaN(val) ? 0 : val;
+          const rawVal = e.target.value.trim();
+          sz.qty = rawVal === '' ? '' : parseInt(rawVal, 10);
+          const q = parseInt(rawVal, 10);
+          const details = getVariantDetails(selectedProd, sz.size);
+          const qtyErrEl = sizeRowEl.querySelector('.sale-qty-error');
+          if (!isNaN(q) && q > 0 && q <= details.availStock) {
+            qtyInp.classList.remove('is-invalid');
+            qtyInp.style.borderColor = '';
+            qtyInp.style.background = '';
+            qtyInp.style.color = '';
+            if (qtyErrEl) { qtyErrEl.textContent = ''; qtyErrEl.style.display = 'none'; }
+          }
           updateSaleSummary();
         });
 
@@ -14776,6 +14983,51 @@ function renderAddSalePage(onNavigate = null) {
   renderSaleItems();
   updateSaleSummary();
 
+  // Wire top & payment controls real-time clearing
+  const custNameInp = mainCard.querySelector('#sale-cust-name');
+  const custNameErr = mainCard.querySelector('#sale-cust-name-error');
+  if (custNameInp) {
+    const clearCustErr = () => {
+      if (custNameInp.value.trim()) {
+        custNameInp.classList.remove('is-invalid');
+        custNameInp.style.borderColor = '';
+        if (custNameErr) { custNameErr.textContent = ''; custNameErr.style.display = 'none'; }
+      }
+    };
+    custNameInp.addEventListener('input', clearCustErr);
+    custNameInp.addEventListener('change', clearCustErr);
+  }
+
+  const amountPaidInp = mainCard.querySelector('#sale-amount-paid');
+  const amountPaidErr = mainCard.querySelector('#sale-amount-paid-error');
+  if (amountPaidInp) {
+    const clearPaidErr = () => {
+      const val = parseFloat(amountPaidInp.value);
+      if (!isNaN(val) && val >= 0) {
+        amountPaidInp.classList.remove('is-invalid');
+        amountPaidInp.style.borderColor = '';
+        if (amountPaidErr) { amountPaidErr.textContent = ''; amountPaidErr.style.display = 'none'; }
+      }
+    };
+    amountPaidInp.addEventListener('input', clearPaidErr);
+    amountPaidInp.addEventListener('change', clearPaidErr);
+  }
+
+  const discountInp = mainCard.querySelector('#sale-discount-input');
+  const discountErr = mainCard.querySelector('#sale-discount-error');
+  if (discountInp) {
+    const clearDiscErr = () => {
+      const val = parseFloat(discountInp.value);
+      if (!isNaN(val) && val >= 0) {
+        discountInp.classList.remove('is-invalid');
+        discountInp.style.borderColor = '';
+        if (discountErr) { discountErr.textContent = ''; discountErr.style.display = 'none'; }
+      }
+    };
+    discountInp.addEventListener('input', clearDiscErr);
+    discountInp.addEventListener('change', clearDiscErr);
+  }
+
   mainCard.querySelector('#btn-add-sale-product').addEventListener('click', () => {
     productsData.push(createProductGroup());
     renderSaleItems();
@@ -14783,14 +15035,270 @@ function renderAddSalePage(onNavigate = null) {
   });
 
   mainCard.querySelector('#sale-discount-input').addEventListener('input', updateSaleSummary);
-  mainCard.querySelector('#sale-pay-status').addEventListener('change', () => updateSaleSummary('status'));
+  mainCard.querySelector('#sale-pay-status').addEventListener('change', () => {
+    updateSaleSummary('status');
+    const paidEl = mainCard.querySelector('#sale-amount-paid');
+    const errEl = mainCard.querySelector('#sale-amount-paid-error');
+    if (paidEl && errEl) {
+      paidEl.classList.remove('is-invalid');
+      paidEl.style.borderColor = '';
+      errEl.textContent = '';
+      errEl.style.display = 'none';
+    }
+  });
   mainCard.querySelector('#sale-amount-paid').addEventListener('input', () => updateSaleSummary('amount'));
 
   mainCard.querySelector('#btn-cancel-sale').addEventListener('click', () => {
     if (onNavigate) onNavigate('sales');
   });
 
+  function expandSaleProductSection(cardEl, prod) {
+    if (!cardEl) return;
+    if (prod) prod.isExpanded = true;
+    cardEl.classList.remove('collapsed');
+    cardEl.classList.add('expanded');
+    const bodyEl = cardEl.querySelector('.sale-product-body');
+    const chevron = cardEl.querySelector('.sale-chevron-icon');
+    if (bodyEl) bodyEl.style.display = 'block';
+    if (chevron) chevron.style.transform = 'rotate(0deg)';
+  }
+
+  function validateAllSaleFields() {
+    let firstError = null;
+
+    function markError(inputEl, errEl, message, cardEl, prod) {
+      if (inputEl) {
+        inputEl.classList.add('is-invalid');
+        inputEl.style.borderColor = 'var(--status-danger, #ef4444)';
+      }
+      if (errEl) {
+        errEl.textContent = message;
+        errEl.style.display = 'block';
+      }
+      if (cardEl) {
+        expandSaleProductSection(cardEl, prod);
+      }
+      if (!firstError) {
+        firstError = { inputEl, errEl, message, cardEl, prod };
+      }
+    }
+
+    function clearError(inputEl, errEl) {
+      if (inputEl) {
+        inputEl.classList.remove('is-invalid');
+        inputEl.style.borderColor = '';
+        inputEl.style.background = '';
+        inputEl.style.color = '';
+      }
+      if (errEl) {
+        errEl.textContent = '';
+        errEl.style.display = 'none';
+      }
+    }
+
+    // 1. Customer Name
+    const custNameEl = mainCard.querySelector('#sale-cust-name');
+    const custNameErrEl = mainCard.querySelector('#sale-cust-name-error');
+    const custNameVal = (custNameEl ? custNameEl.value : '').trim();
+    if (!custNameVal) {
+      markError(custNameEl, custNameErrEl, 'Customer Name is required.', null, null);
+    } else {
+      clearError(custNameEl, custNameErrEl);
+    }
+
+    // Subtotal accumulator to validate payment
+    let currentSubtotal = 0;
+    const prods = store.data.products || [];
+
+    // Cumulative requested stock per variant across all groups
+    const cumulativeDemand = {};
+    for (let pIdx = 0; pIdx < productsData.length; pIdx++) {
+      const prod = productsData[pIdx];
+      const realProd = prods.find(p => p.id === prod.productId);
+      if (realProd) {
+        (prod.sizes || []).forEach(sz => {
+          const q = parseInt(sz.qty, 10);
+          if (!isNaN(q) && q > 0) {
+            const key = `${prod.productId}:::${sz.size || 'Standard'}`;
+            cumulativeDemand[key] = (cumulativeDemand[key] || 0) + q;
+          }
+        });
+      }
+    }
+
+    // 2. Products & Variants
+    if (!productsData || productsData.length === 0) {
+      const addProdBtn = mainCard.querySelector('#btn-add-sale-product');
+      if (!firstError) {
+        firstError = { inputEl: addProdBtn, errEl: null, message: 'Please add at least one product to the sale.', cardEl: null, prod: null };
+      }
+    } else {
+      for (let pIdx = 0; pIdx < productsData.length; pIdx++) {
+        const prod = productsData[pIdx];
+        const cardEl = itemsContainer.querySelector(`[data-product-id="${prod.id}"]`);
+
+        // Combobox / Product
+        const comboboxInp = cardEl ? cardEl.querySelector('.sale-combobox-input') : null;
+        const prodErr = cardEl ? cardEl.querySelector('.sale-prod-error') : null;
+        if (comboboxInp && !comboboxInp.value.trim()) {
+          prod.productId = '';
+          prod.productName = '';
+        }
+
+        if (!prod.productId) {
+          markError(comboboxInp, prodErr, 'Product is required.', cardEl, prod);
+        } else {
+          const realProd = prods.find(p => p.id === prod.productId);
+          if (!realProd) {
+            markError(comboboxInp, prodErr, `Product "${prod.productName || 'Unknown'}" not found in Inventory.`, cardEl, prod);
+          } else {
+            clearError(comboboxInp, prodErr);
+          }
+        }
+
+        // Sizes
+        if (!prod.sizes || prod.sizes.length === 0) {
+          const addSizeBtn = cardEl ? cardEl.querySelector('.sale-add-size-btn') : null;
+          markError(addSizeBtn, null, 'At least one size entry is required.', cardEl, prod);
+        } else {
+          const seenSizes = new Set();
+          const realProd = prods.find(p => p.id === prod.productId);
+
+          for (let sIdx = 0; sIdx < prod.sizes.length; sIdx++) {
+            const sz = prod.sizes[sIdx];
+            const sizeRowEl = cardEl ? cardEl.querySelector(`[data-size-id="${sz.id}"]`) : null;
+            if (!sizeRowEl) continue;
+
+            const sizeSel = sizeRowEl.querySelector('.sale-size-select');
+            const sizeErr = sizeRowEl.querySelector('.sale-size-error');
+            const qtyInp = sizeRowEl.querySelector('.sale-qty-input');
+            const qtyErr = sizeRowEl.querySelector('.sale-qty-error');
+
+            if (sizeSel && sizeSel.value !== undefined) sz.size = sizeSel.value;
+            if (qtyInp && qtyInp.value !== undefined) {
+              const rawVal = qtyInp.value.trim();
+              sz.qty = rawVal === '' ? '' : parseInt(rawVal, 10);
+            }
+
+            const sVal = (sz.size || '').trim();
+
+            // Size selection
+            if (!sVal) {
+              markError(sizeSel, sizeErr, 'Size is required.', cardEl, prod);
+            } else {
+              const lower = sVal.toLowerCase();
+              if (seenSizes.has(lower)) {
+                markError(sizeSel, sizeErr, 'Duplicate size. Each variant must be unique.', cardEl, prod);
+              } else {
+                seenSizes.add(lower);
+                clearError(sizeSel, sizeErr);
+              }
+            }
+
+            // Quantity
+            const rawQty = sz.qty;
+            if (rawQty === '' || rawQty === null || rawQty === undefined || String(rawQty).trim() === '') {
+              markError(qtyInp, qtyErr, 'Quantity is required.', cardEl, prod);
+            } else {
+              const q = parseInt(rawQty, 10);
+              if (isNaN(q) || q <= 0) {
+                markError(qtyInp, qtyErr, 'Quantity must be greater than 0.', cardEl, prod);
+              } else if (realProd) {
+                const details = getVariantDetails(realProd, sz.size);
+                currentSubtotal += q * (details.sellingPrice || 0);
+
+                const key = `${prod.productId}:::${sz.size || 'Standard'}`;
+                const totalReq = cumulativeDemand[key] || q;
+
+                if (details.availStock <= 0) {
+                  markError(qtyInp, qtyErr, 'Out of stock.', cardEl, prod);
+                } else if (totalReq > details.availStock) {
+                  markError(qtyInp, qtyErr, `Only ${details.availStock} units are available.`, cardEl, prod);
+                } else {
+                  clearError(qtyInp, qtyErr);
+                }
+              } else {
+                clearError(qtyInp, qtyErr);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Discount & Payment Details
+    const discountEl = mainCard.querySelector('#sale-discount-input');
+    const discountErrEl = mainCard.querySelector('#sale-discount-error');
+    const discountVal = parseFloat(discountEl ? discountEl.value : '0') || 0;
+
+    if (discountVal < 0) {
+      markError(discountEl, discountErrEl, 'Discount cannot be negative.', null, null);
+    } else {
+      clearError(discountEl, discountErrEl);
+    }
+
+    const finalTotal = Math.max(0, currentSubtotal - discountVal);
+    const payStatusEl = mainCard.querySelector('#sale-pay-status');
+    const payStatus = payStatusEl ? payStatusEl.value : 'Paid';
+    const amountPaidEl = mainCard.querySelector('#sale-amount-paid');
+    const amountPaidErrEl = mainCard.querySelector('#sale-amount-paid-error');
+    const amountPaidRaw = (amountPaidEl ? amountPaidEl.value : '').trim();
+    const amountPaid = parseFloat(amountPaidRaw);
+
+    if (amountPaidRaw !== '' && isFinite(amountPaid) && amountPaid < 0) {
+      markError(amountPaidEl, amountPaidErrEl, 'Amount paid cannot be negative.', null, null);
+    } else if (payStatus === 'Partial') {
+      if (amountPaidRaw === '' || isNaN(amountPaid) || amountPaid <= 0) {
+        markError(amountPaidEl, amountPaidErrEl, 'Amount paid is required for partial payment.', null, null);
+      } else if (amountPaid >= finalTotal) {
+        markError(amountPaidEl, amountPaidErrEl, `Partial payment must be less than final total (₹${finalTotal.toLocaleString('en-IN')}).`, null, null);
+      } else {
+        clearError(amountPaidEl, amountPaidErrEl);
+      }
+    } else if (payStatus === 'Paid') {
+      if (finalTotal > 0 && amountPaidRaw !== '' && isFinite(amountPaid) && amountPaid < finalTotal) {
+        markError(amountPaidEl, amountPaidErrEl, `Amount paid must equal the final total of ₹${finalTotal.toLocaleString('en-IN')}.`, null, null);
+      } else {
+        clearError(amountPaidEl, amountPaidErrEl);
+      }
+    } else {
+      clearError(amountPaidEl, amountPaidErrEl);
+    }
+
+    if (firstError) {
+      if (firstError.cardEl && firstError.prod) {
+        expandSaleProductSection(firstError.cardEl, firstError.prod);
+      }
+      setTimeout(() => {
+        if (firstError.inputEl) {
+          firstError.inputEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (typeof firstError.inputEl.focus === 'function') {
+            firstError.inputEl.focus({ preventScroll: true });
+          }
+          if (typeof firstError.inputEl.select === 'function' && firstError.inputEl.type !== 'date') {
+            try { firstError.inputEl.select(); } catch (_) {}
+          }
+        }
+      }, 50);
+
+      toast.show({
+        message: firstError.message || 'Please complete all required fields.',
+        type: 'danger'
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  let isSubmitting = false;
+
   mainCard.querySelector('#btn-complete-sale').addEventListener('click', () => {
+    if (isSubmitting) return;
+
+    const isValid = validateAllSaleFields();
+    if (!isValid) return;
+
     const custName = mainCard.querySelector('#sale-cust-name').value.trim();
     const custPhone = mainCard.querySelector('#sale-cust-phone').value.trim();
     const payMethod = mainCard.querySelector('#sale-pay-method').value;
@@ -14799,79 +15307,18 @@ function renderAddSalePage(onNavigate = null) {
     const amountPaidRaw = mainCard.querySelector('#sale-amount-paid').value;
     const amountPaid = parseFloat(amountPaidRaw);
 
-    if (!custName) {
-      toast.show({ message: 'Customer Name is required.', type: 'danger' });
-      return;
-    }
-
-    if (payStatus === 'Partial' && (!isFinite(amountPaid) || amountPaid <= 0)) {
-      toast.show({ message: 'Enter the amount the customer paid, or set the status to Pending.', type: 'danger' });
-      return;
-    }
-    if (isFinite(amountPaid) && amountPaid < 0) {
-      toast.show({ message: 'Amount paid cannot be negative.', type: 'danger' });
-      return;
-    }
-
-    if (productsData.length === 0) {
-      toast.show({ message: 'Please add at least one product to the sale.', type: 'danger' });
-      return;
-    }
-
     const prods = store.data.products || [];
     const allSaleItems = [];
-    const requiredStockMap = {};
 
     for (let prod of productsData) {
-      if (!prod.productId) {
-        toast.show({ message: 'Please select a valid product for all product groups.', type: 'danger' });
-        return;
-      }
-      const realProd = prods.find(p => p.id === prod.productId);
-      if (!realProd) {
-        toast.show({ message: `Product "${prod.productName || 'Unknown'}" not found in Inventory records.`, type: 'danger' });
-        return;
-      }
-
-      if (!prod.sizes || prod.sizes.length === 0) {
-        toast.show({ message: `Please add at least one size for "${realProd.name}".`, type: 'danger' });
-        return;
-      }
-
       for (let sz of prod.sizes) {
         const q = parseInt(sz.qty, 10);
-        if (isNaN(q) || q <= 0) {
-          toast.show({ message: `Quantity must be greater than 0 for "${realProd.name}" (${sz.size}).`, type: 'danger' });
-          return;
-        }
-        const key = `${prod.productId}:::${sz.size || 'Standard'}`;
-        requiredStockMap[key] = (requiredStockMap[key] || 0) + q;
         allSaleItems.push({
           productId: prod.productId,
-          productName: realProd.name,
+          productName: prod.productName,
           size: sz.size || 'Standard',
           qty: q
         });
-      }
-    }
-
-    if (allSaleItems.length === 0) {
-      toast.show({ message: 'Please add at least one item to the sale.', type: 'danger' });
-      return;
-    }
-
-    // Cumulative stock verification against latest store inventory
-    for (const [key, reqQty] of Object.entries(requiredStockMap)) {
-      const [prodId, size] = key.split(':::');
-      const prod = prods.find(p => p.id === prodId);
-      const details = getVariantDetails(prod, size);
-      if (reqQty > details.availStock) {
-        const sizeLabel = size && size !== 'Standard' ? ` (${size})` : '';
-        toast.show({
-          message: `Only ${details.availStock} units available for "${prod.name}"${sizeLabel}. Requested: ${reqQty}.`,
-          type: 'danger'
-        });
-        return;
       }
     }
 
@@ -14887,6 +15334,14 @@ function renderAddSalePage(onNavigate = null) {
     });
 
     try {
+      isSubmitting = true;
+      const btnComplete = mainCard.querySelector('#btn-complete-sale');
+      if (btnComplete) {
+        btnComplete.disabled = true;
+        btnComplete.style.opacity = '0.7';
+        btnComplete.style.cursor = 'not-allowed';
+      }
+
       store.addSale({
         customerName: custName,
         customerPhone: custPhone,
@@ -14900,6 +15355,13 @@ function renderAddSalePage(onNavigate = null) {
       toast.show({ message: 'Sale completed successfully.', type: 'success' });
       if (onNavigate) onNavigate('sales');
     } catch (err) {
+      isSubmitting = false;
+      const btnComplete = mainCard.querySelector('#btn-complete-sale');
+      if (btnComplete) {
+        btnComplete.disabled = false;
+        btnComplete.style.opacity = '';
+        btnComplete.style.cursor = '';
+      }
       toast.show({ message: err.message || 'Failed to complete sale.', type: 'danger' });
     }
   });
