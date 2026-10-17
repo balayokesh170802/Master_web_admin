@@ -1,44 +1,121 @@
 /* Theme Tokens for Master Web Admin */
 
+/* ==========================================================================
+   LIGHT THEME — semantic colour system
+   --------------------------------------------------------------------------
+   Neutral  → default surfaces, text, borders (cool slate, tuned to the navy)
+   Brand    → actions, navigation, selection, focus (Master navy)
+   Success  → paid / received / completed / active / in stock
+   Warning  → partial / pending / waiting / low stock / unsaved changes
+   Danger   → out of stock / delete / failed / validation errors
+   Info     → hints, informational notices, overpaid, supporting figures
+   Every family has four roles:
+     <family>          solid — icons, emphasised text; ≥4.5:1 on white
+     <family>-text     darker — text on the family's soft background
+     <family>-bg       soft background (badges, notices, tinted cards)
+     <family>-border   soft border to match the background
+   ========================================================================== */
 :root, [data-theme="light"] {
-  --bg-main: #F7F8FC;
+  /* Neutral */
+  --bg-main: #F1F3F6;
   --bg-surface: #FFFFFF;
-  --bg-secondary: #F1F3F8;
-  
+  --bg-secondary: #F3F5F8;
+  --bg-subtle: #F8F9FB;
+  --bg-hover: #F5F7FA;
+  --bg-disabled: #F3F5F8;
+
   --text-primary: #111827;
-  --text-secondary: #667085;
-  --text-tertiary: #98A2B3;
-  
-  --border-color: #E4E7EC;
-  --border-hover: #D0D5DD;
-  
-  --brand-primary: #2563EB;
-  --brand-hover: #1D4ED8;
-  --brand-soft: #EFF6FF;
+  --text-secondary: #5F6B7A;
+  --text-tertiary: #8A94A3;
+  --text-disabled: #A3ACB9;
+
+  --border-color: #E2E6EC;
+  --border-hover: #CDD3DC;
+  --input-border: #D3D8E0;
+
+  /* Brand */
+  --brand-primary: #0F1E4E;
+  --brand-hover: #1B2D66;
+  --brand-soft: #EEF1F8;
+  --brand-soft-strong: #E1E6F2;
   --brand-text: #FFFFFF;
-  
-  --status-success: #16A34A;
-  --status-success-bg: #F0FDF4;
-  --status-success-border: #BBF7D0;
-  --status-success-text: #15803D;
-  
-  --status-warning: #D97706;
-  --status-warning-bg: #FFFBEB;
-  --status-warning-border: #FDE68A;
-  --status-warning-text: #B45309;
-  
-  --status-danger: #DC2626;
-  --status-danger-bg: #FEF2F2;
-  --status-danger-border: #FECACA;
-  --status-danger-text: #B91C1C;
-  
-  --status-info: #2563EB;
-  --status-info-bg: #EFF6FF;
-  --status-info-border: #BFDBFE;
-  --status-info-text: #1D4ED8;
-  
+  --focus-ring: rgba(15, 30, 78, 0.14);
+
+  /* Visibility hierarchy: neutral (quiet) < success < warning < danger.
+     -accent  vivid hue for icons, dots, stripes and borders (≥3:1, non-text)
+     solid    deep shade for text and emphasis (≥4.5:1 on white) */
+
+  /* Success — clearly positive, the calmest of the three */
+  --status-success: #17803D;
+  --status-success-accent: #1F9D4C;
+  --status-success-text: #116530;
+  --status-success-bg: #E4F4E9;
+  --status-success-border: #A9DBB8;
+  --status-success-border-strong: #7CC896;
+
+  /* Warning — clearly amber, needs checking */
+  --status-warning: #B45309;
+  --status-warning-accent: #CC7A06;
+  --status-warning-text: #8A3F06;
+  --status-warning-bg: #FDF0D8;
+  --status-warning-border: #F2C67E;
+  --status-warning-border-strong: #E9A93F;
+
+  /* Danger — the strongest signal */
+  --status-danger: #C8291D;
+  --status-danger-accent: #DC2626;
+  --status-danger-text: #9F1F16;
+  --status-danger-bg: #FDE5E2;
+  --status-danger-border: #F0A59E;
+  --status-danger-border-strong: #E2766C;
+  --status-danger-hover: #A32016;
+
+  /* Info */
+  --status-info: #2F5BB7;
+  --status-info-accent: #3B6FD6;
+  --status-info-text: #23488F;
+  --status-info-bg: #E7EEFA;
+  --status-info-border: #B8CAEC;
+
+  /* Table rows: white / faint cool tint zebra; hover a touch deeper and
+     nudged toward the navy family; selected rows use --brand-soft. */
+  --table-row-alt: #F8F9FC;
+  --table-row-hover: #EEF1F6;
+
+  /* Neutral status (inactive, archived, cancelled, default) */
+  --status-neutral-bg: #F3F5F8;
+  --status-neutral-border: #E2E6EC;
+  --status-neutral-text: #5F6B7A;
+
   --shadow-sm: 0 1px 2px 0 rgba(16, 24, 40, 0.04);
-  --shadow-md: 0 4px 6px -1px rgba(16, 24, 40, 0.06), 0 2px 4px -2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 4px 12px -2px rgba(16, 24, 40, 0.07), 0 2px 4px -2px rgba(16, 24, 40, 0.03);
+  --shadow-lg: 0 20px 40px -12px rgba(16, 24, 40, 0.18);
+  --overlay-bg: rgba(17, 24, 39, 0.32);
+  --nav-active-bg: #EEF1F8;
+  --nav-active-text: #0F1E4E;
+  --nav-active-indicator: #0F1E4E;
+
+  /* KPI icon container (neutral) */
+  --metric-icon-bg: var(--status-neutral-bg);
+  --metric-icon-border: var(--border-color);
+  --metric-icon-color: var(--text-secondary);
+
+  /* Stock-status KPI cards reuse the warning / danger families */
+  --kpi-warning-bg: #FEF4E1;
+  --kpi-warning-border: var(--status-warning-border-strong);
+  --kpi-warning-icon-bg: #FBE1B3;
+  --kpi-warning-icon-border: var(--status-warning-border);
+  --kpi-warning-accent: var(--status-warning-accent);
+  --kpi-warning-value: var(--status-warning);
+  --kpi-warning-stripe: var(--status-warning-accent);
+
+  --kpi-danger-bg: var(--status-danger-bg);
+  --kpi-danger-border: var(--status-danger-border-strong);
+  --kpi-danger-icon-bg: #FAC9C3;
+  --kpi-danger-icon-border: var(--status-danger-border);
+  --kpi-danger-accent: var(--status-danger-accent);
+  --kpi-danger-value: var(--status-danger);
+  --kpi-danger-stripe: var(--status-danger-accent);
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -83,4 +160,54 @@
   
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+
+  /* Tokens added for the light theme, mapped so dark mode looks as before */
+  --bg-hover: #151F35;
+  --bg-disabled: #151F35;
+  --text-disabled: #64748B;
+  --status-warning-border-strong: rgba(245, 158, 11, 0.35);
+  --status-danger-border-strong: rgba(239, 68, 68, 0.35);
+  --status-neutral-bg: #151F35;
+  --status-neutral-border: #24304A;
+  --status-neutral-text: #98A2B3;
+  /* Light-only visibility tokens; dark keeps its existing solid shades. */
+  --status-success-accent: #16A34A;
+  --status-warning-accent: #D97706;
+  --status-danger-accent: #DC2626;
+  --status-info-accent: #2563EB;
+  --status-success-border-strong: rgba(34, 197, 94, 0.35);
+  --kpi-warning-stripe: transparent;
+  --kpi-danger-stripe: transparent;
+  /* No zebra in dark mode; hover keeps its existing colour. */
+  --table-row-alt: transparent;
+  --table-row-hover: #151F35;
+  --bg-subtle: #151F35;
+  --input-border: #24304A;
+  --brand-soft-strong: rgba(59, 130, 246, 0.3);
+  --focus-ring: rgba(59, 130, 246, 0.22);
+  --status-danger-hover: #B91C1C;
+  --shadow-lg: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  --overlay-bg: rgba(0, 0, 0, 0.45);
+  --nav-active-bg: #3B82F6;
+  --nav-active-text: #FFFFFF;
+  --nav-active-indicator: transparent;
+
+  /* Dark mode keeps its previous look: neutral surface, coloured border */
+  --metric-icon-bg: #151F35;
+  --metric-icon-border: #24304A;
+  --metric-icon-color: #98A2B3;
+
+  --kpi-warning-bg: #10182B;
+  --kpi-warning-border: rgba(245, 158, 11, 0.35);
+  --kpi-warning-icon-bg: #151F35;
+  --kpi-warning-icon-border: #24304A;
+  --kpi-warning-accent: #98A2B3;
+  --kpi-warning-value: #F8FAFC;
+
+  --kpi-danger-bg: #10182B;
+  --kpi-danger-border: rgba(239, 68, 68, 0.35);
+  --kpi-danger-icon-bg: #151F35;
+  --kpi-danger-icon-border: #24304A;
+  --kpi-danger-accent: #98A2B3;
+  --kpi-danger-value: #F8FAFC;
 }

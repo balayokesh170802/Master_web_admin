@@ -39,7 +39,7 @@ body {
 }
 
 .page-container {
-  padding: 1.5rem 2rem;
+  padding: 1.75rem 2rem 2rem;
   max-width: 1600px;
   width: 100%;
   margin: 0 auto;
@@ -96,7 +96,7 @@ body {
   height: 32px;
   border-radius: var(--radius-sm);
   background-color: var(--brand-primary);
-  color: #ffffff;
+  color: var(--brand-text);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -146,35 +146,89 @@ body {
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.65rem 0.85rem;
+  padding: 0.6rem 0.85rem;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 0.875rem;
   font-weight: 500;
   text-decoration: none;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
   background: transparent;
   border: none;
   width: 100%;
   text-align: left;
+  font-family: inherit;
+}
+
+.nav-item i, .nav-item svg {
+  color: var(--text-tertiary);
+  transition: color 0.15s ease;
 }
 
 .nav-item:hover {
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-hover);
   color: var(--text-primary);
 }
 
+.nav-item:hover i, .nav-item:hover svg {
+  color: var(--text-secondary);
+}
+
+.nav-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* Active: soft brand tint + brand text + slim indicator (light theme);
+   solid brand fill in dark theme via the --nav-active-* tokens. */
 .nav-item.active {
-  background-color: var(--brand-primary);
-  color: var(--brand-text);
+  background-color: var(--nav-active-bg);
+  color: var(--nav-active-text);
+  font-weight: 600;
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background-color: var(--nav-active-indicator);
 }
 
 .nav-item.active i, .nav-item.active svg {
-  color: var(--brand-text);
+  color: var(--nav-active-text);
+}
+
+/* Sidebar footer: holds Logout, separated from the page navigation. */
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Logout is an action, not a page: neutral at rest, subtle danger on hover,
+   and never the active-page style. */
+.nav-item.nav-logout:hover {
+  background-color: var(--status-danger-bg);
+  color: var(--status-danger);
+}
+
+.nav-item.nav-logout:hover i,
+.nav-item.nav-logout:hover svg {
+  color: var(--status-danger);
+}
+
+.nav-item.nav-logout:focus-visible {
+  outline: 2px solid var(--status-danger-border);
+  outline-offset: 1px;
 }
 
 .topbar {
@@ -208,8 +262,13 @@ body {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 1.25rem;
+  padding: 1.5rem;
   box-shadow: var(--shadow-sm);
+}
+
+.card-title {
+  color: var(--text-primary);
+  letter-spacing: -0.005em;
 }
 
 .card-header {
@@ -242,10 +301,11 @@ body {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  padding: 1rem 1.15rem;
+  padding: 1.15rem 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
+  box-shadow: var(--shadow-sm);
 }
 
 .metric-card-clickable {
@@ -255,9 +315,9 @@ body {
 }
 
 .metric-card-clickable:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   box-shadow: var(--shadow-md);
-  border-color: var(--brand-primary);
+  border-color: var(--border-hover);
 }
 
 .metric-header {
@@ -267,13 +327,70 @@ body {
   color: var(--text-secondary);
   font-size: var(--font-size-label);
   font-weight: var(--font-weight-label);
+  letter-spacing: 0.02em;
 }
 
 .metric-value {
-  font-size: 1.5rem;
+  font-size: 1.625rem;
   font-weight: 600;
   color: var(--text-primary);
   line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.metric-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--metric-icon-bg);
+  border: 1px solid var(--metric-icon-border);
+  color: var(--metric-icon-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Stock-status KPI cards (Low Stock / Out of Stock): a soft tinted surface
+   with the semantic colour on the icon and the number only — labels and
+   descriptive text stay neutral. */
+.metric-card-status.metric-card-warning {
+  background-color: var(--kpi-warning-bg);
+  border-color: var(--kpi-warning-border);
+}
+
+.metric-card-status.metric-card-warning .metric-icon {
+  background: var(--kpi-warning-icon-bg);
+  border-color: var(--kpi-warning-icon-border);
+  color: var(--kpi-warning-accent);
+}
+
+.metric-card-status.metric-card-warning .metric-value {
+  color: var(--kpi-warning-value);
+}
+
+.metric-card-status.metric-card-danger {
+  background-color: var(--kpi-danger-bg);
+  border-color: var(--kpi-danger-border);
+}
+
+.metric-card-status.metric-card-danger .metric-icon {
+  background: var(--kpi-danger-icon-bg);
+  border-color: var(--kpi-danger-icon-border);
+  color: var(--kpi-danger-accent);
+}
+
+.metric-card-status.metric-card-danger .metric-value {
+  color: var(--kpi-danger-value);
+}
+
+/* Keep the semantic border on hover instead of the neutral hover border. */
+.metric-card-status.metric-card-warning.metric-card-clickable:hover {
+  border-color: var(--kpi-warning-accent);
+}
+
+.metric-card-status.metric-card-danger.metric-card-clickable:hover {
+  border-color: var(--kpi-danger-accent);
 }
 
 .metric-footer {
@@ -297,29 +414,53 @@ body {
 
 .admin-table th {
   padding: 0.75rem 1rem;
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-subtle);
   color: var(--text-secondary);
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.05em;
   border-bottom: 1px solid var(--border-color);
   white-space: nowrap;
 }
 
 .admin-table td {
-  padding: 0.85rem 1rem;
+  padding: 0.9rem 1rem;
   border-bottom: 1px solid var(--border-color);
   color: var(--text-primary);
   vertical-align: middle;
+  line-height: 1.45;
 }
 
-.admin-table tbody tr {
+.admin-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-table tbody tr,
+.pur-size-table tbody tr {
   transition: background-color 0.15s ease;
 }
 
-.admin-table tbody tr:hover {
-  background-color: var(--bg-secondary);
+/* Zebra striping (shared by every table).
+   Priority: zebra < hover < selected. Selected rows set their background
+   inline, which already outranks both rules below.
+   `nth-child(even of …)` counts only real data rows, so Inventory's
+   expandable size-breakdown rows and the empty-state row don't shift the
+   stripe pattern. A lone empty-state row is row 1, so it is never striped. */
+.admin-table tbody tr:nth-child(even of :not(.size-breakdown-row)),
+.pur-size-table tbody tr:nth-child(even of :not(.pur-size-empty-row)) {
+  background-color: var(--table-row-alt);
+}
+
+/* Hover must override zebra: same specificity as the zebra rule, declared
+   after it. Container / empty-state rows don't highlight. */
+.admin-table tbody tr:hover:not(.size-breakdown-row),
+:root:not([data-theme="dark"]) .pur-size-table tbody tr:hover:not(.pur-size-empty-row) {
+  background-color: var(--table-row-hover);
+}
+
+.admin-table tbody tr:has(> td[colspan]:only-child):hover {
+  background-color: transparent;
 }
 
 /* Badges */
@@ -327,11 +468,12 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.2rem 0.55rem;
+  padding: 0.22rem 0.6rem;
   border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
+  font-size: 0.72rem;
+  font-weight: 600;
   line-height: 1.2;
+  letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
@@ -359,10 +501,17 @@ body {
   color: var(--status-info-text);
 }
 
+/* Brand / selected state (selected size rows, product labels). */
+.badge-primary {
+  background-color: var(--brand-soft);
+  border: 1px solid var(--brand-soft-strong);
+  color: var(--brand-primary);
+}
+
 .badge-secondary {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
+  background-color: var(--status-neutral-bg);
+  border: 1px solid var(--status-neutral-border);
+  color: var(--status-neutral-text);
 }
 
 /* Buttons */
@@ -371,21 +520,28 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  padding: 0.5rem 0.9rem;
+  padding: 0.5rem 0.95rem;
   font-size: 0.875rem;
   font-weight: 500;
+  line-height: 1.35;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   text-decoration: none;
   font-family: inherit;
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .btn-primary {
   background-color: var(--brand-primary);
   color: var(--brand-text);
   border-color: var(--brand-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-primary:hover {
@@ -396,11 +552,12 @@ body {
 .btn-secondary {
   background-color: var(--bg-surface);
   color: var(--text-primary);
-  border-color: var(--border-color);
+  border-color: var(--input-border);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-secondary:hover {
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-hover);
   border-color: var(--border-hover);
 }
 
@@ -411,17 +568,23 @@ body {
 }
 
 .btn-ghost:hover {
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-hover);
   color: var(--text-primary);
 }
 
 .btn-danger {
   background-color: var(--status-danger);
-  color: #ffffff;
+  border-color: var(--status-danger);
+  color: var(--brand-text);
+}
+
+.btn-danger:hover {
+  background-color: var(--status-danger-hover);
+  border-color: var(--status-danger-hover);
 }
 
 .btn-sm {
-  padding: 0.35rem 0.65rem;
+  padding: 0.38rem 0.7rem;
   font-size: 0.78125rem;
 }
 
@@ -429,7 +592,7 @@ body {
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
 }
 
 .form-label {
@@ -440,20 +603,37 @@ body {
 
 .form-input, .form-select, .form-textarea {
   width: 100%;
-  padding: 0.5rem 0.75rem;
+  padding: 0.55rem 0.75rem;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--input-border);
   background-color: var(--bg-surface);
   color: var(--text-primary);
   font-family: inherit;
   font-size: 0.875rem;
+  line-height: 1.4;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.form-input::placeholder, .form-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.form-input:hover:not(:disabled):not(:focus),
+.form-select:hover:not(:disabled):not(:focus),
+.form-textarea:hover:not(:disabled):not(:focus) {
+  border-color: var(--border-hover);
+}
+
 .form-input:focus, .form-select:focus, .form-textarea:focus {
   border-color: var(--brand-primary);
-  box-shadow: 0 0 0 2px var(--brand-soft);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.form-input:disabled, .form-select:disabled, .form-textarea:disabled {
+  background-color: var(--bg-disabled);
+  color: var(--text-disabled);
+  cursor: not-allowed;
 }
 
 /* Filter Bar */
@@ -487,7 +667,7 @@ body {
 .modal-overlay, .drawer-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.45);
+  background-color: var(--overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -504,7 +684,7 @@ body {
   max-width: 600px;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
 }
@@ -515,6 +695,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.modal-header .card-title {
+  font-weight: 600;
 }
 
 .modal-body {
@@ -531,7 +715,8 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 0.75rem;
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-subtle);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
 
 .drawer-content {
@@ -543,7 +728,7 @@ body {
   max-width: 520px;
   background-color: var(--bg-surface);
   border-left: 1px solid var(--border-color);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   z-index: 101;
@@ -605,6 +790,154 @@ body {
   animation: fadeIn 0.2s ease;
 }
 
+/* ==========================================================================
+   LIGHT MODE — semantic visibility layer
+   Normal UI stays neutral; semantic states add background + border + accent
+   (stripe, dot or icon), never colour alone. Danger is the strongest signal.
+   Everything here is scoped to light mode so dark mode is unchanged.
+   ========================================================================== */
+/* Toasts: tinted surface, family border, solid edge, coloured icon. */
+:root:not([data-theme="dark"]) .toast-success {
+  background-color: var(--status-success-bg);
+  border-color: var(--status-success-border);
+  border-left: 4px solid var(--status-success-accent);
+}
+:root:not([data-theme="dark"]) .toast-warning {
+  background-color: var(--status-warning-bg);
+  border-color: var(--status-warning-border);
+  border-left: 4px solid var(--status-warning-accent);
+}
+:root:not([data-theme="dark"]) .toast-danger {
+  background-color: var(--status-danger-bg);
+  border-color: var(--status-danger-border);
+  border-left: 4px solid var(--status-danger-accent);
+}
+:root:not([data-theme="dark"]) .toast-info {
+  background-color: var(--status-info-bg);
+  border-color: var(--status-info-border);
+  border-left: 4px solid var(--status-info-accent);
+}
+
+/* Status badges: a leading dot in the family accent so state reads at a
+   glance in dense tables (skipped when the badge already has an icon). */
+:root:not([data-theme="dark"]) .badge-success:not(:has(svg, i))::before,
+:root:not([data-theme="dark"]) .badge-warning:not(:has(svg, i))::before,
+:root:not([data-theme="dark"]) .badge-danger:not(:has(svg, i))::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+:root:not([data-theme="dark"]) .badge-success:not(:has(svg, i))::before { background-color: var(--status-success-accent); }
+:root:not([data-theme="dark"]) .badge-warning:not(:has(svg, i))::before { background-color: var(--status-warning-accent); }
+:root:not([data-theme="dark"]) .badge-danger:not(:has(svg, i))::before  { background-color: var(--status-danger-accent); }
+
+/* Validation: error text gets a small "!" marker next to the message. */
+:root:not([data-theme="dark"]) .field-error,
+:root:not([data-theme="dark"]) .pur-name-error {
+  font-weight: 600;
+  color: var(--status-danger);
+}
+:root:not([data-theme="dark"]) .field-error::before,
+:root:not([data-theme="dark"]) .pur-name-error::before {
+  content: '!';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background-color: var(--status-danger-accent);
+  color: #FFFFFF;
+  font-size: 0.6rem;
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: -2px;
+}
+
+:root:not([data-theme="dark"]) .field-error:empty::before,
+:root:not([data-theme="dark"]) .pur-name-error:empty::before {
+  content: none;
+}
+
+/* Destructive icon buttons in tables: red icon + soft red border at rest,
+   red tint on hover — recognisable next to neutral View/Edit buttons. */
+:root:not([data-theme="dark"]) .table-action-btn.action-delete-btn,
+:root:not([data-theme="dark"]) .table-action-btn.delete-inv-btn,
+:root:not([data-theme="dark"]) .table-action-btn.delete-sale-btn,
+:root:not([data-theme="dark"]) .table-action-btn.delete-cust-btn {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--status-danger-border);
+  color: var(--status-danger) !important;
+}
+:root:not([data-theme="dark"]) .table-action-btn.action-delete-btn:hover,
+:root:not([data-theme="dark"]) .table-action-btn.delete-inv-btn:hover,
+:root:not([data-theme="dark"]) .table-action-btn.delete-sale-btn:hover,
+:root:not([data-theme="dark"]) .table-action-btn.delete-cust-btn:hover {
+  background-color: var(--status-danger-bg);
+  border-color: var(--status-danger-border-strong);
+}
+
+/* Inline remove (×/trash) buttons inside forms: red tint on hover. */
+:root:not([data-theme="dark"]) .remove-item-btn:hover,
+:root:not([data-theme="dark"]) .remove-sale-item-btn:hover,
+:root:not([data-theme="dark"]) .pur-remove-product-btn:hover,
+:root:not([data-theme="dark"]) .pur-remove-size-btn:hover,
+:root:not([data-theme="dark"]) .sale-remove-product-btn:hover,
+:root:not([data-theme="dark"]) .sale-remove-size-btn:hover,
+:root:not([data-theme="dark"]) .remove-adj-entry-btn:hover {
+  background-color: var(--status-danger-bg);
+}
+
+/* Settings "Clear Database": a destructive secondary action. */
+:root:not([data-theme="dark"]) #btn-clear-db {
+  background-color: var(--status-danger-bg);
+}
+:root:not([data-theme="dark"]) #btn-clear-db:hover {
+  background-color: #FBD3CE;
+}
+
+/* Stock-status KPI cards: add a status stripe on the leading edge. */
+:root:not([data-theme="dark"]) .metric-card-status.metric-card-warning {
+  box-shadow: inset 3px 0 0 var(--kpi-warning-stripe), var(--shadow-sm);
+}
+:root:not([data-theme="dark"]) .metric-card-status.metric-card-danger {
+  box-shadow: inset 4px 0 0 var(--kpi-danger-stripe), var(--shadow-sm);
+}
+
+/* Disabled buttons: one clearly inactive, neutral look everywhere. Pages set
+   ad-hoc inline opacities (0.5–0.7) on disabled buttons; the neutral colours
+   already read as inactive, so opacity is normalised to keep the label legible. */
+:root:not([data-theme="dark"]) .btn:disabled,
+:root:not([data-theme="dark"]) .btn[disabled] {
+  background-color: var(--bg-disabled);
+  border-color: var(--border-color);
+  color: var(--text-disabled);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 1 !important;
+}
+
+.btn-success {
+  background-color: var(--status-success);
+  border-color: var(--status-success);
+  color: var(--brand-text);
+}
+
+.btn-success:hover {
+  background-color: var(--status-success-text);
+  border-color: var(--status-success-text);
+}
+
+/* Floating chart tooltip and product search dropdown carry heavy inline
+   shadows meant for dark mode; soften them to the shared shadow scale. */
+.sales-chart-tooltip,
+.sale-combobox-menu {
+  box-shadow: var(--shadow-md) !important;
+}
+
 /* Table Action Icon Buttons */
 .row-actions-box {
   display: flex;
@@ -643,9 +976,9 @@ body {
 }
 
 .table-action-btn.action-delete-btn:hover {
-  background-color: rgba(239, 68, 68, 0.15);
+  background-color: var(--status-danger-bg);
   color: var(--status-danger);
-  border-color: var(--status-danger);
+  border-color: var(--status-danger-border-strong);
 }
 
 /* Visually Hidden Screen Reader Text */
@@ -704,12 +1037,28 @@ body {
     white-space: nowrap;
     padding: 0.5rem 0.75rem;
   }
+  /* Horizontal mobile nav: Logout sits on its own slim row, right-aligned. */
+  .sidebar-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.25rem 0.5rem 0.5rem;
+  }
+  .sidebar-footer .nav-logout {
+    width: auto;
+  }
   .topbar {
     padding: 0 1rem;
     position: static;
   }
   .page-container {
     padding: 1rem;
+  }
+  .card {
+    padding: 1rem;
+  }
+  /* Horizontal mobile nav: the tint alone marks the active item. */
+  .nav-item.active::before {
+    display: none;
   }
 }
 
@@ -758,7 +1107,7 @@ body {
 }
 
 .pur-accordion-header:hover {
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-hover);
 }
 
 .pur-chevron-icon {
@@ -818,8 +1167,8 @@ body {
 
 .form-input.is-invalid,
 .form-select.is-invalid {
-  border-color: var(--status-danger, #ef4444) !important;
-  box-shadow: 0 0 0 1px var(--status-danger, #ef4444);
+  border-color: var(--status-danger) !important;
+  box-shadow: 0 0 0 3px var(--status-danger-bg);
 }
 
 .pur-size-table td {
@@ -832,7 +1181,7 @@ body {
 .field-error {
   font-size: 0.725rem;
   line-height: 1.25;
-  color: var(--status-danger, #ef4444);
+  color: var(--status-danger);
   margin-top: 3px;
   font-weight: 500;
 }
@@ -856,7 +1205,7 @@ body {
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 -2px 12px rgba(16, 24, 40, 0.06);
   padding: 0.85rem 1.25rem;
   margin-top: 1.25rem;
   display: flex;
@@ -900,15 +1249,15 @@ body {
 }
 
 .pur-cost-accent {
-  color: var(--status-info-text, #2563EB) !important;
+  color: var(--status-info-text) !important;
 }
 
 .pur-selling-accent {
-  color: var(--status-success-text, #16A34A) !important;
+  color: var(--status-success-text) !important;
 }
 
 .pur-profit-accent {
-  color: var(--status-success-text, #16A34A) !important;
+  color: var(--status-success-text) !important;
 }
 
 /* Responsive Overrides */

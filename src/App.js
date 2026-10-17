@@ -1716,14 +1716,17 @@ class StoreManager {
         sale.customer = sale.customerName;
       }
 
-      // Link customerId if matching registered customer
+      // Link a legacy sale that has no customerId yet, by exact name only and
+      // only when that name is unambiguous. An existing customerId is never
+      // overwritten and phone numbers are never used, so a sale cannot move
+      // to a different customer on page load.
       if (sale.customerName && sale.customerName.toLowerCase() !== 'walk-in customer') {
-        const matchedCust = this.data.customers.find(c =>
-          (c.name && c.name.toLowerCase() === sale.customerName.toLowerCase()) ||
-          (sale.phone && sale.phone !== '-' && c.phone === sale.phone)
-        );
-        if (matchedCust) {
-          sale.customerId = matchedCust.id;
+        if (!sale.customerId) {
+          const nameLower = sale.customerName.trim().toLowerCase();
+          const sameName = this.data.customers.filter(c => c.name && c.name.trim().toLowerCase() === nameLower);
+          if (sameName.length === 1) {
+            sale.customerId = sameName[0].id;
+          }
         }
       } else {
         sale.customerId = '';
@@ -1779,6 +1782,107 @@ class StoreManager {
 
     // 7. Recalculate customer metrics from actual sales
     this.recalculateCustomerMetrics();
+  }
+
+  /**
+   * Next unique ID in a `PREFIX-NN` series.
+   *
+   * The sequence is persisted under `this.data.idSequences[key]` and only
+   * ever moves forward, so an ID freed by a deletion is never handed out
+   * again. It is also seeded from the highest number already in use, and
+   * every candidate is checked against `existingIds` before it is returned.
+   * Existing IDs are never rewritten.
+   */
+  _nextSequentialId(key, prefix, existingIds, padLength = 2) {
+    if (!this.data.idSequences || typeof this.data.idSequences !== 'object') {
+      this.data.idSequences = {};
+    }
+    const taken = new Set(existingIds.filter(Boolean).map(id => String(id).toUpperCase()));
+
+    let highest = 0;
+    taken.forEach(id => {
+      const m = id.match(/(\d+)$/);
+      if (m) highest = Math.max(highest, parseInt(m[1], 10));
+    });
+
+    let seq = Math.max(Number(this.data.idSequences[key]) || 0, highest);
+    let candidate;
+    do {
+      seq += 1;
+      candidate = `${prefix}-${String(seq).padStart(padLength, '0')}`;
+    } while (taken.has(candidate.toUpperCase()));
+
+    this.data.idSequences[key] = seq;
+    return candidate;
+  }
+
+  /** Unique customer ID. Also avoids IDs still referenced by sales. */
+  _nextCustomerId() {
+    const ids = [
+      ...(this.data.customers || []).map(c => c && c.id),
+      ...(this.data.sales || []).map(s => s && s.customerId)
+    ].filter(id => /^CUST-/i.test(String(id || '')));
+    return this._nextSequentialId('customer', 'CUST', ids, 2);
+  }
+
+  /** Unique sale / bill ID in the existing BILL-XXXX style. */
+  _nextSaleId() {
+    // Only plain BILL-<digits> IDs can collide with a generated ID, so only
+    // they seed the counter; the sample data's BILL-2026-1042 style cannot.
+    const ids = (this.data.sales || [])
+      .map(s => s && (s.id || s.reference))
+      .filter(id => /^BILL-\d+$/i.test(String(id || '')));
+    return this._nextSequentialId('sale', 'BILL', ids, 4);
+  }
+
+  /**
+   * Decide which customer a sale belongs to. Phone number is never used to
+   * pick a customer: two people can share a household number.
+   *
+   *  1. An explicit customerId that still exists (and whose name matches what
+   *     was entered) is used as-is.
+   *  2. Otherwise an existing customer with the same name is reused. If more
+   *     than one shares the name, the one with the same phone is preferred.
+   *  3. Otherwise a new customer is created with a unique ID.
+   *
+   * Returns '' for walk-in customers.
+   */
+  _resolveSaleCustomer({ customerId = '', name = '', phone = '-' } = {}) {
+    const custName = (name || '').trim();
+    const custPhone = (phone || '-').trim() || '-';
+    if (!custName || custName.toLowerCase() === 'walk-in customer') return '';
+    if (!Array.isArray(this.data.customers)) this.data.customers = [];
+
+    const lower = custName.toLowerCase();
+    let customer = null;
+
+    if (customerId) {
+      const byId = this.data.customers.find(c => c.id === customerId);
+      if (byId && (byId.name || '').trim().toLowerCase() === lower) customer = byId;
+    }
+
+    if (!customer) {
+      const sameName = this.data.customers.filter(c => (c.name || '').trim().toLowerCase() === lower);
+      if (sameName.length > 0) {
+        customer = (custPhone !== '-' && sameName.find(c => c.phone === custPhone)) || sameName[0];
+      }
+    }
+
+    if (!customer) {
+      customer = {
+        id: this._nextCustomerId(),
+        name: custName,
+        phone: custPhone,
+        ordersCount: 0,
+        lastPurchase: new Date().toISOString().split('T')[0],
+        totalSpend: 0
+      };
+      this.data.customers.unshift(customer);
+    } else if (custPhone !== '-' && (!customer.phone || customer.phone === '-')) {
+      customer.phone = custPhone;
+    }
+
+    return customer.id;
   }
 
   getStoreInfo() {
@@ -3636,9 +3740,16 @@ class StoreManager {
       }
     }
 
+    // A sale is all-or-nothing. Phases 2 and 3 only READ store data; nothing
+    // (stock, customers, ID counters, movements, sales) is changed until
+    // every check has passed. Phase 4 then applies the changes and undoes
+    // them if anything unexpected throws part-way through.
+
+    // 2. Price each line (read-only)
     let totalAmt = 0;
     let totalItemCount = 0;
     const saleItems = [];
+    const stockPlan = [];
     const shouldDeductStock = salePayload.paymentStatus !== 'Cancelled' && salePayload.paymentStatus !== 'Failed' && salePayload.paymentStatus !== 'Draft';
 
     (salePayload.items || []).forEach(item => {
@@ -3646,16 +3757,6 @@ class StoreManager {
       if (prod) {
         const variant = (prod.variants || []).find(v => (v.size || 'Standard').toUpperCase() === (item.size || 'Standard').toUpperCase()) || (prod.variants && prod.variants.length > 0 ? prod.variants[0] : null);
         const itemQty = parseInt(item.qty, 10) || 1;
-
-        if (variant && shouldDeductStock) {
-          variant.stock = Math.max(0, (variant.stock || 0) - itemQty);
-        } else if (!variant && shouldDeductStock) {
-          prod.totalStock = Math.max(0, (prod.totalStock || 0) - itemQty);
-        }
-        if (Array.isArray(prod.variants) && prod.variants.length > 0) {
-          prod.totalStock = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
-        }
-        prod.stock = prod.totalStock;
 
         const priceToUse = (item.sellingPrice !== undefined && item.sellingPrice !== null && Number(item.sellingPrice) > 0)
           ? Number(item.sellingPrice)
@@ -3667,6 +3768,7 @@ class StoreManager {
         // Snapshot unit purchase cost for historical profit integrity
         const unitCost = this.getItemUnitCost({ ...item, productId: prod.id, size: item.size }, prod);
 
+        stockPlan.push({ prod, variant, itemQty });
         saleItems.push({
           product: prod.name,
           productId: prod.id,
@@ -3683,106 +3785,132 @@ class StoreManager {
     const discountVal = Math.max(0, parseFloat(salePayload.discount) || 0);
     const finalTotal = Math.max(0, totalAmt - discountVal);
 
-    const custName = (salePayload.customerName || salePayload.customer || 'Walk-in Customer').trim();
-    const custPhone = (salePayload.customerPhone || salePayload.phone || '-').trim();
-    let custId = salePayload.customerId || '';
-
-    if (custName && custName.toLowerCase() !== 'walk-in customer') {
-      let customer = (this.data.customers || []).find(c =>
-        (custId && c.id === custId) ||
-        (c.name && c.name.toLowerCase() === custName.toLowerCase()) ||
-        (custPhone && custPhone !== '-' && c.phone === custPhone)
-      );
-      if (!customer) {
-        custId = custId || `CUST-${String((this.data.customers || []).length + 1).padStart(2, '0')}`;
-        customer = {
-          id: custId,
-          name: custName,
-          phone: custPhone,
-          ordersCount: 0,
-          lastPurchase: new Date().toISOString().split('T')[0],
-          totalSpend: 0
-        };
-        if (!Array.isArray(this.data.customers)) this.data.customers = [];
-        this.data.customers.unshift(customer);
-      } else {
-        custId = customer.id;
-        if (custPhone && custPhone !== '-' && (!customer.phone || customer.phone === '-')) {
-          customer.phone = custPhone;
-        }
-      }
-    } else {
-      custId = '';
-    }
-
-    const saleRecord = {
-      id: `BILL-${Date.now().toString().slice(-4)}`,
-      date: new Date().toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }),
-      customer: custName,
-      customerName: custName,
-      customerId: custId,
-      phone: custPhone,
-      itemCount: totalItemCount,
-      subtotal: totalAmt,
-      totalAmount: finalTotal,
-      paymentMethod: salePayload.paymentMethod || 'Cash',
-      status: salePayload.paymentStatus || 'Paid',
-      discount: discountVal,
-      items: saleItems,
-      payments: []
-    };
-
-    // Open the payment ledger from the status chosen at the till.
+    // 3. Validate the payment taken at the till (read-only)
     const requestedStatus = salePayload.paymentStatus || 'Paid';
     const payMethod = salePayload.paymentMethod || 'Cash';
     let openingPayment = 0;
     if (requestedStatus === 'Paid' || requestedStatus === 'Completed') {
       openingPayment = this._money(finalTotal);
     } else if (requestedStatus === 'Partial') {
-      openingPayment = this._money(salePayload.amountPaid);
-      if (!isFinite(openingPayment) || openingPayment <= 0) {
+      // Number(), not _money(): _money() turns non-numeric input into 0.
+      const rawPaid = Number(salePayload.amountPaid);
+      if (salePayload.amountPaid === '' || salePayload.amountPaid === null || !isFinite(rawPaid) || rawPaid <= 0) {
         throw new Error('A partial sale needs the amount actually paid.');
       }
+      openingPayment = this._money(rawPaid);
       if (openingPayment - this._money(finalTotal) > 0.005) {
         throw new Error(`Amount paid (₹${openingPayment.toLocaleString()}) cannot exceed the sale total of ₹${this._money(finalTotal).toLocaleString()}.`);
       }
     }
 
-    if (openingPayment > 0) {
-      saleRecord.payments.push({
-        id: `PAY-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`,
-        amount: openingPayment,
-        date: saleRecord.date,
-        method: payMethod,
-        note: 'Payment at point of sale'
-      });
-    }
-    this.recalculateSalePayments(saleRecord);
+    // 4. Commit. Everything above has passed, so only an unexpected error
+    //    can stop us now; if one does, restore what was touched so no half
+    //    sale is left in memory for a later save() to persist.
+    const custName = (salePayload.customerName || salePayload.customer || 'Walk-in Customer').trim();
+    const custPhone = (salePayload.customerPhone || salePayload.phone || '-').trim();
 
-    // Log Stock Movement for completed sale
-    if (shouldDeductStock) {
-      if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
-      saleItems.forEach(si => {
-        this.data.stockMovements.unshift({
-          id: `MOV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
-          date: new Date().toLocaleString(),
-          product: si.product,
-          productId: si.productId,
-          size: si.size,
-          sku: `${(si.product || 'PRD').slice(0,3).toUpperCase()}-${si.size || 'STD'}`,
-          type: 'Sale',
-          quantity: -si.qty,
-          reference: saleRecord.id,
-          user: 'Cashier'
-        });
-      });
-    }
-
+    if (!Array.isArray(this.data.customers)) this.data.customers = [];
+    if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
     if (!Array.isArray(this.data.sales)) this.data.sales = [];
-    this.data.sales.unshift(saleRecord);
 
-    // Dynamic customer metrics reconciliation
-    this.recalculateCustomerMetrics();
+    const touchedProducts = [...new Set(stockPlan.map(p => p.prod))];
+    const undo = {
+      variants: stockPlan.filter(p => p.variant).map(p => ({ variant: p.variant, stock: p.variant.stock })),
+      products: touchedProducts.map(prod => ({ prod, totalStock: prod.totalStock, stock: prod.stock })),
+      customers: [...this.data.customers],
+      customerPhones: this.data.customers.map(c => [c, c.phone]),
+      idSequences: this.data.idSequences ? { ...this.data.idSequences } : undefined,
+      stockMovements: [...this.data.stockMovements],
+      sales: [...this.data.sales]
+    };
+
+    let saleRecord;
+    try {
+      const custId = this._resolveSaleCustomer({
+        customerId: salePayload.customerId || '',
+        name: custName,
+        phone: custPhone
+      });
+
+      saleRecord = {
+        id: this._nextSaleId(),
+        date: new Date().toLocaleString('en-US', { dateStyle: 'short', timeStyle: 'short' }),
+        customer: custName,
+        customerName: custName,
+        customerId: custId,
+        phone: custPhone,
+        itemCount: totalItemCount,
+        subtotal: totalAmt,
+        totalAmount: finalTotal,
+        paymentMethod: salePayload.paymentMethod || 'Cash',
+        status: requestedStatus,
+        discount: discountVal,
+        items: saleItems,
+        payments: []
+      };
+
+      if (openingPayment > 0) {
+        saleRecord.payments.push({
+          id: `PAY-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 900 + 100)}`,
+          amount: openingPayment,
+          date: saleRecord.date,
+          method: payMethod,
+          note: 'Payment at point of sale'
+        });
+      }
+      this.recalculateSalePayments(saleRecord);
+
+      // Apply the stock deduction
+      if (shouldDeductStock) {
+        stockPlan.forEach(({ prod, variant, itemQty }) => {
+          if (variant) {
+            variant.stock = Math.max(0, (variant.stock || 0) - itemQty);
+          } else {
+            prod.totalStock = Math.max(0, (prod.totalStock || 0) - itemQty);
+          }
+        });
+      }
+      touchedProducts.forEach(prod => {
+        if (Array.isArray(prod.variants) && prod.variants.length > 0) {
+          prod.totalStock = prod.variants.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+        }
+        prod.stock = prod.totalStock;
+      });
+
+      // Log Stock Movement for completed sale
+      if (shouldDeductStock) {
+        saleItems.forEach(si => {
+          this.data.stockMovements.unshift({
+            id: `MOV-${Date.now().toString().slice(-4)}-${Math.floor(Math.random()*100)}`,
+            date: new Date().toLocaleString(),
+            product: si.product,
+            productId: si.productId,
+            size: si.size,
+            sku: `${(si.product || 'PRD').slice(0,3).toUpperCase()}-${si.size || 'STD'}`,
+            type: 'Sale',
+            quantity: -si.qty,
+            reference: saleRecord.id,
+            user: 'Cashier'
+          });
+        });
+      }
+
+      this.data.sales.unshift(saleRecord);
+
+      // Dynamic customer metrics reconciliation
+      this.recalculateCustomerMetrics();
+    } catch (err) {
+      undo.variants.forEach(({ variant, stock }) => { variant.stock = stock; });
+      undo.products.forEach(({ prod, totalStock, stock }) => { prod.totalStock = totalStock; prod.stock = stock; });
+      this.data.customers = undo.customers;
+      undo.customerPhones.forEach(([c, phone]) => { c.phone = phone; });
+      if (undo.idSequences) this.data.idSequences = undo.idSequences;
+      else delete this.data.idSequences;
+      this.data.stockMovements = undo.stockMovements;
+      this.data.sales = undo.sales;
+      this.recalculateCustomerMetrics();
+      throw err;
+    }
 
     this.save();
     return saleRecord;
@@ -3829,6 +3957,10 @@ class StoreManager {
       sale.status = 'Pending';
     } else if (paid + 0.005 < total) {
       sale.status = 'Partial';
+    } else if (sale.overpaidAmount > 0.005) {
+      // More was collected than the sale is now worth (e.g. the sale was
+      // edited down after payment). Kept visible rather than shown as Paid.
+      sale.status = 'Overpaid';
     } else {
       // Keep the historical 'Completed' wording where it was already in use.
       sale.status = sale.status === 'Completed' ? 'Completed' : 'Paid';
@@ -3925,10 +4057,16 @@ class StoreManager {
     const active = (this.data.sales || []).filter(s => s && s.status !== 'Cancelled' && s.status !== 'Failed' && s.status !== 'Draft');
     const revenue = this._money(active.reduce((a, s) => a + (Number(s.totalAmount) || 0), 0));
     const collected = this._money(active.reduce((a, s) => a + (Number(s.amountPaid) || 0), 0));
+    // Each sale's balance stands on its own: an overpayment on one sale must
+    // never reduce what another sale (or customer) still owes.
+    const outstanding = this._money(active.reduce((a, s) => a + Math.max(0, Number(s.balanceDue) || 0), 0));
+    const overpaid = this._money(active.reduce((a, s) => a + Math.max(0, Number(s.overpaidAmount) || 0), 0));
     return {
       revenue,
       collected,
-      outstanding: this._money(Math.max(0, revenue - collected)),
+      outstanding,
+      overpaid,
+      overpaidCount: active.filter(s => (Number(s.overpaidAmount) || 0) > 0).length,
       unpaidCount: active.filter(s => (Number(s.balanceDue) || 0) > 0).length
     };
   }
@@ -4084,7 +4222,9 @@ class StoreManager {
       });
     }
 
-    this.data.sales = this.data.sales.filter(s => s.id !== saleId);
+    // Remove only this record, even if older data holds another sale with the
+    // same ID (IDs were not guaranteed unique before).
+    this.data.sales = this.data.sales.filter(s => s !== sale);
     this.recalculateCustomerMetrics();
     this.save();
     return true;
@@ -4228,49 +4368,46 @@ class StoreManager {
 
     const custName = (updatedPayload.customerName || updatedPayload.customer || sale.customer || 'Walk-in Customer').trim();
     const custPhone = (updatedPayload.customerPhone || updatedPayload.phone || sale.phone || '-').trim();
-    let custId = updatedPayload.customerId || sale.customerId || '';
+    // Keep the sale's own customer unless the name was changed; never
+    // re-match by phone (see _resolveSaleCustomer).
+    const custId = this._resolveSaleCustomer({
+      customerId: updatedPayload.customerId || sale.customerId || '',
+      name: custName,
+      phone: custPhone
+    });
 
-    if (custName && custName.toLowerCase() !== 'walk-in customer') {
-      let customer = (this.data.customers || []).find(c =>
-        (custId && c.id === custId) ||
-        (c.name && c.name.toLowerCase() === custName.toLowerCase()) ||
-        (custPhone && custPhone !== '-' && c.phone === custPhone)
-      );
-      if (!customer) {
-        custId = custId || `CUST-${String((this.data.customers || []).length + 1).padStart(2, '0')}`;
-        customer = {
-          id: custId,
-          name: custName,
-          phone: custPhone,
-          ordersCount: 0,
-          lastPurchase: new Date().toISOString().split('T')[0],
-          totalSpend: 0
-        };
-        if (!Array.isArray(this.data.customers)) this.data.customers = [];
-        this.data.customers.unshift(customer);
-      } else {
-        custId = customer.id;
-        if (custPhone && custPhone !== '-' && (!customer.phone || customer.phone === '-')) {
-          customer.phone = custPhone;
-        }
-      }
-    } else {
-      custId = '';
-    }
-
+    // Log the real stock change for each product/size: units this sale
+    // previously took out minus units it takes out now. Positive = stock
+    // returned to inventory, negative = additional stock sold.
     if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
-    this.data.stockMovements.unshift({
-      id: `MOV-SALE-EDIT-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 100)}`,
-      date: new Date().toLocaleString(),
-      product: saleItems.map(si => si.product).join(', '),
-      productId: saleItems.length === 1 ? saleItems[0].productId : 'MULTI',
-      size: saleItems.length === 1 ? saleItems[0].size : 'MULTI',
-      sku: `${sale.id}-EDIT`,
-      type: 'Sale Update Adjustment',
-      quantity: -totalItemCount,
-      reference: sale.id,
-      user: 'Cashier',
-      notes: `Sale ${sale.id} items updated. Total units: ${totalItemCount}, Final Amount: ₹${finalTotal}.`
+    const newDeductedMap = isActiveSale ? newRequestedMap : new Map();
+    const movementKeys = new Set([...oldDeductedMap.keys(), ...newDeductedMap.keys()]);
+    movementKeys.forEach(key => {
+      const oldQty = oldDeductedMap.get(key) || 0;
+      const newQty = newDeductedMap.get(key) || 0;
+      const delta = oldQty - newQty;
+      if (delta === 0) return;
+
+      const [prodId, sizeKey] = key.split(':::');
+      const prod = (this.data.products || []).find(p => p.id === prodId);
+      const variant = prod ? (prod.variants || []).find(v => (v.size || 'Standard').toUpperCase() === sizeKey) : null;
+      const sizeLabel = variant ? (variant.size || 'Standard') : sizeKey;
+      const prodName = prod ? prod.name : prodId;
+
+      this.data.stockMovements.unshift({
+        id: `MOV-SALE-EDIT-${Date.now().toString().slice(-4)}-${Math.floor(Math.random() * 10000)}`,
+        date: new Date().toLocaleString(),
+        product: prodName,
+        productId: prodId,
+        size: sizeLabel,
+        sku: (variant && variant.sku) ? variant.sku : `${(prodName || 'PRD').slice(0, 3).toUpperCase()}-${sizeLabel}`,
+        type: delta > 0 ? 'Sale Edited — Quantity Reduced' : 'Sale Edited — Quantity Increased',
+        quantity: delta,
+        reference: sale.id,
+        user: 'Cashier',
+        notes: `Sale ${sale.id} edited: ${oldQty} → ${newQty} units of ${prodName} (${sizeLabel}). ` +
+          (delta > 0 ? `${delta} unit(s) returned to stock.` : `${Math.abs(delta)} additional unit(s) sold.`)
+      });
     });
 
     sale.customer = custName;
@@ -4313,13 +4450,19 @@ class StoreManager {
     const customer = (this.data.customers || []).find(c => c.id === customerId);
     if (!customer) throw new Error('Customer not found.');
 
-    (this.data.sales || []).forEach(s => {
-      if (s.customerId === customerId) {
-        s.customerId = '';
-      }
-    });
+    // Older data may contain two customers with the same ID. Remove only
+    // this record, and only unlink sales when no other customer still
+    // carries the ID, so the other customer's sales stay attached.
+    const idStillUsed = this.data.customers.some(c => c !== customer && c.id === customerId);
+    if (!idStillUsed) {
+      (this.data.sales || []).forEach(s => {
+        if (s.customerId === customerId) {
+          s.customerId = '';
+        }
+      });
+    }
 
-    this.data.customers = this.data.customers.filter(c => c.id !== customerId);
+    this.data.customers = this.data.customers.filter(c => c !== customer);
     this.recalculateCustomerMetrics();
     this.save();
     return true;
@@ -4648,19 +4791,59 @@ function createBadge({ label, variant = 'secondary', icon = null }) {
   return badge;
 }
 
-function createMetricCard({ label, value, subtext = null, icon = null, variant = 'default', onClick = null }) {
+/**
+ * Badge colour family for a status label. The single source of truth so the
+ * same meaning looks the same on every page:
+ *   success  — Paid, Completed, Received, Active, In Stock
+ *   warning  — Partial, Pending, Waiting for Receive, Partially Received,
+ *              Low Stock, Partial Stock
+ *   danger   — Failed, Out of Stock
+ *   info     — Overpaid (excess collected, shown for information)
+ *   secondary (neutral) — Cancelled, Draft, Inactive, Archived, anything else
+ * Presentation only: it never changes a record's status.
+ */
+function getStatusBadgeVariant(status) {
+  switch (status) {
+    case 'Paid':
+    case 'Completed':
+    case 'Received':
+    case 'Active':
+    case 'In Stock':
+      return 'success';
+    case 'Partial':
+    case 'Pending':
+    case 'Partially Received':
+    case 'Low Stock':
+    case 'Partial Stock':
+      return 'warning';
+    case 'Failed':
+    case 'Out of Stock':
+      return 'danger';
+    case 'Overpaid':
+      return 'info';
+    default:
+      return isPurchaseWaiting(status) ? 'warning' : 'secondary';
+  }
+}
+
+// `statusTint` gives a warning/danger card the soft tinted status surface
+// (used by the stock-status KPIs); other cards keep a plain coloured border.
+function createMetricCard({ label, value, subtext = null, icon = null, variant = 'default', onClick = null, statusTint = false }) {
   const card = document.createElement('div');
-  card.className = `metric-card ${onClick ? 'metric-card-clickable' : ''}`;
-  
-  let borderColor = 'var(--border-color)';
-  if (variant === 'danger') borderColor = 'var(--status-danger-border)';
-  if (variant === 'warning') borderColor = 'var(--status-warning-border)';
-  if (variant === 'success') borderColor = 'var(--status-success-border)';
-  card.style.borderColor = borderColor;
+  const tinted = statusTint && (variant === 'warning' || variant === 'danger');
+  card.className = `metric-card ${onClick ? 'metric-card-clickable' : ''} ${tinted ? `metric-card-status metric-card-${variant}` : ''}`;
+
+  if (!tinted) {
+    let borderColor = 'var(--border-color)';
+    if (variant === 'danger') borderColor = 'var(--status-danger-border)';
+    if (variant === 'warning') borderColor = 'var(--status-warning-border)';
+    if (variant === 'success') borderColor = 'var(--status-success-border)';
+    card.style.borderColor = borderColor;
+  }
 
   let iconHtml = icon ? `
-    <div style="width: 32px; height: 32px; border-radius: var(--radius-sm); background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-color);">
-      <i data-lucide="${icon}" style="width: 16px; height: 16px; color: var(--text-secondary);"></i>
+    <div class="metric-icon">
+      <i data-lucide="${icon}" style="width: 16px; height: 16px;"></i>
     </div>
   ` : '';
 
@@ -4669,7 +4852,7 @@ function createMetricCard({ label, value, subtext = null, icon = null, variant =
       <span style="font-size: 0.725rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary);">${label}</span>
       ${iconHtml}
     </div>
-    <div class="metric-value" style="font-size: 1.55rem; font-weight: 700; color: var(--text-primary); letter-spacing: -0.02em; line-height: 1.2;">${value}</div>
+    <div class="metric-value" style="font-size: 1.55rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2;">${value}</div>
     ${subtext ? `<div class="metric-footer" style="font-size: 0.775rem; margin-top: 0.35rem; display: flex; align-items: center; gap: 0.35rem;">${subtext}</div>` : ''}
   `;
 
@@ -4741,7 +4924,9 @@ function uiConfirm({
   message = '',
   confirmText = 'Confirm',
   cancelText = 'Cancel',
-  variant = 'primary'
+  variant = 'primary',
+  // When set, the confirm button stays disabled until this exact text is typed.
+  requireText = ''
 } = {}) {
   return new Promise(resolve => {
     let settled = false;
@@ -4763,6 +4948,21 @@ function uiConfirm({
       body.appendChild(pEl);
     });
 
+    let confirmInput = null;
+    if (requireText) {
+      const label = document.createElement('label');
+      label.style.cssText = 'margin-top: 0.5rem; font-size: 0.85rem; font-weight: 600; color: var(--text-primary);';
+      label.textContent = `Type ${requireText} to confirm`;
+      confirmInput = document.createElement('input');
+      confirmInput.type = 'text';
+      confirmInput.className = 'form-input confirm-require-input';
+      confirmInput.autocomplete = 'off';
+      confirmInput.setAttribute('aria-label', `Type ${requireText} to confirm`);
+      body.appendChild(label);
+      body.appendChild(confirmInput);
+    }
+    const isConfirmTextOk = () => !confirmInput || confirmInput.value.trim() === requireText;
+
     const cancelBtn = createButton({
       text: cancelText,
       variant: 'secondary',
@@ -4773,8 +4973,22 @@ function uiConfirm({
       variant: variant,
       // Remove the overlay directly rather than via closeModal(), so onClose
       // (which resolves false) never fires for an accepted dialog.
-      onClick: () => { modal.overlay.remove(); finish(true); }
+      onClick: () => {
+        if (!isConfirmTextOk()) return;
+        modal.overlay.remove();
+        finish(true);
+      }
     });
+    if (confirmInput) {
+      const syncOk = () => {
+        const ok = isConfirmTextOk();
+        okBtn.disabled = !ok;
+        okBtn.style.opacity = ok ? '' : '0.5';
+        okBtn.style.cursor = ok ? '' : 'not-allowed';
+      };
+      confirmInput.addEventListener('input', syncOk);
+      syncOk();
+    }
 
     const modal = createModal({
       title,
@@ -4790,7 +5004,7 @@ function uiConfirm({
     document.addEventListener('keydown', onKey, true);
 
     modal.overlay.classList.add('confirm-dialog-overlay');
-    setTimeout(() => okBtn.focus(), 0);
+    setTimeout(() => (confirmInput || okBtn).focus(), 0);
   });
 }
 
@@ -4806,10 +5020,13 @@ const toast = {
       document.body.appendChild(container);
     }
 
+    // Same semantic families as badges; 'info' previously fell through to the
+    // green success check.
+    const kind = ['success', 'warning', 'danger', 'info'].includes(type) ? type : 'success';
     const t = document.createElement('div');
-    t.className = 'toast';
-    let icon = type === 'danger' ? 'alert-circle' : (type === 'warning' ? 'alert-triangle' : 'check-circle-2');
-    let color = type === 'danger' ? 'var(--status-danger)' : (type === 'warning' ? 'var(--status-warning)' : 'var(--status-success)');
+    t.className = `toast toast-${kind}`;
+    const icon = { success: 'check-circle-2', warning: 'alert-triangle', danger: 'alert-circle', info: 'info' }[kind];
+    const color = `var(--status-${kind})`;
 
     t.innerHTML = `
       <i data-lucide="${icon}" style="width: 18px; height: 18px; color: ${color}; flex-shrink: 0;"></i>
@@ -4990,10 +5207,11 @@ function openSaleDetailsModal(saleInput) {
   let matchedCustomer = null;
 
   if (custName && custName !== 'Walk-in Customer') {
-    matchedCustomer = (store.data.customers || []).find(c => 
-      (c.name && c.name.toLowerCase() === custName.toLowerCase()) ||
-      (custPhone && custPhone !== '-' && c.phone && c.phone === custPhone)
-    );
+    // The sale's own customerId decides who it belongs to; a name match is
+    // only a fallback for legacy sales without one. Never match by phone.
+    matchedCustomer = sale.customerId
+      ? (store.data.customers || []).find(c => c.id === sale.customerId)
+      : (store.data.customers || []).find(c => c.name && c.name.toLowerCase() === custName.toLowerCase());
     if (matchedCustomer) {
       if (!custId) custId = matchedCustomer.id || '';
       if ((!custPhone || custPhone === '-') && matchedCustomer.phone) custPhone = matchedCustomer.phone;
@@ -5006,10 +5224,7 @@ function openSaleDetailsModal(saleInput) {
   const paymentMethod = sale.paymentMethod || 'Cash';
   const paymentStatus = sale.status || sale.paymentStatus || 'Completed';
 
-  let statusBadgeVariant = 'secondary';
-  if (paymentStatus === 'Completed' || paymentStatus === 'Paid') statusBadgeVariant = 'success';
-  else if (paymentStatus === 'Pending') statusBadgeVariant = 'warning';
-  else if (paymentStatus === 'Failed' || paymentStatus === 'Cancelled') statusBadgeVariant = 'danger';
+  const statusBadgeVariant = getStatusBadgeVariant(paymentStatus);
 
   // 3. Itemized Products Details
   const items = Array.isArray(sale.items) && sale.items.length > 0 ? sale.items : [];
@@ -5055,7 +5270,7 @@ function openSaleDetailsModal(saleInput) {
         <td style="font-weight: 600; color: var(--text-primary); text-align: center; padding: 0.75rem; font-size: 0.875rem; vertical-align: middle;">${qty}</td>
         <td style="color: var(--text-primary); font-size: 0.875rem; text-align: right; padding: 0.75rem; vertical-align: middle;">₹${unitPrice.toLocaleString('en-IN')}</td>
         <td style="color: var(--text-secondary); font-size: 0.875rem; text-align: right; padding: 0.75rem; vertical-align: middle;">₹${itemSubtotal.toLocaleString('en-IN')}</td>
-        <td style="color: ${itemDiscount > 0 ? 'var(--status-warning, #f59e0b)' : 'var(--text-secondary)'}; font-size: 0.875rem; text-align: right; padding: 0.75rem; vertical-align: middle; font-weight: ${itemDiscount > 0 ? '600' : 'normal'};">
+        <td style="color: ${itemDiscount > 0 ? 'var(--status-warning)' : 'var(--text-secondary)'}; font-size: 0.875rem; text-align: right; padding: 0.75rem; vertical-align: middle; font-weight: ${itemDiscount > 0 ? '600' : 'normal'};">
           ${itemDiscount > 0 ? `-₹${itemDiscount.toLocaleString('en-IN')}` : '—'}
         </td>
         <td style="font-weight: 700; color: var(--text-primary); text-align: right; padding: 0.75rem; font-size: 0.875rem; vertical-align: middle;">₹${itemTotal.toLocaleString('en-IN')}</td>
@@ -5274,7 +5489,7 @@ function openSaleDetailsModal(saleInput) {
               </div>
               <div style="display: flex; justify-content: space-between; padding: 0.2rem 0;">
                 <span style="color: var(--text-secondary);">Fulfillment Status:</span>
-                <span style="font-weight: 500; color: var(--status-success, #10b981);">Fulfilled & Delivered</span>
+                <span style="font-weight: 500; color: var(--status-success);">Fulfilled & Delivered</span>
               </div>
             </div>
           ` : ''}
@@ -5293,7 +5508,7 @@ function openSaleDetailsModal(saleInput) {
             <strong style="color: var(--text-primary);">₹${subtotal.toLocaleString('en-IN')}</strong>
           </div>
           ${overallDiscount > 0 ? `
-            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--status-warning, #f59e0b);">
+            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--status-warning);">
               <span>Discount:</span>
               <strong>-₹${overallDiscount.toLocaleString('en-IN')}</strong>
             </div>
@@ -5315,9 +5530,15 @@ function openSaleDetailsModal(saleInput) {
             </div>
           ` : ''}
           ${sale.balanceDue !== undefined && sale.balanceDue !== null ? `
-            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--status-warning, #f59e0b);">
+            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--status-warning);">
               <span>Balance Due:</span>
               <strong>₹${Number(sale.balanceDue).toLocaleString('en-IN')}</strong>
+            </div>
+          ` : ''}
+          ${Number(sale.overpaidAmount || 0) > 0 ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; color: var(--status-danger);">
+              <span>Overpaid:</span>
+              <strong>₹${Number(sale.overpaidAmount).toLocaleString('en-IN')}</strong>
             </div>
           ` : ''}
           ${sale.changeReturned !== undefined && sale.changeReturned !== null ? `
@@ -5505,9 +5726,40 @@ function createSidebar(activeNavId, onNavigate) {
     nav.appendChild(btn);
   });
   
+  // Logout is an action, not a route: it lives in its own footer below the
+  // navigation and never receives the active-page styling.
+  const footer = document.createElement('div');
+  footer.className = 'sidebar-footer';
+  const logoutBtn = document.createElement('button');
+  logoutBtn.type = 'button';
+  logoutBtn.className = 'nav-item nav-logout';
+  logoutBtn.innerHTML = `
+    <i data-lucide="log-out" style="width: 18px; height: 18px;"></i>
+    <span>Logout</span>
+  `;
+  logoutBtn.addEventListener('click', handleLogout);
+  footer.appendChild(logoutBtn);
+
   sidebar.appendChild(header);
   sidebar.appendChild(nav);
+  sidebar.appendChild(footer);
   return sidebar;
+}
+
+/**
+ * Logout action for the sidebar.
+ *
+ * The app has no authentication yet — no sign-in, session or user account
+ * (see renderProfilePage) — so there is no session to end. This is the single
+ * place to connect a real sign-out once authentication exists. Until then it
+ * only explains that, and deliberately touches no store data or localStorage.
+ */
+function handleLogout() {
+  toast.show({
+    message: 'Logout isn’t available yet — this admin has no sign-in, so there is no session to end.',
+    type: 'info',
+    duration: 4500
+  });
 }
 
 function createTopbar(activeTitle, onThemeToggle, onNavigate = null) {
@@ -5542,7 +5794,7 @@ function createTopbar(activeTitle, onThemeToggle, onNavigate = null) {
       </button>
 
       <button type="button" class="topbar-profile-btn" title="View profile" aria-label="View profile" style="display: flex; align-items: center; gap: 0.6rem; padding: 0.25rem 0.5rem 0.25rem 0.75rem; margin-left: 0.25rem; border: none; border-left: 1px solid var(--border-color); border-radius: var(--radius-sm); background: transparent; cursor: pointer; text-align: left; font: inherit; color: inherit;">
-        <div style="width: 32px; height: 32px; border-radius: 50%; background-color: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.85rem; flex-shrink: 0;">
+        <div style="width: 32px; height: 32px; border-radius: 50%; background-color: var(--brand-primary); color: var(--brand-text); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.85rem; flex-shrink: 0;">
           ${escapeHtml(ownerInitials)}
         </div>
         <div style="display: flex; flex-direction: column;">
@@ -5939,7 +6191,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
       const sz = btn.dataset.size.toUpperCase();
       if (currentSizes.includes(sz)) {
         btn.style.backgroundColor = 'var(--brand-primary)';
-        btn.style.color = '#ffffff';
+        btn.style.color = 'var(--brand-text)';
         btn.style.borderColor = 'var(--brand-primary)';
       } else {
         btn.style.backgroundColor = 'var(--bg-secondary)';
@@ -6132,9 +6384,11 @@ function renderOverview(onNavigate) {
   kpiGrid.appendChild(createMetricCard({
     label: 'Low Stock',
     value: `${lowCount} Items`,
-    subtext: `<span style="color: var(--status-warning-text); font-weight: 600;">${lowCount} items</span> <span style="color: var(--text-secondary);">below min threshold (${thresholdVal})</span>`,
+    // Colour only when there is something to act on: 0 = neutral card.
+    subtext: `<span style="color: ${lowCount > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)'}; font-weight: 600;">${lowCount} items</span> <span style="color: var(--text-secondary);">below min threshold (${thresholdVal})</span>`,
     icon: 'alert-triangle',
-    variant: 'warning',
+    variant: lowCount > 0 ? 'warning' : 'default',
+    statusTint: true,
     onClick: () => onNavigate('inventory', { status: 'LOW' })
   }));
 
@@ -6143,7 +6397,8 @@ function renderOverview(onNavigate) {
     if (outCount > 0) {
       outSubtext = `<span style="color: var(--status-danger-text); font-weight: 600;">${outVariantsCount} ${outVariantsCount === 1 ? 'size' : 'sizes'} at 0 stock</span> <span style="color: var(--text-secondary);">(${outCount} ${outCount === 1 ? 'product' : 'products'} fully out)</span>`;
     } else {
-      outSubtext = `<span style="color: var(--status-warning-text); font-weight: 600;">${outVariantsCount} ${outVariantsCount === 1 ? 'size' : 'sizes'} at 0 stock</span> <span style="color: var(--text-secondary);">(in partial stock)</span>`;
+      // No product is fully out, so the card stays neutral (see variant below).
+      outSubtext = `<span style="color: var(--text-secondary); font-weight: 600;">${outVariantsCount} ${outVariantsCount === 1 ? 'size' : 'sizes'} at 0 stock</span> <span style="color: var(--text-secondary);">(in partial stock)</span>`;
     }
   } else {
     outSubtext = `<span style="color: var(--text-secondary);">0 sizes at 0 stock</span>`;
@@ -6154,7 +6409,9 @@ function renderOverview(onNavigate) {
     value: `${outCount} Products`,
     subtext: outSubtext,
     icon: 'alert-circle',
-    variant: (outCount > 0 || outVariantsCount > 0) ? 'danger' : 'default',
+    // Red only when at least one product is fully out of stock.
+    variant: outCount > 0 ? 'danger' : 'default',
+    statusTint: true,
     onClick: () => onNavigate('inventory', { status: 'OUT' })
   }));
 
@@ -6626,7 +6883,7 @@ function renderOverview(onNavigate) {
       const p = btn.dataset.period;
       if (p === periodKey) {
         btn.style.backgroundColor = 'var(--brand-primary)';
-        btn.style.color = '#ffffff';
+        btn.style.color = 'var(--brand-text)';
         btn.style.fontWeight = '600';
         btn.style.borderRadius = 'var(--radius-sm)';
       } else {
@@ -6795,7 +7052,7 @@ function renderOverview(onNavigate) {
         <td style="color: var(--text-secondary);">${s.itemCount || (s.items ? s.items.length : 1)} item${(s.itemCount || 1) > 1 ? 's' : ''}</td>
         <td style="font-weight: 600; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
         <td>${createBadge({ label: s.paymentMethod || 'Cash', variant: 'secondary' }).outerHTML}</td>
-        <td>${createBadge({ label: s.status || 'Completed', variant: 'secondary' }).outerHTML}</td>
+        <td>${createBadge({ label: s.status || 'Completed', variant: getStatusBadgeVariant(s.status || 'Completed') }).outerHTML}</td>
       `;
       tbody.appendChild(tr);
     });
@@ -7152,7 +7409,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
             <h2 style="margin: 0; font-size: 1.35rem; font-weight: 700; color: var(--text-primary); line-height: 1.3;">Manage Product</h2>
             ${product.id ? `<span class="badge badge-secondary" style="font-family: monospace; font-size: 0.75rem; padding: 0.2rem 0.55rem; font-weight: 600;">ID: ${escapeHtml(product.id)}</span>` : ''}
-            ${createBadge({ label: product.status || 'Active', variant: (product.status === 'Active' ? 'success' : 'secondary') }).outerHTML}
+            ${createBadge({ label: product.status || 'Active', variant: getStatusBadgeVariant(product.status || 'Active') }).outerHTML}
           </div>
           <div style="font-size: 1.15rem; font-weight: 600; color: var(--text-primary); margin-top: 0.4rem;">${escapeHtml(product.name)}</div>
           <div style="display: flex; align-items: center; gap: 0.75rem; margin-top: 0.35rem; font-size: 0.825rem; color: var(--text-secondary); flex-wrap: wrap;">
@@ -7473,7 +7730,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
                 const varStatus = getSizeStockStatus(v.stock, lowStockThreshold);
                 const isSelectedRow = (v.size === initialSelectedSize);
                 const rowStyle = isSelectedRow
-                  ? 'border-bottom: 1px solid var(--border-color); background: rgba(79, 70, 229, 0.08); transition: background-color 0.2s ease;'
+                  ? 'border-bottom: 1px solid var(--border-color); background: var(--brand-soft); transition: background-color 0.2s ease;'
                   : 'border-bottom: 1px solid var(--border-color); transition: background-color 0.2s ease;';
                 return `
                   <tr style="${rowStyle}" class="variant-stock-row ${isSelectedRow ? 'selected-variant-row' : ''}" data-variant-size="${escapeHtml(v.size)}">
@@ -7559,7 +7816,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
         const rowSz = row.getAttribute('data-variant-size');
         const isSelected = rowSz === activeSelectedSize || activeSizes.has(rowSz);
         if (isSelected) {
-          row.style.background = 'rgba(79, 70, 229, 0.08)';
+          row.style.background = 'var(--brand-soft)';
           row.classList.add('selected-variant-row');
           const b = row.querySelector('.badge');
           if (b) { b.classList.remove('badge-secondary'); b.classList.add('badge-primary'); }
@@ -8191,7 +8448,7 @@ function renderViewProductPage(params = {}, onNavigate = null) {
     errorCard.className = 'card';
     errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
     errorCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -8256,9 +8513,7 @@ function renderViewProductPage(params = {}, onNavigate = null) {
   }, 0);
 
   // Status badges
-  let statusBadgeVariant = 'success';
-  if (isArchived) statusBadgeVariant = 'warning';
-  else if (isInactive) statusBadgeVariant = 'secondary';
+  const statusBadgeVariant = getStatusBadgeVariant(product.status || 'Active');
 
   // 1. Header (Breadcrumb, Badges, & Action Buttons)
   const headerDiv = document.createElement('div');
@@ -8304,7 +8559,7 @@ function renderViewProductPage(params = {}, onNavigate = null) {
   // Archived Notice Banner
   if (isArchived) {
     const archiveBanner = document.createElement('div');
-    archiveBanner.style.cssText = 'background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 0.85rem 1.15rem; margin-bottom: 1.25rem; display: flex; align-items: flex-start; gap: 0.75rem;';
+    archiveBanner.style.cssText = 'background: var(--status-warning-bg); border: 1px solid var(--status-warning-border); border-radius: var(--radius-md); padding: 0.85rem 1.15rem; margin-bottom: 1.25rem; display: flex; align-items: flex-start; gap: 0.75rem;';
     archiveBanner.innerHTML = `
       <i data-lucide="archive" style="width: 20px; height: 20px; color: var(--status-warning); flex-shrink: 0; margin-top: 2px;"></i>
       <div style="font-size: 0.85rem; color: var(--text-primary); line-height: 1.5;">
@@ -8535,7 +8790,7 @@ function renderViewProductPage(params = {}, onNavigate = null) {
                     <tr>
                       <td style="font-weight: 600;">${escapeHtml(po.id)}</td>
                       <td>${escapeHtml(po.supplier || 'Supplier')}</td>
-                      <td>${createBadge({ label: po.status || 'Received', variant: isPurchaseWaiting(po.status) ? 'info' : 'success' }).outerHTML}</td>
+                      <td>${createBadge({ label: po.status || 'Received', variant: getStatusBadgeVariant(po.status || 'Received') }).outerHTML}</td>
                       <td style="text-align: right;">
                         <button type="button" class="btn btn-sm btn-secondary view-rel-po-btn" data-po-id="${po.id}" title="View Purchase" style="padding: 0.2rem 0.5rem;">
                           <i data-lucide="eye" style="width: 13px; height: 13px;"></i>
@@ -8567,7 +8822,7 @@ function renderViewProductPage(params = {}, onNavigate = null) {
                     <tr>
                       <td style="font-weight: 600;">${escapeHtml(s.id || s.reference || 'SAL')}</td>
                       <td>${escapeHtml(s.customer || s.customerName || 'Walk-in')}</td>
-                      <td>${createBadge({ label: s.status || 'Paid', variant: 'success' }).outerHTML}</td>
+                      <td>${createBadge({ label: s.status || 'Paid', variant: getStatusBadgeVariant(s.status || 'Paid') }).outerHTML}</td>
                       <td style="text-align: right;">
                         <button type="button" class="btn btn-sm btn-secondary view-rel-sale-btn" data-sale-id="${s.id}" title="View Sale" style="padding: 0.2rem 0.5rem;">
                           <i data-lucide="eye" style="width: 13px; height: 13px;"></i>
@@ -9871,10 +10126,7 @@ function renderPurchases(params = {}, onNavigate = null) {
       tr.style.cursor = 'default';
 
       const status = p.status || 'Completed';
-      let badgeVariant = 'secondary';
-      if (isPurchaseWaiting(status)) badgeVariant = 'info';
-      else if (status === 'Partially Received') badgeVariant = 'warning';
-      else if (isPurchaseReceived(status)) badgeVariant = 'success';
+      const badgeVariant = getStatusBadgeVariant(status);
 
       // Calculate total ordered and total received
       const totalOrdered = p.totalQuantity !== undefined ? Number(p.totalQuantity) : (p.items || []).reduce((s, i) => s + Number(i.qty || i.received || 0), 0);
@@ -10102,7 +10354,7 @@ function renderPurchases(params = {}, onNavigate = null) {
       const f = btn.dataset.filter;
       if (f === currentFilter) {
         btn.style.backgroundColor = 'var(--brand-primary)';
-        btn.style.color = '#ffffff';
+        btn.style.color = 'var(--brand-text)';
         btn.style.borderColor = 'var(--brand-primary)';
       } else {
         btn.style.backgroundColor = 'var(--bg-secondary)';
@@ -10163,7 +10415,7 @@ function renderReceivePurchasePage(params = {}, onNavigate = null) {
     errorCard.className = 'card';
     errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
     errorCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -10188,10 +10440,7 @@ function renderReceivePurchasePage(params = {}, onNavigate = null) {
   const status = purchase.status || PURCHASE_STATUS_WAITING;
   const canReceive = isPurchaseReceivable(status);
 
-  let badgeVariant = 'secondary';
-  if (isPurchaseWaiting(status)) badgeVariant = 'info';
-  else if (status === 'Partially Received') badgeVariant = 'warning';
-  else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+  const badgeVariant = getStatusBadgeVariant(status);
 
   // 1. Header (Breadcrumb + Status Badge + Back)
   const headerDiv = document.createElement('div');
@@ -10454,17 +10703,14 @@ function renderReceivePurchasePage(params = {}, onNavigate = null) {
 function openViewPurchaseModal(purchase, onNavigate, onRefresh) {
   const modalOverlay = document.createElement('div');
   modalOverlay.className = 'modal-overlay';
-  modalOverlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem;';
+  modalOverlay.style.cssText = 'position: fixed; inset: 0; background: var(--overlay-bg); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem;';
 
   const modalBox = document.createElement('div');
   modalBox.className = 'modal-content card';
   modalBox.style.cssText = 'max-width: 800px; width: 100%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1.25rem;';
 
   const status = purchase.status || 'Completed';
-  let badgeVariant = 'secondary';
-  if (isPurchaseWaiting(status)) badgeVariant = 'info';
-  else if (status === 'Partially Received') badgeVariant = 'warning';
-  else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+  const badgeVariant = getStatusBadgeVariant(status);
 
   const totalOrdered = purchase.totalQuantity !== undefined ? Number(purchase.totalQuantity) : (purchase.items || []).reduce((s, i) => s + Number(i.qty || i.received || 0), 0);
   const totalReceived = purchase.totalReceived !== undefined ? Number(purchase.totalReceived) : (purchase.items || []).reduce((s, i) => s + Number(i.receivedQty !== undefined ? i.receivedQty : (i.received !== undefined ? i.received : (status === 'Completed' || status === 'Received' ? (i.qty || 0) : 0))), 0);
@@ -10663,7 +10909,7 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
     errorCard.className = 'card';
     errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
     errorCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -10686,10 +10932,7 @@ function renderViewPurchasePage(params = {}, onNavigate = null) {
   }
 
   const status = purchase.status || PURCHASE_STATUS_WAITING;
-  let badgeVariant = 'secondary';
-  if (isPurchaseWaiting(status)) badgeVariant = 'info';
-  else if (status === 'Partially Received') badgeVariant = 'warning';
-  else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+  const badgeVariant = getStatusBadgeVariant(status);
 
   // Normalize items
   const items = (purchase.items || []).map(it => store.normalizePurchaseItem ? store.normalizePurchaseItem(it, status) : it);
@@ -11048,7 +11291,7 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
     errorCard.className = 'card';
     errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
     errorCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -11075,10 +11318,7 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
   const markChanged = () => { hasUnsavedChanges = true; };
 
   const status = purchase.status || PURCHASE_STATUS_WAITING;
-  let badgeVariant = 'secondary';
-  if (isPurchaseWaiting(status)) badgeVariant = 'info';
-  else if (status === 'Partially Received') badgeVariant = 'warning';
-  else if (status === 'Received' || status === 'Completed') badgeVariant = 'success';
+  const badgeVariant = getStatusBadgeVariant(status);
 
   // 1. Header (Breadcrumb & Status Badge)
   const headerDiv = document.createElement('div');
@@ -11098,7 +11338,7 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
   const isReceivedStatus = status === 'Received' || status === 'Completed' || status === 'Partially Received';
   if (isReceivedStatus) {
     const noticeDiv = document.createElement('div');
-    noticeDiv.style.cssText = 'background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-md); padding: 0.85rem 1.15rem; margin-bottom: 1.25rem; display: flex; align-items: flex-start; gap: 0.75rem;';
+    noticeDiv.style.cssText = 'background: var(--status-info-bg); border: 1px solid var(--status-info-border); border-radius: var(--radius-md); padding: 0.85rem 1.15rem; margin-bottom: 1.25rem; display: flex; align-items: flex-start; gap: 0.75rem;';
     noticeDiv.innerHTML = `
       <i data-lucide="info" style="width: 20px; height: 20px; color: var(--brand-primary); flex-shrink: 0; margin-top: 2px;"></i>
       <div style="font-size: 0.85rem; color: var(--text-primary); line-height: 1.5;">
@@ -11176,12 +11416,12 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
         <div class="form-group">
-          <label class="form-label" style="font-weight: 600;">Supplier <span style="color: #ef4444;">*</span></label>
+          <label class="form-label" style="font-weight: 600;">Supplier <span style="color: var(--status-danger);">*</span></label>
           <input type="text" id="edit-pur-supplier" class="form-input" list="edit-pur-suppliers-list" value="${escapeHtml(purchase.supplier || '')}" placeholder="Select or enter supplier">
         </div>
 
         <div class="form-group">
-          <label class="form-label" style="font-weight: 600;">Purchase Date <span style="color: #ef4444;">*</span></label>
+          <label class="form-label" style="font-weight: 600;">Purchase Date <span style="color: var(--status-danger);">*</span></label>
           <input type="date" id="edit-pur-date" class="form-input" value="${escapeHtml(purchase.date || new Date().toISOString().split('T')[0])}">
         </div>
 
@@ -11237,7 +11477,7 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
       </div>
       <div>
         <div style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase;">Est. Gross Profit</div>
-        <div id="edit-pur-sum-profit" style="font-size: 1.25rem; font-weight: 700; color: #10b981; margin-top: 0.25rem;">₹0</div>
+        <div id="edit-pur-sum-profit" style="font-size: 1.25rem; font-weight: 700; color: var(--status-success); margin-top: 0.25rem;">₹0</div>
       </div>
     </div>
 
@@ -11307,7 +11547,7 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem;">
           <div class="form-group">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product Name <span style="color: #ef4444;">*</span></label>
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product Name <span style="color: var(--status-danger);">*</span></label>
             <input type="text" class="form-input item-name-input" list="edit-pur-products-list" value="${escapeHtml(it.productName || '')}" placeholder="e.g. Classic Oxford Shirt">
           </div>
 
@@ -11333,12 +11573,12 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
           </div>
 
           <div class="form-group">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity <span style="color: #ef4444;">*</span></label>
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity <span style="color: var(--status-danger);">*</span></label>
             <input type="number" class="form-input item-qty-input" min="1" step="1" value="${it.qty !== undefined ? it.qty : 1}">
           </div>
 
           <div class="form-group">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Buying Price (₹) <span style="color: #ef4444;">*</span></label>
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Buying Price (₹) <span style="color: var(--status-danger);">*</span></label>
             <input type="number" class="form-input item-bp-input" min="0" step="any" value="${it.buyingPrice !== undefined ? it.buyingPrice : 0}">
           </div>
 
@@ -11660,12 +11900,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       </h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
-          <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Supplier <span style="color: #ef4444;">*</span></label>
+          <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Supplier <span style="color: var(--status-danger);">*</span></label>
           <input type="text" id="pur-supplier" class="form-input" placeholder="e.g. Apex Apparel Ltd" value="${supplierVal}">
           <div id="pur-supplier-error" class="field-error" style="display: none;"></div>
         </div>
         <div class="form-group">
-          <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Purchase Date <span style="color: #ef4444;">*</span></label>
+          <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Purchase Date <span style="color: var(--status-danger);">*</span></label>
           <input type="date" id="pur-date" class="form-input" value="${dateVal}">
           <div id="pur-date-error" class="field-error" style="display: none;"></div>
         </div>
@@ -11963,10 +12203,10 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
               <span class="pur-metric-pill" style="padding: 0.2rem 0.5rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); color: var(--text-primary); font-weight: 600;">
                 <span class="pur-header-units">${initialProdUnits}</span> units
               </span>
-              <span class="pur-metric-pill" style="padding: 0.2rem 0.5rem; background: var(--status-info-bg, rgba(37,99,235,0.08)); border-radius: var(--radius-sm); border: 1px solid var(--status-info-border, rgba(37,99,235,0.2)); color: var(--status-info-text, #2563EB); font-weight: 700;">
+              <span class="pur-metric-pill" style="padding: 0.2rem 0.5rem; background: var(--status-info-bg); border-radius: var(--radius-sm); border: 1px solid var(--status-info-border); color: var(--status-info-text); font-weight: 700;">
                 <span style="font-size: 0.7rem; font-weight: 500; opacity: 0.8; margin-right: 2px;">Cost:</span>₹<span class="pur-header-cost">${initialProdCost.toLocaleString()}</span>
               </span>
-              <span class="pur-metric-pill" style="padding: 0.2rem 0.5rem; background: var(--status-success-bg); border-radius: var(--radius-sm); border: 1px solid var(--status-success-border); color: var(--status-success-text, #16A34A); font-weight: 700;">
+              <span class="pur-metric-pill" style="padding: 0.2rem 0.5rem; background: var(--status-success-bg); border-radius: var(--radius-sm); border: 1px solid var(--status-success-border); color: var(--status-success-text); font-weight: 700;">
                 <span style="font-size: 0.7rem; font-weight: 500; opacity: 0.8; margin-right: 2px;">Est:</span>₹<span class="pur-header-value">${initialProdVal.toLocaleString()}</span>
               </span>
             </div>
@@ -11982,12 +12222,12 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           <!-- Horizontal Product Details Row: Product Name, Category, Brand -->
           <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.65rem; align-items: end;">
             <div class="form-group" style="margin: 0;">
-              <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
-              <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${prod.productName || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; ${prod.nameError ? 'border-color: var(--status-danger, #ef4444);' : ''}">
-              <div class="pur-name-error" style="font-size: 0.725rem; color: var(--status-danger, #ef4444); margin-top: 3px; display: ${prod.nameError ? 'block' : 'none'};">${prod.nameError || ''}</div>
+              <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; white-space: nowrap;">Product Name <span style="color: var(--status-danger);">*</span></label>
+              <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${prod.productName || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; ${prod.nameError ? 'border-color: var(--status-danger);' : ''}">
+              <div class="pur-name-error" style="font-size: 0.725rem; color: var(--status-danger); margin-top: 3px; display: ${prod.nameError ? 'block' : 'none'};">${prod.nameError || ''}</div>
             </div>
             <div class="form-group pur-cat-group" style="margin: 0;">
-              <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; white-space: nowrap;">Category <span style="color: #ef4444;">*</span></label>
+              <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; white-space: nowrap;">Category <span style="color: var(--status-danger);">*</span></label>
               <div class="pur-cat-container" style="position: relative; width: 100%;">
                 <select class="form-select pur-cat-select" style="display: ${isCustomCat ? 'none' : 'block'}; height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 500; width: 100%; box-sizing: border-box;">
                   <option value="" ${!prod.category ? 'selected' : ''}>Select Category *</option>
@@ -12032,11 +12272,11 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             <table class="pur-size-table">
               <thead>
                 <tr>
-                  <th style="width: 20%;">Size / Variant <span style="color: #ef4444;">*</span></th>
-                  <th style="width: 12%;">Quantity <span style="color: #ef4444;">*</span></th>
-                  <th style="width: 16%;">Buying Price (₹) <span style="color: #ef4444;">*</span></th>
+                  <th style="width: 20%;">Size / Variant <span style="color: var(--status-danger);">*</span></th>
+                  <th style="width: 12%;">Quantity <span style="color: var(--status-danger);">*</span></th>
+                  <th style="width: 16%;">Buying Price (₹) <span style="color: var(--status-danger);">*</span></th>
                   <th style="width: 17%;">Total Cost (₹)</th>
-                  <th style="width: 16%;">Selling Price (₹) <span style="color: #ef4444;">*</span></th>
+                  <th style="width: 16%;">Selling Price (₹) <span style="color: var(--status-danger);">*</span></th>
                   <th style="width: 17%;">Estimated Value (₹)</th>
                   <th style="width: 40px; text-align: center;">Action</th>
                 </tr>
@@ -12175,7 +12415,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             nameErrorEl.style.display = 'block';
           }
           nameInp.classList.add('is-invalid');
-          nameInp.style.borderColor = 'var(--status-danger, #ef4444)';
+          nameInp.style.borderColor = 'var(--status-danger)';
         } else {
           prod.nameError = null;
           if (nameErrorEl) {
@@ -12215,7 +12455,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
               nameErrorEl.style.display = 'block';
             }
             nameInp.classList.add('is-invalid');
-            nameInp.style.borderColor = 'var(--status-danger, #ef4444)';
+            nameInp.style.borderColor = 'var(--status-danger)';
           }
         } else {
           prod.nameError = null;
@@ -12580,7 +12820,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
     function markError(inputEl, errEl, message, cardEl, prod) {
       if (inputEl) {
         inputEl.classList.add('is-invalid');
-        inputEl.style.borderColor = 'var(--status-danger, #ef4444)';
+        inputEl.style.borderColor = 'var(--status-danger)';
       }
       if (errEl) {
         errEl.textContent = message;
@@ -12929,7 +13169,7 @@ function renderViewSalePage(params = {}, onNavigate = null) {
     errorCard.className = 'card';
     errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
     errorCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -12954,19 +13194,14 @@ function renderViewSalePage(params = {}, onNavigate = null) {
   const custName = sale.customer || sale.customerName || 'Walk-in Customer';
   let matchedCustomer = null;
   if (custName && custName !== 'Walk-in Customer') {
-    matchedCustomer = (store.data.customers || []).find(c =>
-      (c.id && sale.customerId && c.id === sale.customerId) ||
-      (c.name && c.name.toLowerCase() === custName.toLowerCase()) ||
-      (sale.phone && c.phone && c.phone === sale.phone)
-    );
+    matchedCustomer = sale.customerId
+      ? (store.data.customers || []).find(c => c.id === sale.customerId)
+      : (store.data.customers || []).find(c => c.name && c.name.toLowerCase() === custName.toLowerCase());
   }
 
   const saleRef = sale.id || sale.reference || '—';
   const paymentStatus = sale.status || sale.paymentStatus || 'Completed';
-  let statusBadgeVariant = 'secondary';
-  if (paymentStatus === 'Completed' || paymentStatus === 'Paid') statusBadgeVariant = 'success';
-  else if (paymentStatus === 'Pending') statusBadgeVariant = 'warning';
-  else if (paymentStatus === 'Failed' || paymentStatus === 'Cancelled') statusBadgeVariant = 'danger';
+  const statusBadgeVariant = getStatusBadgeVariant(paymentStatus);
 
   // Items breakdown
   const items = Array.isArray(sale.items) && sale.items.length > 0 ? sale.items : [];
@@ -13064,7 +13299,7 @@ function renderViewSalePage(params = {}, onNavigate = null) {
     custBanner.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; background: var(--bg-secondary); border: 1px solid var(--border-color);';
     custBanner.innerHTML = `
       <div style="display: flex; align-items: center; gap: 0.75rem;">
-        <div style="width: 40px; height: 40px; border-radius: 50%; background: var(--brand-primary); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1rem;">
+        <div style="width: 40px; height: 40px; border-radius: 50%; background: var(--brand-primary); color: var(--brand-text); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1rem;">
           ${escapeHtml(matchedCustomer.name.slice(0, 1).toUpperCase())}
         </div>
         <div>
@@ -13169,6 +13404,12 @@ function renderViewSalePage(params = {}, onNavigate = null) {
             <span>₹${Math.round(balanceDue).toLocaleString()}</span>
           </div>
         ` : ''}
+        ${Number(sale.overpaidAmount || 0) > 0 ? `
+          <div class="sale-overpaid-row" style="display: flex; justify-content: space-between; color: var(--status-danger); font-size: 0.8rem; font-weight: 600;">
+            <span>Overpaid:</span>
+            <span>₹${Number(sale.overpaidAmount).toLocaleString('en-IN')}</span>
+          </div>
+        ` : ''}
       </div>
     </div>
   `;
@@ -13179,6 +13420,7 @@ function renderViewSalePage(params = {}, onNavigate = null) {
   const payTotal = Number(sale.totalAmount || 0);
   const payPaid = Number(sale.amountPaid || 0);
   const payBalance = Number(sale.balanceDue || 0);
+  const payOverpaid = Number(sale.overpaidAmount || 0);
   const payments = Array.isArray(sale.payments) ? sale.payments : [];
   const isSettled = payBalance <= 0;
   const payCard = document.createElement('div');
@@ -13209,7 +13451,19 @@ function renderViewSalePage(params = {}, onNavigate = null) {
         <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Balance Due</div>
         <div style="font-size: 1.05rem; font-weight: 700; color: ${isSettled ? 'var(--status-success)' : 'var(--status-warning-text)'};">₹${payBalance.toLocaleString('en-IN')}</div>
       </div>
+      ${payOverpaid > 0 ? `
+      <div>
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); font-weight: 600; margin-bottom: 0.25rem;">Overpaid</div>
+        <div style="font-size: 1.05rem; font-weight: 700; color: var(--status-danger);">₹${payOverpaid.toLocaleString('en-IN')}</div>
+      </div>
+      ` : ''}
     </div>
+
+    ${payOverpaid > 0 ? `
+      <div class="sale-overpaid-notice" style="margin-bottom: 1.15rem; padding: 0.75rem 1rem; border: 1px solid var(--status-danger); border-radius: var(--radius-sm); color: var(--status-danger); font-size: 0.85rem; font-weight: 500;">
+        ₹${payOverpaid.toLocaleString('en-IN')} more has been collected than this sale's total of ₹${payTotal.toLocaleString('en-IN')}. No refund has been recorded, and this amount is not applied to any other sale.
+      </div>
+    ` : ''}
 
     ${payments.length > 0 ? `
       <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
@@ -13320,7 +13574,7 @@ function renderEditSalePage(params = {}, onNavigate = null) {
     errorCard.className = 'card';
     errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
     errorCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -13346,11 +13600,7 @@ function renderEditSalePage(params = {}, onNavigate = null) {
   const markChanged = () => { hasUnsavedChanges = true; };
 
   const status = sale.status || 'Paid';
-  let badgeVariant = 'secondary';
-  if (status === 'Paid' || status === 'Completed') badgeVariant = 'success';
-  else if (status === 'Partial') badgeVariant = 'info';
-  else if (status === 'Pending') badgeVariant = 'warning';
-  else if (status === 'Cancelled' || status === 'Failed') badgeVariant = 'danger';
+  const badgeVariant = getStatusBadgeVariant(status);
 
   // 1. Header (Breadcrumb & Status Badge)
   const headerDiv = document.createElement('div');
@@ -13446,7 +13696,7 @@ function renderEditSalePage(params = {}, onNavigate = null) {
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
-          <label class="form-label" style="font-weight: 600;">Customer Name <span style="color: #ef4444;">*</span></label>
+          <label class="form-label" style="font-weight: 600;">Customer Name <span style="color: var(--status-danger);">*</span></label>
           <input type="text" id="edit-sale-cust-name" class="form-input" list="edit-sale-customers-list" value="${escapeHtml(sale.customer || sale.customerName || 'Walk-in Customer')}">
         </div>
 
@@ -13504,7 +13754,7 @@ function renderEditSalePage(params = {}, onNavigate = null) {
         <div class="form-group">
           <label class="form-label" style="font-weight: 600;">Payment Status</label>
           <select id="edit-sale-pay-status" class="form-select">
-            <option value="Paid" ${sale.status === 'Paid' || sale.status === 'Completed' ? 'selected' : ''}>Paid</option>
+            <option value="Paid" ${sale.status === 'Paid' || sale.status === 'Completed' || sale.status === 'Overpaid' ? 'selected' : ''}>Paid</option>
             <option value="Pending" ${sale.status === 'Pending' ? 'selected' : ''}>Pending</option>
             <option value="Cancelled" ${sale.status === 'Cancelled' ? 'selected' : ''}>Cancelled</option>
           </select>
@@ -13595,7 +13845,7 @@ function renderEditSalePage(params = {}, onNavigate = null) {
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem;">
           <div class="form-group">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product <span style="color: #ef4444;">*</span></label>
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product <span style="color: var(--status-danger);">*</span></label>
             <select class="form-select sale-prod-select">
               ${productsList.map(p => `<option value="${p.id}" ${p.id === it.productId ? 'selected' : ''}>${escapeHtml(p.name)} (${p.brand || ''})</option>`).join('')}
             </select>
@@ -13615,12 +13865,12 @@ function renderEditSalePage(params = {}, onNavigate = null) {
           </div>
 
           <div class="form-group">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity <span style="color: #ef4444;">*</span></label>
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity <span style="color: var(--status-danger);">*</span></label>
             <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${it.qty !== undefined ? it.qty : 1}">
           </div>
 
           <div class="form-group">
-            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Unit Selling Price (₹) <span style="color: #ef4444;">*</span></label>
+            <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Unit Selling Price (₹) <span style="color: var(--status-danger);">*</span></label>
             <input type="number" class="form-input sale-price-input" min="0" step="any" value="${it.sellingPrice !== undefined ? it.sellingPrice : 0}">
           </div>
 
@@ -13730,7 +13980,7 @@ function renderEditSalePage(params = {}, onNavigate = null) {
     if (onNavigate) onNavigate('sales');
   });
 
-  mainCard.querySelector('#btn-edit-sale-save').addEventListener('click', () => {
+  mainCard.querySelector('#btn-edit-sale-save').addEventListener('click', async () => {
     const custName = mainCard.querySelector('#edit-sale-cust-name').value.trim();
     const custPhone = mainCard.querySelector('#edit-sale-cust-phone').value.trim();
     const saleDate = mainCard.querySelector('#edit-sale-date').value.trim();
@@ -13765,8 +14015,23 @@ function renderEditSalePage(params = {}, onNavigate = null) {
       }
     }
 
+    // Editing a sale below what has already been collected leaves an
+    // overpayment. Payments are never rewritten, so say so before saving.
+    const alreadyPaid = (Array.isArray(sale.payments) ? sale.payments : []).reduce((a, pm) => a + (Number(pm.amount) || 0), 0);
+    const newTotal = Math.max(0, editSaleItems.reduce((a, it) => a + (Number(it.sellingPrice) || 0) * (parseInt(it.qty, 10) || 0), 0) - discount);
+    if (alreadyPaid - newTotal > 0.005) {
+      const excess = Math.round((alreadyPaid - newTotal) * 100) / 100;
+      const proceed = await uiConfirm({
+        title: 'This sale will be overpaid',
+        message: `₹${alreadyPaid.toLocaleString('en-IN')} has already been paid, but the new sale total is ₹${newTotal.toLocaleString('en-IN')}.\n\nThe sale will be marked Overpaid by ₹${excess.toLocaleString('en-IN')}. Payment history is kept as recorded and the excess is not applied to any other sale.`,
+        confirmText: 'Save as Overpaid',
+        variant: 'danger'
+      });
+      if (!proceed) return;
+    }
+
     try {
-      store.updateSale(sale.id, {
+      const updated = store.updateSale(sale.id, {
         customerName: custName,
         customerPhone: custPhone,
         date: saleDate,
@@ -13776,7 +14041,11 @@ function renderEditSalePage(params = {}, onNavigate = null) {
         items: editSaleItems
       });
       hasUnsavedChanges = false;
-      toast.show({ message: `Sale ${sale.id} updated successfully!`, type: 'success' });
+      if (updated && Number(updated.overpaidAmount || 0) > 0) {
+        toast.show({ message: `Sale ${sale.id} updated. Overpaid by ₹${Number(updated.overpaidAmount).toLocaleString('en-IN')}.`, type: 'warning', duration: 5000 });
+      } else {
+        toast.show({ message: `Sale ${sale.id} updated successfully!`, type: 'success' });
+      }
       if (onNavigate) onNavigate('sales');
     } catch (err) {
       toast.show({ message: err.message || 'Error updating sale.', type: 'danger' });
@@ -13886,7 +14155,7 @@ function renderSales(params = {}, onNavigate = null) {
       const statusLower = (s.status || 'paid').toLowerCase();
 
       // Status Filter
-      if (currentFilter === 'paid' && statusLower !== 'paid' && statusLower !== 'completed') return false;
+      if (currentFilter === 'paid' && statusLower !== 'paid' && statusLower !== 'completed' && statusLower !== 'overpaid') return false;
       if (currentFilter === 'partial' && statusLower !== 'partial') return false;
       if (currentFilter === 'pending' && statusLower !== 'pending') return false;
       // Anything still owing money, whatever its status label.
@@ -13927,11 +14196,7 @@ function renderSales(params = {}, onNavigate = null) {
       tr.style.cssText = 'transition: background-color 0.15s ease;';
 
       const status = s.status || 'Paid';
-      let badgeVariant = 'secondary';
-      if (status === 'Paid' || status === 'Completed') badgeVariant = 'success';
-      else if (status === 'Partial') badgeVariant = 'info';
-      else if (status === 'Pending') badgeVariant = 'warning';
-      else if (status === 'Failed' || status === 'Cancelled') badgeVariant = 'danger';
+      const badgeVariant = getStatusBadgeVariant(status);
 
       const saleRef = s.id || s.reference || `SAL-${String(index + 1).padStart(2, '0')}`;
       const custName = s.customer || s.customerName || 'Walk-in Customer';
@@ -13947,6 +14212,7 @@ function renderSales(params = {}, onNavigate = null) {
         <td style="font-weight: 700; color: var(--text-primary);">
           ₹${(s.totalAmount || 0).toLocaleString()}
           ${Number(s.balanceDue || 0) > 0 ? `<div style="font-size: 0.75rem; font-weight: 600; color: var(--status-warning-text); margin-top: 2px;">₹${Number(s.balanceDue).toLocaleString('en-IN')} due</div>` : ''}
+          ${Number(s.overpaidAmount || 0) > 0 ? `<div style="font-size: 0.75rem; font-weight: 600; color: var(--status-danger); margin-top: 2px;" title="More has been collected than the sale total. No refund has been recorded.">₹${Number(s.overpaidAmount).toLocaleString('en-IN')} overpaid</div>` : ''}
         </td>
         <td>
           ${createBadge({ label: status, variant: badgeVariant }).outerHTML}
@@ -14047,7 +14313,7 @@ function renderSales(params = {}, onNavigate = null) {
       const f = btn.dataset.filter;
       if (f === currentFilter) {
         btn.style.backgroundColor = 'var(--brand-primary)';
-        btn.style.color = '#ffffff';
+        btn.style.color = 'var(--brand-text)';
         btn.style.borderColor = 'var(--brand-primary)';
       } else {
         btn.style.backgroundColor = 'var(--bg-secondary)';
@@ -14170,7 +14436,7 @@ function renderAddSalePage(onNavigate = null) {
       </h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Customer Name <span style="color: #ef4444;">*</span></label>
+          <label class="form-label" style="font-weight: 500;">Customer Name <span style="color: var(--status-danger);">*</span></label>
           <input type="text" id="sale-cust-name" class="form-input" placeholder="e.g. Sneha Patel" value="Walk-in Customer">
           <div id="sale-cust-name-error" class="field-error" style="display: none;"></div>
         </div>
@@ -14305,7 +14571,7 @@ function renderAddSalePage(onNavigate = null) {
           if (qtyInp) {
             if (isOver) {
               qtyInp.classList.add('is-invalid');
-              qtyInp.style.borderColor = 'var(--status-danger, #ef4444)';
+              qtyInp.style.borderColor = 'var(--status-danger)';
             } else if (q > 0) {
               qtyInp.classList.remove('is-invalid');
               qtyInp.style.borderColor = '';
@@ -14495,7 +14761,7 @@ function renderAddSalePage(onNavigate = null) {
             </div>
 
             <div class="form-group" style="margin: 0; position: relative;">
-              <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${sz.qty !== undefined && sz.qty !== null ? sz.qty : ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; text-align: center; box-sizing: border-box; ${isOverStock ? 'border-color: #ef4444; background: rgba(239,68,68,0.08); color: #ef4444;' : ''}">
+              <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${sz.qty !== undefined && sz.qty !== null ? sz.qty : ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; text-align: center; box-sizing: border-box; ${isOverStock ? 'border-color: var(--status-danger); background: var(--status-danger-bg); color: var(--status-danger-text);' : ''}">
               <div class="sale-qty-error field-error" style="font-size: 0.7rem; text-align: center; display: ${isOverStock ? 'block' : 'none'};">
                 ${availStock === 0 ? 'Out of stock.' : `Only ${availStock} units are available.`}
               </div>
@@ -14546,7 +14812,7 @@ function renderAddSalePage(onNavigate = null) {
               <!-- Horizontal Product Details Row: Product Name (Searchable Combobox), Brand, Category -->
               <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.55rem; align-items: start;">
                 <div class="form-group" style="margin: 0;">
-                  <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: #ef4444;">*</span></label>
+                  <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: var(--status-danger);">*</span></label>
                   <div class="sale-combobox-container" style="position: relative; width: 100%;">
                     <input type="text" class="form-input sale-combobox-input" placeholder="Search or select product..." autocomplete="off" spellcheck="false" value="${selectedProd ? `${selectedProd.name}${selectedProd.brand ? ' [' + selectedProd.brand + ']' : ''}` : ''}" style="width: 100%; height: 32px; padding: 0.25rem 1.85rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; cursor: pointer; text-overflow: ellipsis; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);" title="Click to search or select product">
                     <div class="sale-combobox-chevron" style="position: absolute; right: 8px; top: 16px; transform: translateY(-50%); pointer-events: none; color: var(--text-secondary); display: flex; align-items: center;">
@@ -14588,10 +14854,10 @@ function renderAddSalePage(onNavigate = null) {
 
               <!-- Size Column Headers -->
               <div style="display: grid; grid-template-columns: 1.4fr 1.1fr 1.2fr 1fr 1.2fr 30px; gap: 0.55rem; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); padding: 0.1rem 0;">
-                <div>Size / Variant <span style="color: #ef4444;">*</span></div>
+                <div>Size / Variant <span style="color: var(--status-danger);">*</span></div>
                 <div style="text-align: center;">Available Stock</div>
                 <div style="text-align: right;">Selling Price (₹)</div>
-                <div style="text-align: center;">Quantity <span style="color: #ef4444;">*</span></div>
+                <div style="text-align: center;">Quantity <span style="color: var(--status-danger);">*</span></div>
                 <div style="text-align: right;">Total (₹)</div>
                 <div></div>
               </div>
@@ -15069,7 +15335,7 @@ function renderAddSalePage(onNavigate = null) {
     function markError(inputEl, errEl, message, cardEl, prod) {
       if (inputEl) {
         inputEl.classList.add('is-invalid');
-        inputEl.style.borderColor = 'var(--status-danger, #ef4444)';
+        inputEl.style.borderColor = 'var(--status-danger)';
       }
       if (errEl) {
         errEl.textContent = message;
@@ -15389,12 +15655,10 @@ function openCustomerDetailsModal(customer, onNavigate = null) {
   modalEl.appendChild(modalBreadcrumb);
 
   // Customer sales history
-  const customerSales = (store.data.sales || []).filter(s => {
-    const isIdMatch = s.customerId && customer.id && s.customerId === customer.id;
-    const isNameMatch = (s.customer || s.customerName || '').toLowerCase() === (customer.name || '').toLowerCase();
-    const isPhoneMatch = customer.phone && customer.phone !== '-' && s.phone === customer.phone;
-    return isIdMatch || isNameMatch || isPhoneMatch;
-  });
+  // Same rule as the customers table and view page (ID first, legacy name
+  // fallback, never phone), so a shared phone number cannot pull in another
+  // customer's sales.
+  const customerSales = store.getCustomerSales(customer);
 
   const innerContent = document.createElement('div');
   innerContent.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%;';
@@ -15444,7 +15708,7 @@ function openCustomerDetailsModal(customer, onNavigate = null) {
                 <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(s.id || s.reference || 'SAL-' + (idx+1))}</td>
                 <td style="color: var(--text-secondary);">${s.date || '-'}</td>
                 <td style="font-weight: 700; color: var(--text-primary);">₹${(s.totalAmount || 0).toLocaleString()}</td>
-                <td>${createBadge({ label: s.status || 'Paid', variant: s.status === 'Paid' ? 'success' : 'warning' }).outerHTML}</td>
+                <td>${createBadge({ label: s.status || 'Paid', variant: getStatusBadgeVariant(s.status || 'Paid') }).outerHTML}</td>
                 <td style="text-align: right;">
                   <button type="button" class="btn btn-sm btn-secondary table-action-btn cust-view-sale-btn" data-sale-id="${s.id}" title="View" aria-label="View">
                     <i data-lucide="eye"></i>
@@ -15508,7 +15772,7 @@ function openEditCustomerModal(customer, onSaved = null) {
 
       <div style="display: flex; flex-direction: column; gap: 1rem;">
         <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Customer Name <span style="color: #ef4444;">*</span></label>
+          <label class="form-label" style="font-weight: 500;">Customer Name <span style="color: var(--status-danger);">*</span></label>
           <input type="text" id="edit-cust-name" class="form-input" value="${customer.name || ''}">
         </div>
 
@@ -15609,7 +15873,7 @@ function renderViewCustomerPage(params = {}, onNavigate = null) {
     errorCard.className = 'card';
     errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
     errorCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -15779,7 +16043,7 @@ function renderViewCustomerPage(params = {}, onNavigate = null) {
             const sUnits = (s.items || []).reduce((sum, item) => sum + (Number(item.qty || item.quantity || 1) || 0), 0);
             // Colour follows the ledger, not the label: anything still owing
             // reads as outstanding even if the sale is labelled otherwise.
-            const payVariant = row.balanceDue <= 0 ? 'success' : (row.amountPaid > 0 ? 'warning' : 'danger');
+            const payVariant = getStatusBadgeVariant(row.status);
             return `
               <tr>
                 <td style="text-align: center; color: var(--text-secondary); font-weight: 600;">${idx + 1}</td>
@@ -15895,7 +16159,7 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
     errorCard.className = 'card';
     errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
     errorCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -15973,7 +16237,7 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
 
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem;">
       <div class="form-group">
-        <label class="form-label" style="font-weight: 600;">Customer Name <span style="color: #ef4444;">*</span></label>
+        <label class="form-label" style="font-weight: 600;">Customer Name <span style="color: var(--status-danger);">*</span></label>
         <input type="text" id="cust-edit-name" class="form-input" value="${escapeHtml(customer.name || '')}" placeholder="Full Customer Name">
       </div>
 
@@ -16414,7 +16678,7 @@ function renderReports(onNavigate = null) {
     if (isOk) {
       return `<span class="badge badge-success"><i data-lucide="check-circle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>${okText}</span>`;
     }
-    return `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3);"><i data-lucide="alert-triangle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>${failText}</span>`;
+    return `<span class="badge badge-warning"><i data-lucide="alert-triangle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 4px;"></i>${failText}</span>`;
   }
 
   const headerDiv = document.createElement('div');
@@ -16470,7 +16734,8 @@ function renderReports(onNavigate = null) {
   cashGrid.appendChild(createMetricCard({
     label: 'Outstanding Receivables',
     value: `₹${payTotals.outstanding.toLocaleString('en-IN')}`,
-    subtext: `<span style="color: var(--text-secondary);">${payTotals.unpaidCount} sale${payTotals.unpaidCount === 1 ? '' : 's'} awaiting payment${payTotals.unpaidCount > 0 ? ' — click to collect' : ''}</span>`,
+    subtext: `<span style="color: var(--text-secondary);">${payTotals.unpaidCount} sale${payTotals.unpaidCount === 1 ? '' : 's'} awaiting payment${payTotals.unpaidCount > 0 ? ' — click to collect' : ''}</span>` +
+      (payTotals.overpaid > 0 ? `<div style="color: var(--status-danger); margin-top: 2px;">₹${payTotals.overpaid.toLocaleString('en-IN')} overpaid on ${payTotals.overpaidCount} sale${payTotals.overpaidCount === 1 ? '' : 's'} (not netted)</div>` : ''),
     icon: 'hourglass',
     variant: payTotals.outstanding > 0 ? 'warning' : 'default',
     // Route straight from the figure to the sales that make it up.
@@ -16574,7 +16839,7 @@ function renderRecordPaymentPage(params = {}, onNavigate = null) {
     errorCard.className = 'card';
     errorCard.style.cssText = 'text-align: center; padding: 3.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1.25rem;';
     errorCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-danger-bg); display: flex; align-items: center; justify-content: center; color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -16606,7 +16871,7 @@ function renderRecordPaymentPage(params = {}, onNavigate = null) {
   ], onNavigate));
   crumbWrap.appendChild(createBadge({
     label: sale.status || 'Pending',
-    variant: (sale.status === 'Paid' || sale.status === 'Completed') ? 'success' : (sale.status === 'Partial' ? 'info' : 'warning')
+    variant: getStatusBadgeVariant(sale.status || 'Pending')
   }));
   headerDiv.appendChild(crumbWrap);
   const btnBack = document.createElement('button');
@@ -16623,7 +16888,7 @@ function renderRecordPaymentPage(params = {}, onNavigate = null) {
     doneCard.className = 'card';
     doneCard.style.cssText = 'text-align: center; padding: 3rem 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 1rem;';
     doneCard.innerHTML = `
-      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(34,197,94,0.12); display: flex; align-items: center; justify-content: center; color: var(--status-success);">
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: var(--status-success-bg); display: flex; align-items: center; justify-content: center; color: var(--status-success);">
         <i data-lucide="check-circle" style="width: 28px; height: 28px;"></i>
       </div>
       <div>
@@ -16833,7 +17098,7 @@ function renderProfilePage(params = {}, onNavigate = null) {
   idCard.style.cssText = 'padding: 1.35rem 1.5rem;';
   idCard.innerHTML = `
     <div style="display: flex; align-items: center; gap: 1.15rem; flex-wrap: wrap;">
-      <div id="profile-avatar" aria-hidden="true" style="width: 64px; height: 64px; border-radius: 50%; background-color: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.4rem; letter-spacing: 0.02em; flex-shrink: 0;">
+      <div id="profile-avatar" aria-hidden="true" style="width: 64px; height: 64px; border-radius: 50%; background-color: var(--brand-primary); color: var(--brand-text); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.4rem; letter-spacing: 0.02em; flex-shrink: 0;">
         ${escapeHtml(initialsOf(info.ownerName))}
       </div>
       <div style="min-width: 0; display: flex; flex-direction: column; gap: 0.2rem;">
@@ -17024,7 +17289,7 @@ function renderSettings(onThemeToggle, onNavigate = null) {
     <div style="display: flex; align-items: center; justify-content: space-between; padding-bottom: 1rem; border-bottom: 1px solid var(--border-color);">
       <div>
         <h3 class="card-title">Interface Theme</h3>
-        <p style="font-size: 0.78rem; color: var(--text-secondary);">Switch between Light Mode (#F7F8FC) and Dark Mode (#080D1C)</p>
+        <p style="font-size: 0.78rem; color: var(--text-secondary);">Switch between Light Mode (#F1F3F6) and Dark Mode (#080D1C)</p>
       </div>
       <button class="btn btn-secondary btn-sm" id="settings-theme-toggle-btn">
         <i data-lucide="${currentTheme === 'dark' ? 'sun' : 'moon'}" style="width: 16px; height: 16px;"></i> Toggle Theme
@@ -17183,7 +17448,7 @@ function renderSettings(onThemeToggle, onNavigate = null) {
     const body = document.createElement('div');
     body.style.cssText = 'display: flex; flex-direction: column; gap: 0.85rem; font-size: 0.85rem; color: var(--text-primary);';
     body.innerHTML = `
-      <div style="display: flex; align-items: flex-start; gap: 0.65rem; padding: 0.75rem 0.9rem; background: var(--status-danger-bg, rgba(239, 68, 68, 0.08)); border: 1px solid var(--status-danger-border, rgba(239, 68, 68, 0.25)); border-radius: var(--radius-sm, 6px); color: var(--status-danger, #ef4444);">
+      <div style="display: flex; align-items: flex-start; gap: 0.65rem; padding: 0.75rem 0.9rem; background: var(--status-danger-bg); border: 1px solid var(--status-danger-border); border-radius: var(--radius-sm, 6px); color: var(--status-danger);">
         <i data-lucide="alert-triangle" style="width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px;"></i>
         <div>
           <div style="font-weight: 600; font-size: 0.88rem; margin-bottom: 2px;">Cannot Delete ${typeLabel} "${item}"</div>
@@ -17292,8 +17557,8 @@ function renderSettings(onThemeToggle, onNavigate = null) {
     delBtn.innerHTML = '&times;';
 
     delBtn.addEventListener('mouseenter', () => {
-      delBtn.style.color = 'var(--status-danger, #ef4444)';
-      delBtn.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+      delBtn.style.color = 'var(--status-danger)';
+      delBtn.style.backgroundColor = 'var(--status-danger-bg)';
     });
     delBtn.addEventListener('mouseleave', () => {
       delBtn.style.color = 'var(--text-secondary)';
@@ -17414,7 +17679,7 @@ function renderSettings(onThemeToggle, onNavigate = null) {
     </div>
 
     <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-      <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-db" style="border-color: #ef4444; color: #ef4444; font-weight: 600; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem;">
+      <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-db" style="border-color: var(--status-danger); color: var(--status-danger); font-weight: 600; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem;">
         <i data-lucide="trash-2" style="width: 15px; height: 15px;"></i>
         Clear Database (Empty Store)
       </button>
@@ -17425,7 +17690,15 @@ function renderSettings(onThemeToggle, onNavigate = null) {
     </div>
   `;
 
-  dbCard.querySelector('#btn-clear-db').addEventListener('click', () => {
+  dbCard.querySelector('#btn-clear-db').addEventListener('click', async () => {
+    const ok = await uiConfirm({
+      title: 'Clear the entire database?',
+      message: 'This will permanently remove all current store data: products, purchases, sales, payments, customers and stock history.\n\nThis cannot be undone.',
+      confirmText: 'Clear Database',
+      variant: 'danger',
+      requireText: 'DELETE'
+    });
+    if (!ok) return;
     store.clearDatabase();
     if (typeof toast !== 'undefined' && toast.show) {
       toast.show({ message: 'Database cleared! Products, purchases, and sales are now empty.', type: 'success' });
@@ -17433,7 +17706,15 @@ function renderSettings(onThemeToggle, onNavigate = null) {
     if (window.appInstance) window.appInstance.render();
   });
 
-  dbCard.querySelector('#btn-restore-demo').addEventListener('click', () => {
+  dbCard.querySelector('#btn-restore-demo').addEventListener('click', async () => {
+    const ok = await uiConfirm({
+      title: 'Replace current data with sample data?',
+      message: 'This will replace the current store data with sample demo data. All current products, purchases, sales, payments and customers will be overwritten.\n\nThis cannot be undone.',
+      confirmText: 'Replace with Sample Data',
+      variant: 'danger',
+      requireText: 'REPLACE'
+    });
+    if (!ok) return;
     store.loadSampleData();
     if (typeof toast !== 'undefined' && toast.show) {
       toast.show({ message: 'Sample demo data restored successfully.', type: 'success' });
