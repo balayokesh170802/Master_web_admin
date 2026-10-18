@@ -1,13 +1,13 @@
 const sampleDemoData = {
   storeInfo: {
-    name: "Apex Fashion Store",
-    branch: "Main Street Branch #01",
-    ownerName: "Suresh Menon",
+    name: "Master",
+    branch: "Clothing Fashion",
+    ownerName: "VISHNU VIKASH",
     ownerRole: "Store Owner",
     currency: "₹",
     currencyCode: "INR",
-    phone: "+91 98765 43210",
-    email: "manager@apexfashion.com",
+    phone: "9876543210",
+    email: "vishnu@masterclothing.com",
     address: "124 Commerce Avenue, Fashion District, City",
     defaultMinStock: 10
   },
@@ -17,11 +17,11 @@ const sampleDemoData = {
   },
 
   categories: ["Shirts", "T-Shirts", "Jeans", "Trousers", "Hoodies"],
-  brands: ["ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
+  brands: ["Master", "ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
   sizes: ["S", "M", "L", "XL"],
   
   suppliers: [
-    { id: "SUP-01", name: "Apex Apparel Ltd", contact: "Rajesh Kumar (+91 98111 22334)", city: "Tirupur" },
+    { id: "SUP-01", name: "Sri Textiles", contact: "Ganesh Raman (+91 98450 12345)", city: "Tirupur" },
     { id: "SUP-02", name: "SilkRoute Fabrics", contact: "Anita Sharma (+91 98222 33445)", city: "Surat" },
     { id: "SUP-03", name: "Urban Thread Co", contact: "Vikram Singh (+91 98333 44556)", city: "Ludhiana" }
   ],
@@ -32,44 +32,32 @@ const sampleDemoData = {
     "createdAt": "2026-10-01T08:00:00.000Z",
     "name": "Classic Oxford Shirt",
     "category": "Shirts",
-    "brand": "ClassicFit",
+    "brand": "Master",
     "description": "100% Cotton button-down Oxford shirt suitable for daily formal and casual wear.",
     "purchasePrice": 650,
-    "sellingPrice": 1499,
+    "sellingPrice": 999,
     "minStock": 12,
-    "totalStock": 59,
-    "supplier": "Apex Apparel Ltd",
+    "totalStock": 55,
+    "supplier": "Sri Textiles",
     "status": "Active",
     "variants": [
       {
-        "sku": "OXF-BLK-S",
-        "color": "Black",
+        "sku": "OXF-WHT-S",
+        "color": "White",
         "size": "S",
-        "stock": 18,
-        "damaged": 1,
-        "daysInStock": 25
-      },
-      {
-        "sku": "OXF-BLK-M",
-        "color": "Black",
-        "size": "M",
-        "stock": 4,
+        "stock": 15,
+        "buyingPrice": 650,
+        "sellingPrice": 999,
         "damaged": 0,
-        "daysInStock": 40
-      },
-      {
-        "sku": "OXF-BLK-L",
-        "color": "Black",
-        "size": "L",
-        "stock": 0,
-        "damaged": 2,
-        "daysInStock": 15
+        "daysInStock": 25
       },
       {
         "sku": "OXF-WHT-M",
         "color": "White",
         "size": "M",
-        "stock": 22,
+        "stock": 20,
+        "buyingPrice": 650,
+        "sellingPrice": 999,
         "damaged": 0,
         "daysInStock": 12
       },
@@ -77,9 +65,21 @@ const sampleDemoData = {
         "sku": "OXF-WHT-L",
         "color": "White",
         "size": "L",
-        "stock": 15,
-        "damaged": 1,
+        "stock": 12,
+        "buyingPrice": 650,
+        "sellingPrice": 999,
+        "damaged": 0,
         "daysInStock": 10
+      },
+      {
+        "sku": "OXF-WHT-XL",
+        "color": "White",
+        "size": "XL",
+        "stock": 8,
+        "buyingPrice": 650,
+        "sellingPrice": 999,
+        "damaged": 0,
+        "daysInStock": 15
       }
     ]
   },
@@ -249,9 +249,9 @@ const sampleDemoData = {
     {
       id: "DMG-1001",
       product: "Classic Oxford Shirt",
-      sku: "OXF-BLK-L",
-      quantity: 2,
-      supplier: "Apex Apparel Ltd",
+      sku: "OXF-WHT-L",
+      quantity: 1,
+      supplier: "Sri Textiles",
       purchaseId: "PUR-2026-088",
       date: "2026-10-02",
       reason: "Stained collar fabric from supplier packing",
@@ -282,26 +282,25 @@ const sampleDemoData = {
   ],
 
   stockMovements: [
-    { id: "MOV-5005", date: "2026-10-06 08:15 PM", product: "Classic Oxford Shirt", sku: "OXF-WHT-M", type: "Sale", quantity: -3, reference: "BILL-2026-1042", user: "Staff - Priya" },
+    { id: "MOV-5005", date: "2026-10-06 08:15 PM", product: "Classic Oxford Shirt", sku: "OXF-WHT-M", type: "Sale", quantity: -2, reference: "BILL-2026-1042", user: "Staff - Priya" },
     { id: "MOV-5004", date: "2026-10-06 05:10 PM", product: "Premium Cotton T-Shirt", sku: "TSH-WHT-S", type: "Sale", quantity: -5, reference: "BILL-2026-1040", user: "Staff - Priya" },
-    { id: "MOV-5003", date: "2026-10-05 04:15 PM", product: "Classic Oxford Shirt", sku: "OXF-WHT-M", type: "Stock In", quantity: 20, reference: "PUR-2026-095", user: "Manager - Suresh" },
-    { id: "MOV-5002", date: "2026-10-05 04:15 PM", product: "Classic Oxford Shirt", sku: "OXF-BLK-L", type: "Damage", quantity: 2, reference: "PUR-2026-095", user: "Manager - Suresh" },
-    { id: "MOV-5001", date: "2026-09-28 11:30 AM", product: "Essential Fleece Hoodie", sku: "HD-OLV-L", type: "Stock In", quantity: 15, reference: "PUR-2026-092", user: "Manager - Suresh" }
+    { id: "MOV-5003", date: "2026-10-05 04:15 PM", product: "Classic Oxford Shirt", sku: "OXF-WHT-M", type: "Stock In", quantity: 20, reference: "PUR-2026-095", user: "Manager - Vishnu" },
+    { id: "MOV-5002", date: "2026-10-05 04:15 PM", product: "Classic Oxford Shirt", sku: "OXF-WHT-M", type: "Stock In", quantity: 20, reference: "PUR-2026-095", user: "Manager - Vishnu" },
+    { id: "MOV-5001", date: "2026-09-28 11:30 AM", product: "Essential Fleece Hoodie", sku: "HD-OLV-L", type: "Stock In", quantity: 15, reference: "PUR-2026-092", user: "Manager - Vishnu" }
   ],
 
   purchases: [
     {
       id: "PUR-2026-095",
-      supplier: "Apex Apparel Ltd",
-      invoiceNumber: "INV-APX-8842",
+      supplier: "Sri Textiles",
+      invoiceNumber: "INV-SRI-8842",
       date: "2026-10-05",
-      productCount: 2,
-      totalQuantity: 40,
-      totalAmount: 26000,
+      productCount: 1,
+      totalQuantity: 20,
+      totalAmount: 13000,
       status: "Completed",
       items: [
-        { product: "Classic Oxford Shirt", sku: "OXF-WHT-M", received: 20, good: 20, damaged: 0, price: 650 },
-        { product: "Classic Oxford Shirt", sku: "OXF-BLK-L", received: 20, good: 18, damaged: 2, price: 650 }
+        { product: "Classic Oxford Shirt", sku: "OXF-WHT-M", size: "M", received: 20, good: 20, damaged: 0, price: 650 }
       ]
     },
     {
@@ -351,28 +350,21 @@ const sampleDemoData = {
   {
     "id": "BILL-2026-1042",
     "date": "Oct 6, 08:15 PM",
-    "customer": "Amit Verma",
-    "phone": "+91 98123 45678",
-    "itemCount": 5,
-    "totalAmount": 8495,
+    "customer": "Arun Kumar",
+    "phone": "9876543210",
+    "itemCount": 2,
+    "totalAmount": 1998,
     "paymentMethod": "UPI",
     "status": "Completed",
     "items": [
       {
         "product": "Classic Oxford Shirt",
         "sku": "OXF-WHT-M",
-        "qty": 3,
-        "price": 1499,
-        "discount": 0,
-        "amount": 4497
-      },
-      {
-        "product": "Slim Fit Denim Jeans",
-        "sku": "JNS-NAV-M",
+        "size": "M",
         "qty": 2,
-        "price": 1999,
+        "price": 999,
         "discount": 0,
-        "amount": 3998
+        "amount": 1998
       }
     ]
   },
@@ -1305,11 +1297,11 @@ const sampleDemoData = {
   customers: [
   {
     "id": "CUST-01",
-    "name": "Amit Verma",
-    "phone": "+91 98123 45678",
-    "ordersCount": 4,
+    "name": "Arun Kumar",
+    "phone": "9876543210",
+    "ordersCount": 1,
     "lastPurchase": "2026-10-06",
-    "totalSpend": 25881
+    "totalSpend": 1998
   },
   {
     "id": "CUST-02",
@@ -1398,25 +1390,33 @@ const sampleDemoData = {
     "ordersCount": 3,
     "lastPurchase": "2026-10-05",
     "totalSpend": 20886
+  },
+  {
+    "id": "CUST-13",
+    "name": "Amit Verma",
+    "phone": "+91 98123 45678",
+    "ordersCount": 3,
+    "lastPurchase": "2026-10-04",
+    "totalSpend": 17386
   }
 ],
 
   users: [
-    { id: "USR-01", name: "Suresh Menon", role: "Store Owner / Admin", email: "suresh@apexfashion.com", status: "Active" },
+    { id: "USR-01", name: "VISHNU VIKASH", role: "Store Owner / Admin", email: "vishnu@masterclothing.com", status: "Active" },
     { id: "USR-02", name: "Priya Nair", role: "Billing Staff", email: "priya@apexfashion.com", status: "Active" }
   ]
 };
 
 const emptyInitialData = {
   storeInfo: {
-    name: "Apex Fashion Store",
-    branch: "Main Street Branch #01",
-    ownerName: "Suresh Menon",
+    name: "Master",
+    branch: "Clothing Fashion",
+    ownerName: "VISHNU VIKASH",
     ownerRole: "Store Owner",
     currency: "₹",
     currencyCode: "INR",
-    phone: "+91 98765 43210",
-    email: "manager@apexfashion.com",
+    phone: "9876543210",
+    email: "vishnu@masterclothing.com",
     address: "124 Commerce Avenue, Fashion District, City",
     defaultMinStock: 10
   },
@@ -1424,10 +1424,10 @@ const emptyInitialData = {
     lowStockThreshold: 5
   },
   categories: ["Shirts", "T-Shirts", "Jeans", "Trousers", "Hoodies"],
-  brands: ["ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
+  brands: ["Master", "ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
   sizes: ["S", "M", "L", "XL"],
   suppliers: [
-    { id: "SUP-01", name: "Apex Apparel Ltd", contact: "Rajesh Kumar (+91 98111 22334)", city: "Tirupur" },
+    { id: "SUP-01", name: "Sri Textiles", contact: "Ganesh Raman (+91 98450 12345)", city: "Tirupur" },
     { id: "SUP-02", name: "SilkRoute Fabrics", contact: "Anita Sharma (+91 98222 33445)", city: "Surat" },
     { id: "SUP-03", name: "Urban Thread Co", contact: "Vikram Singh (+91 98333 44556)", city: "Ludhiana" }
   ],
@@ -1437,7 +1437,7 @@ const emptyInitialData = {
   stockMovements: [],
   customers: [],
   users: [
-    { id: "USR-01", name: "Suresh Menon", role: "Store Owner / Admin", email: "suresh@apexfashion.com", status: "Active" },
+    { id: "USR-01", name: "VISHNU VIKASH", role: "Store Owner / Admin", email: "vishnu@masterclothing.com", status: "Active" },
     { id: "USR-02", name: "Priya Nair", role: "Billing Staff", email: "priya@apexfashion.com", status: "Active" }
   ]
 };
@@ -1478,11 +1478,13 @@ function isPurchaseReceivable(status) {
 
 class StoreManager {
   constructor() {
+    this.listeners = [];
+    let saved = null;
     try {
       // Clean up legacy storage versions so deleted database is in effect
       localStorage.removeItem('master_web_admin_data');
       localStorage.removeItem('master_web_admin_data_v2');
-      const saved = localStorage.getItem('master_web_admin_data_v3');
+      saved = localStorage.getItem('master_web_admin_data_v3');
       this.data = saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(emptyInitialData));
     } catch (e) {
       this.data = JSON.parse(JSON.stringify(emptyInitialData));
@@ -1501,7 +1503,9 @@ class StoreManager {
     if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
 
     this.migrateAndRepairData();
-    this.listeners = [];
+    if (saved) {
+      this.save();
+    }
   }
 
   loadFromStorage() {
@@ -1510,6 +1514,7 @@ class StoreManager {
       if (saved) {
         this.data = JSON.parse(saved);
         this.migrateAndRepairData();
+        this.save();
       }
     } catch (e) {
       console.error('Error loading from storage:', e);
@@ -1703,6 +1708,29 @@ class StoreManager {
       });
     });
 
+    // 2b. Repair legacy customer ID collision and ensure customer ID uniqueness
+    const amitCust = (this.data.customers || []).find(c => c && (c.name || '').trim().toLowerCase() === 'amit verma');
+    const kavitaCust = (this.data.customers || []).find(c => c && (c.name || '').trim().toLowerCase() === 'kavita reddy');
+    if (amitCust && kavitaCust && (amitCust.id === 'CUST-02' || (this.data.customers || []).filter(c => c.id === 'CUST-02').length > 1)) {
+      amitCust.id = 'CUST-13';
+      (this.data.sales || []).forEach(s => {
+        if (s && (s.customer || s.customerName || '').trim().toLowerCase() === 'amit verma') {
+          s.customerId = 'CUST-13';
+        }
+      });
+    }
+
+    // Ensure customer ID uniqueness for all records
+    const seenCustIds = new Set();
+    (this.data.customers || []).forEach(c => {
+      if (!c) return;
+      if (seenCustIds.has(c.id)) {
+        const existingIds = this.data.customers.map(x => x && x.id).filter(Boolean);
+        c.id = this._nextSequentialId('customers', 'CUST', existingIds);
+      }
+      seenCustIds.add(c.id);
+    });
+
     // 3. Ensure sales data integrity (subtotal, customerName, customerId, item unit cost snapshot)
     this.data.sales.forEach(sale => {
       if (sale.subtotal === undefined || sale.subtotal === null) {
@@ -1716,13 +1744,13 @@ class StoreManager {
         sale.customer = sale.customerName;
       }
 
-      // Link a legacy sale that has no customerId yet, by exact name only and
-      // only when that name is unambiguous. An existing customerId is never
-      // overwritten and phone numbers are never used, so a sale cannot move
-      // to a different customer on page load.
+      // Link a legacy sale that has no customerId yet, or relink if mislinked
+      // to a customer whose name does not match, by exact name only and only
+      // when that name is unambiguous.
       if (sale.customerName && sale.customerName.toLowerCase() !== 'walk-in customer') {
-        if (!sale.customerId) {
-          const nameLower = sale.customerName.trim().toLowerCase();
+        const nameLower = sale.customerName.trim().toLowerCase();
+        const linkedCust = sale.customerId ? this.data.customers.find(c => c.id === sale.customerId) : null;
+        if (!linkedCust || (linkedCust.name && linkedCust.name.trim().toLowerCase() !== nameLower)) {
           const sameName = this.data.customers.filter(c => c.name && c.name.trim().toLowerCase() === nameLower);
           if (sameName.length === 1) {
             sale.customerId = sameName[0].id;
@@ -1761,6 +1789,16 @@ class StoreManager {
           this.data.storeInfo[k] = defaults[k] !== undefined ? defaults[k] : '';
         }
       });
+      // Upgrade default store branding to Master / Clothing Fashion if unmodified
+      if (this.data.storeInfo.name === 'Apex Fashion Store') {
+        this.data.storeInfo.name = 'Master';
+      }
+      if (this.data.storeInfo.branch === 'Main Street Branch #01') {
+        this.data.storeInfo.branch = 'Clothing Fashion';
+      }
+      if (this.data.storeInfo.ownerName === 'Suresh Menon' || !this.data.storeInfo.ownerName) {
+        this.data.storeInfo.ownerName = 'VISHNU VIKASH';
+      }
     }
 
     // 5b. Retire the approval workflow on existing records.
@@ -1847,7 +1885,7 @@ class StoreManager {
    *
    * Returns '' for walk-in customers.
    */
-  _resolveSaleCustomer({ customerId = '', name = '', phone = '-' } = {}) {
+  _resolveSaleCustomer({ customerId = '', name = '', phone = '-', email = '', city = '', address = '', notes = '' } = {}) {
     const custName = (name || '').trim();
     const custPhone = (phone || '-').trim() || '-';
     if (!custName || custName.toLowerCase() === 'walk-in customer') return '';
@@ -1858,7 +1896,11 @@ class StoreManager {
 
     if (customerId) {
       const byId = this.data.customers.find(c => c.id === customerId);
-      if (byId && (byId.name || '').trim().toLowerCase() === lower) customer = byId;
+      if (byId) {
+        if (!custName || (byId.name || '').trim().toLowerCase() === lower) {
+          customer = byId;
+        }
+      }
     }
 
     if (!customer) {
@@ -1873,13 +1915,24 @@ class StoreManager {
         id: this._nextCustomerId(),
         name: custName,
         phone: custPhone,
+        email: (email || '').trim(),
+        city: (city || '').trim(),
+        address: (address || '').trim(),
+        notes: (notes || '').trim(),
         ordersCount: 0,
         lastPurchase: new Date().toISOString().split('T')[0],
         totalSpend: 0
       };
       this.data.customers.unshift(customer);
-    } else if (custPhone !== '-' && (!customer.phone || customer.phone === '-')) {
-      customer.phone = custPhone;
+    } else {
+      // For existing customer: backfill missing details if provided during sale
+      if (custPhone !== '-' && (!customer.phone || customer.phone === '-')) {
+        customer.phone = custPhone;
+      }
+      if (email && !customer.email) customer.email = email.trim();
+      if (city && !customer.city) customer.city = city.trim();
+      if (address && !customer.address) customer.address = address.trim();
+      if (notes && !customer.notes) customer.notes = notes.trim();
     }
 
     return customer.id;
@@ -3829,7 +3882,11 @@ class StoreManager {
       const custId = this._resolveSaleCustomer({
         customerId: salePayload.customerId || '',
         name: custName,
-        phone: custPhone
+        phone: custPhone,
+        email: salePayload.customerEmail || salePayload.email || '',
+        city: salePayload.customerCity || salePayload.city || '',
+        address: salePayload.customerAddress || salePayload.address || '',
+        notes: salePayload.customerNotes || salePayload.notes || ''
       });
 
       saleRecord = {
@@ -3839,6 +3896,10 @@ class StoreManager {
         customerName: custName,
         customerId: custId,
         phone: custPhone,
+        customerEmail: (salePayload.customerEmail || salePayload.email || '').trim(),
+        customerCity: (salePayload.customerCity || salePayload.city || '').trim(),
+        customerAddress: (salePayload.customerAddress || salePayload.address || '').trim(),
+        customerNotes: (salePayload.customerNotes || salePayload.notes || '').trim(),
         itemCount: totalItemCount,
         subtotal: totalAmt,
         totalAmount: finalTotal,
@@ -5697,8 +5758,8 @@ function createSidebar(activeNavId, onNavigate) {
   
   // Store identity comes from Settings -> Store Details.
   const sbInfo = (typeof store !== 'undefined' && store.getStoreInfo) ? store.getStoreInfo() : {};
-  const storeName = sbInfo.name || 'Master Admin';
-  const storeBranch = sbInfo.branch || '';
+  const storeName = sbInfo.name || 'Master';
+  const storeBranch = sbInfo.branch || 'Clothing Fashion';
   const storeBadge = (storeName.trim()[0] || 'M').toUpperCase();
 
   const header = document.createElement('div');
@@ -5776,8 +5837,15 @@ function createTopbar(activeTitle, onThemeToggle, onNavigate = null) {
     .filter(Boolean)
     .slice(0, 2)
     .map(w => w[0].toUpperCase())
-    .join('') || 'S';
-  const branchLabel = sInfo.branch || 'Store #01';
+    .join('') || 'V';
+  const sName = (sInfo.name || 'Master').trim();
+  const bName = (sInfo.branch || 'Clothing Fashion').trim();
+  let statusBadgeLabel = 'Master Clothing Fashion';
+  if (sName && bName) {
+    statusBadgeLabel = bName.toLowerCase().startsWith(sName.toLowerCase()) ? bName : `${sName} ${bName}`;
+  } else if (sName) {
+    statusBadgeLabel = sName;
+  }
 
   topbar.innerHTML = `
     <div class="topbar-left">
@@ -5786,7 +5854,7 @@ function createTopbar(activeTitle, onThemeToggle, onNavigate = null) {
     <div class="topbar-right">
       <div style="font-size: 0.8rem; background: var(--bg-secondary); padding: 0.35rem 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: flex; align-items: center; gap: 0.4rem;">
         <span style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--status-success);"></span>
-        <span style="font-weight: 500; color: var(--text-secondary);">${escapeHtml(branchLabel)} • Online</span>
+        <span style="font-weight: 500; color: var(--text-secondary);">${escapeHtml(statusBadgeLabel)} • Online</span>
       </div>
       
       <button class="btn btn-secondary btn-sm theme-toggle-btn" title="Toggle Light/Dark Mode" style="padding: 0.45rem;">
@@ -6024,19 +6092,21 @@ function renderAddProductPage(params = {}, onNavigate = null) {
       
       <div class="form-group">
         <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Product Name *</label>
-        <input type="text" class="form-input" id="new-prod-name" placeholder="e.g. Oxford Cotton Formal Shirt" style="font-size: 0.9rem;">
+        <input type="text" class="form-input" id="new-prod-name" placeholder="Enter product name" style="font-size: 0.9rem;">
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
           <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Category *</label>
           <select class="form-select" id="new-prod-cat">
+            <option value="" disabled selected>Select Category</option>
             ${catOptions.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
           <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Brand</label>
           <select class="form-select" id="new-prod-brand">
+            <option value="" disabled selected>Select Brand</option>
             ${brandOptions.map(b => `<option value="${escapeHtml(b)}">${escapeHtml(b)}</option>`).join('')}
           </select>
         </div>
@@ -6079,13 +6149,13 @@ function renderAddProductPage(params = {}, onNavigate = null) {
         <!-- Number of Units Purchased -->
         <div class="form-group">
           <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Number of Units Purchased *</label>
-          <input type="number" class="form-input" id="new-prod-units" value="50" min="1" step="1" style="font-weight: 600;">
+          <input type="number" class="form-input" id="new-prod-units" value="50" min="1" step="1" placeholder="Enter quantity" style="font-weight: 600;">
         </div>
 
         <!-- Total Buying Price -->
         <div class="form-group">
           <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Total Buying Price (₹) *</label>
-          <input type="number" class="form-input" id="new-prod-total-buying" value="20000" min="0" step="100" style="font-weight: 600;">
+          <input type="number" class="form-input" id="new-prod-total-buying" value="20000" min="0" step="100" placeholder="Enter buying price" style="font-weight: 600;">
         </div>
 
         <!-- Buying Price Per Unit (Auto-calculated) -->
@@ -6097,7 +6167,7 @@ function renderAddProductPage(params = {}, onNavigate = null) {
         <!-- Selling Price Per Unit -->
         <div class="form-group">
           <label class="form-label" style="font-size: 0.825rem; font-weight: 600; color: var(--text-primary);">Selling Price Per Unit (₹) *</label>
-          <input type="number" class="form-input" id="new-prod-selling-unit" value="600" min="0" step="10" style="font-weight: 600;">
+          <input type="number" class="form-input" id="new-prod-selling-unit" value="600" min="0" step="10" placeholder="Enter selling price" style="font-weight: 600;">
         </div>
 
         <!-- Selling Price Markup Percentage (Auto-calculated) -->
@@ -6358,8 +6428,13 @@ function renderOverview(onNavigate) {
   kpiGrid.className = 'kpi-grid';
 
   const lowCount = metrics.lowStockCount || 0;
+  const lowVariantsCount = metrics.lowStockVariantsCount || 0;
+  const hasLowStock = lowCount > 0 || lowVariantsCount > 0;
+
   const outCount = metrics.outOfStockCount || 0;
   const outVariantsCount = metrics.outOfStockVariantsCount || 0;
+  const hasOutOfStock = outCount > 0 || outVariantsCount > 0;
+
   const totalStockUnits = metrics.totalStock || 0;
   const totalRevenue = sales.reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
   const avgOrderVal = sales.length > 0 ? Math.round(totalRevenue / sales.length) : 0;
@@ -6384,10 +6459,10 @@ function renderOverview(onNavigate) {
   kpiGrid.appendChild(createMetricCard({
     label: 'Low Stock',
     value: `${lowCount} Items`,
-    // Colour only when there is something to act on: 0 = neutral card.
-    subtext: `<span style="color: ${lowCount > 0 ? 'var(--status-warning-text)' : 'var(--text-secondary)'}; font-weight: 600;">${lowCount} items</span> <span style="color: var(--text-secondary);">below min threshold (${thresholdVal})</span>`,
+    // Semantic warning styling only when low stock items/sizes exist; neutral when 0.
+    subtext: `<span style="color: ${hasLowStock ? 'var(--status-warning-text)' : 'var(--text-secondary)'}; font-weight: 600;">${lowCount} items</span> <span style="color: var(--text-secondary);">below min threshold (${thresholdVal})</span>`,
     icon: 'alert-triangle',
-    variant: lowCount > 0 ? 'warning' : 'default',
+    variant: hasLowStock ? 'warning' : 'default',
     statusTint: true,
     onClick: () => onNavigate('inventory', { status: 'LOW' })
   }));
@@ -6397,8 +6472,7 @@ function renderOverview(onNavigate) {
     if (outCount > 0) {
       outSubtext = `<span style="color: var(--status-danger-text); font-weight: 600;">${outVariantsCount} ${outVariantsCount === 1 ? 'size' : 'sizes'} at 0 stock</span> <span style="color: var(--text-secondary);">(${outCount} ${outCount === 1 ? 'product' : 'products'} fully out)</span>`;
     } else {
-      // No product is fully out, so the card stays neutral (see variant below).
-      outSubtext = `<span style="color: var(--text-secondary); font-weight: 600;">${outVariantsCount} ${outVariantsCount === 1 ? 'size' : 'sizes'} at 0 stock</span> <span style="color: var(--text-secondary);">(in partial stock)</span>`;
+      outSubtext = `<span style="color: var(--status-danger-text); font-weight: 600;">${outVariantsCount} ${outVariantsCount === 1 ? 'size' : 'sizes'} at 0 stock</span> <span style="color: var(--text-secondary);">(in partial stock)</span>`;
     }
   } else {
     outSubtext = `<span style="color: var(--text-secondary);">0 sizes at 0 stock</span>`;
@@ -6409,8 +6483,8 @@ function renderOverview(onNavigate) {
     value: `${outCount} Products`,
     subtext: outSubtext,
     icon: 'alert-circle',
-    // Red only when at least one product is fully out of stock.
-    variant: outCount > 0 ? 'danger' : 'default',
+    // Dynamic danger state whenever out-of-stock items exist (fully out or 0-stock sizes).
+    variant: hasOutOfStock ? 'danger' : 'default',
     statusTint: true,
     onClick: () => onNavigate('inventory', { status: 'OUT' })
   }));
@@ -7999,7 +8073,7 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
 
               <div>
                 <label class="form-label" style="font-size: 0.75rem; margin-bottom: 0.25rem;">Quantity (Units)</label>
-                <input type="number" min="1" step="1" ${index === 0 ? 'id="manage-adj-qty-input"' : ''} class="form-input manage-adj-qty-input" data-entry-id="${entry.id}" value="${entry.qty}" placeholder="e.g. 5" style="font-size: 0.825rem; padding: 0.45rem 0.65rem;">
+                <input type="number" min="1" step="1" ${index === 0 ? 'id="manage-adj-qty-input"' : ''} class="form-input manage-adj-qty-input" data-entry-id="${entry.id}" value="${entry.qty}" placeholder="Enter quantity" style="font-size: 0.825rem; padding: 0.45rem 0.65rem;">
               </div>
 
               <div>
@@ -9554,7 +9628,7 @@ function openEditProductModal(product, onSaved) {
           <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
             Product Name <span style="color: var(--status-danger);">*</span>
           </label>
-          <input type="text" id="edit-prod-name" class="form-input" value="${product.name || ''}" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+          <input type="text" id="edit-prod-name" class="form-input" placeholder="Enter product name" value="${product.name || ''}" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
@@ -9581,7 +9655,7 @@ function openEditProductModal(product, onSaved) {
             <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
               Default Selling Price (₹)
             </label>
-            <input type="number" id="edit-prod-price" class="form-input" placeholder="e.g. 1499" value="${product.sellingPrice !== null && product.sellingPrice !== undefined ? product.sellingPrice : ''}" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+            <input type="number" id="edit-prod-price" class="form-input" placeholder="Enter selling price" value="${product.sellingPrice !== null && product.sellingPrice !== undefined ? product.sellingPrice : ''}" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           </div>
           <div class="form-group" style="margin: 0;">
             <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
@@ -9811,7 +9885,7 @@ function openRowStockAdjustModal(product, initialSize = null, onAdjusted = null)
           <label class="form-label" style="font-size: 0.825rem; font-weight: 500; margin-bottom: 0.35rem; display: block; color: var(--text-primary);">
             Quantity <span style="color: var(--status-danger);">*</span>
           </label>
-          <input type="number" id="adj-qty-input" class="form-input" min="1" step="1" value="1" placeholder="Enter positive whole number" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
+          <input type="number" id="adj-qty-input" class="form-input" min="1" step="1" value="1" placeholder="Enter quantity" style="font-size: 0.85rem; padding: 0.45rem 0.75rem;">
           <div id="adj-qty-error" style="font-size: 0.75rem; color: var(--status-danger); margin-top: 3px; display: none;"></div>
         </div>
 
@@ -11417,7 +11491,7 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
         <div class="form-group">
           <label class="form-label" style="font-weight: 600;">Supplier <span style="color: var(--status-danger);">*</span></label>
-          <input type="text" id="edit-pur-supplier" class="form-input" list="edit-pur-suppliers-list" value="${escapeHtml(purchase.supplier || '')}" placeholder="Select or enter supplier">
+          <input type="text" id="edit-pur-supplier" class="form-input" list="edit-pur-suppliers-list" value="${escapeHtml(purchase.supplier || '')}" placeholder="Enter supplier name">
         </div>
 
         <div class="form-group">
@@ -11548,7 +11622,7 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem;">
           <div class="form-group">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Product Name <span style="color: var(--status-danger);">*</span></label>
-            <input type="text" class="form-input item-name-input" list="edit-pur-products-list" value="${escapeHtml(it.productName || '')}" placeholder="e.g. Classic Oxford Shirt">
+            <input type="text" class="form-input item-name-input" list="edit-pur-products-list" value="${escapeHtml(it.productName || '')}" placeholder="Enter product name">
           </div>
 
           <div class="form-group">
@@ -11574,17 +11648,17 @@ function renderEditPurchasePage(params = {}, onNavigate = null) {
 
           <div class="form-group">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity <span style="color: var(--status-danger);">*</span></label>
-            <input type="number" class="form-input item-qty-input" min="1" step="1" value="${it.qty !== undefined ? it.qty : 1}">
+            <input type="number" class="form-input item-qty-input" min="1" step="1" value="${it.qty !== undefined ? it.qty : 1}" placeholder="Enter quantity">
           </div>
 
           <div class="form-group">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Buying Price (₹) <span style="color: var(--status-danger);">*</span></label>
-            <input type="number" class="form-input item-bp-input" min="0" step="any" value="${it.buyingPrice !== undefined ? it.buyingPrice : 0}">
+            <input type="number" class="form-input item-bp-input" min="0" step="any" value="${it.buyingPrice !== undefined ? it.buyingPrice : 0}" placeholder="Enter buying price">
           </div>
 
           <div class="form-group">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Selling Price (₹)</label>
-            <input type="number" class="form-input item-sp-input" min="0" step="any" value="${it.sellingPrice !== undefined ? it.sellingPrice : 0}">
+            <input type="number" class="form-input item-sp-input" min="0" step="any" value="${it.sellingPrice !== undefined ? it.sellingPrice : 0}" placeholder="Enter selling price">
           </div>
 
           <div class="form-group">
@@ -11901,7 +11975,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
           <label class="form-label" style="font-weight: 600; font-size: 0.825rem;">Supplier <span style="color: var(--status-danger);">*</span></label>
-          <input type="text" id="pur-supplier" class="form-input" placeholder="e.g. Apex Apparel Ltd" value="${supplierVal}">
+          <input type="text" id="pur-supplier" class="form-input" placeholder="Enter supplier name" value="${supplierVal}">
           <div id="pur-supplier-error" class="field-error" style="display: none;"></div>
         </div>
         <div class="form-group">
@@ -12223,7 +12297,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
           <div style="display: grid; grid-template-columns: 2fr 1.35fr 1.35fr; gap: 0.65rem; align-items: end;">
             <div class="form-group" style="margin: 0;">
               <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; white-space: nowrap;">Product Name <span style="color: var(--status-danger);">*</span></label>
-              <input type="text" class="form-input pur-name-input" placeholder="e.g. Classic Oxford Shirt" list="pur-products-list" value="${prod.productName || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; ${prod.nameError ? 'border-color: var(--status-danger);' : ''}">
+              <input type="text" class="form-input pur-name-input" placeholder="Enter product name" list="pur-products-list" value="${prod.productName || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; ${prod.nameError ? 'border-color: var(--status-danger);' : ''}">
               <div class="pur-name-error" style="font-size: 0.725rem; color: var(--status-danger); margin-top: 3px; display: ${prod.nameError ? 'block' : 'none'};">${prod.nameError || ''}</div>
             </div>
             <div class="form-group pur-cat-group" style="margin: 0;">
@@ -12245,7 +12319,7 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
             </div>
             <div class="form-group" style="margin: 0;">
               <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; white-space: nowrap;">Brand</label>
-              <input type="text" class="form-input pur-brand-input" placeholder="e.g. ClassicFit" list="pur-brands-list" value="${prod.brand || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; box-sizing: border-box;">
+              <input type="text" class="form-input pur-brand-input" placeholder="Enter brand name" list="pur-brands-list" value="${prod.brand || ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; box-sizing: border-box;">
             </div>
           </div>
 
@@ -12334,18 +12408,18 @@ function renderAddPurchasePage(params = {}, onNavigate = null) {
                         </div>
                       </td>
                       <td>
-                        <input type="number" class="form-input pur-qty-input" min="1" placeholder="Qty *" value="${qtyDisplay}" style="font-weight: 600;">
+                        <input type="number" class="form-input pur-qty-input" min="1" placeholder="Enter quantity" value="${qtyDisplay}" style="font-weight: 600;">
                         <div class="pur-qty-error field-error" style="display: none;"></div>
                       </td>
                       <td>
-                        <input type="number" class="form-input pur-buying-input" min="0" step="any" placeholder="0.00" value="${buyDisplay}" style="font-weight: 600;">
+                        <input type="number" class="form-input pur-buying-input" min="0" step="any" placeholder="Enter buying price" value="${buyDisplay}" style="font-weight: 600;">
                         <div class="pur-buying-error field-error" style="display: none;"></div>
                       </td>
                       <td>
                         <input type="text" class="form-input pur-cost-display pur-cost-accent" placeholder="—" value="${costDisplayVal}" readonly style="font-weight: 700; background: var(--bg-secondary);">
                       </td>
                       <td>
-                        <input type="number" class="form-input pur-selling-input" min="0" step="any" placeholder="0.00" value="${sellDisplay}" style="font-weight: 600;">
+                        <input type="number" class="form-input pur-selling-input" min="0" step="any" placeholder="Enter selling price" value="${sellDisplay}" style="font-weight: 600;">
                         <div class="pur-selling-error field-error" style="display: none;"></div>
                       </td>
                       <td>
@@ -13606,12 +13680,25 @@ function renderEditSalePage(params = {}, onNavigate = null) {
   const headerDiv = document.createElement('div');
   headerDiv.style.cssText = 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem;';
   
+  const returnTo = params && params.returnTo;
+  const returnCustomerId = params && params.returnCustomerId;
+  const returnCustomer = returnCustomerId ? (store.data.customers || []).find(c => c.id === returnCustomerId) : null;
+  const custLabel = returnCustomer ? returnCustomer.name : (sale.customerName || sale.customer || 'Customer');
+
+  const breadcrumbItems = (returnTo === 'customer' && returnCustomerId)
+    ? [
+        { label: 'Customers', target: 'customers' },
+        { label: `Edit Customer (${escapeHtml(custLabel)})`, target: 'customers', params: { action: 'edit', customerId: returnCustomerId } },
+        { label: `Edit Sale (${sale.id})` }
+      ]
+    : [
+        { label: 'Sales', target: 'sales' },
+        { label: `Edit Sale (${sale.id})` }
+      ];
+
   const breadcrumbWrap = document.createElement('div');
   breadcrumbWrap.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;';
-  breadcrumbWrap.appendChild(createBreadcrumb([
-    { label: 'Sales', target: 'sales' },
-    { label: `Edit Sale (${sale.id})` }
-  ], onNavigate));
+  breadcrumbWrap.appendChild(createBreadcrumb(breadcrumbItems, onNavigate));
   breadcrumbWrap.appendChild(createBadge({ label: status, variant: badgeVariant }));
   headerDiv.appendChild(breadcrumbWrap);
   container.appendChild(headerDiv);
@@ -13697,12 +13784,12 @@ function renderEditSalePage(params = {}, onNavigate = null) {
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
           <label class="form-label" style="font-weight: 600;">Customer Name <span style="color: var(--status-danger);">*</span></label>
-          <input type="text" id="edit-sale-cust-name" class="form-input" list="edit-sale-customers-list" value="${escapeHtml(sale.customer || sale.customerName || 'Walk-in Customer')}">
+          <input type="text" id="edit-sale-cust-name" class="form-input" list="edit-sale-customers-list" value="${escapeHtml(sale.customer || sale.customerName || 'Walk-in Customer')}" placeholder="Enter customer name">
         </div>
 
         <div class="form-group">
           <label class="form-label" style="font-weight: 600;">Phone Number</label>
-          <input type="text" id="edit-sale-cust-phone" class="form-input" value="${escapeHtml(sale.phone && sale.phone !== '-' ? sale.phone : '')}" placeholder="+91 98765 43210">
+          <input type="text" id="edit-sale-cust-phone" class="form-input" value="${escapeHtml(sale.phone && sale.phone !== '-' ? sale.phone : '')}" placeholder="Enter phone number">
         </div>
 
         <div class="form-group">
@@ -13854,7 +13941,11 @@ function renderEditSalePage(params = {}, onNavigate = null) {
           <div class="form-group">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Size Variant</label>
             <select class="form-select sale-size-select">
-              ${variants.map(v => `<option value="${escapeHtml(v.size || 'Standard')}" ${(v.size || 'Standard') === it.size ? 'selected' : ''}>${escapeHtml(v.size || 'Standard')}</option>`).join('')}
+              ${variants.map(v => {
+                const s = v.size || 'Standard';
+                const label = s === 'Standard' ? 'Standard' : (s.startsWith('Size ') ? s : 'Size ' + s);
+                return `<option value="${escapeHtml(s)}" ${s === it.size ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+              }).join('')}
               ${variants.length === 0 ? '<option value="Standard" selected>Standard</option>' : ''}
             </select>
           </div>
@@ -13866,12 +13957,12 @@ function renderEditSalePage(params = {}, onNavigate = null) {
 
           <div class="form-group">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Quantity <span style="color: var(--status-danger);">*</span></label>
-            <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${it.qty !== undefined ? it.qty : 1}">
+            <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${it.qty !== undefined ? it.qty : 1}" placeholder="Enter quantity">
           </div>
 
           <div class="form-group">
             <label class="form-label" style="font-size: 0.8rem; font-weight: 600;">Unit Selling Price (₹) <span style="color: var(--status-danger);">*</span></label>
-            <input type="number" class="form-input sale-price-input" min="0" step="any" value="${it.sellingPrice !== undefined ? it.sellingPrice : 0}">
+            <input type="number" class="form-input sale-price-input" min="0" step="any" value="${it.sellingPrice !== undefined ? it.sellingPrice : 0}" placeholder="Enter selling price">
           </div>
 
           <div class="form-group">
@@ -13974,10 +14065,17 @@ function renderEditSalePage(params = {}, onNavigate = null) {
 
   mainCard.querySelector('#btn-edit-sale-cancel').addEventListener('click', async () => {
     if (hasUnsavedChanges) {
-      const leave = await uiConfirm({ title: 'Discard unsaved changes?', message: 'You have unsaved changes. Are you sure you want to discard them and return to Sales?', confirmText: 'Discard changes', variant: 'danger' });
+      const targetName = returnTo === 'customer' ? 'Customer' : 'Sales';
+      const leave = await uiConfirm({ title: 'Discard unsaved changes?', message: `You have unsaved changes. Are you sure you want to discard them and return to ${targetName}?`, confirmText: 'Discard changes', variant: 'danger' });
       if (!leave) return;
     }
-    if (onNavigate) onNavigate('sales');
+    if (onNavigate) {
+      if (returnTo === 'customer' && returnCustomerId) {
+        onNavigate('customers', { action: 'edit', customerId: returnCustomerId });
+      } else {
+        onNavigate('sales');
+      }
+    }
   });
 
   mainCard.querySelector('#btn-edit-sale-save').addEventListener('click', async () => {
@@ -14046,7 +14144,13 @@ function renderEditSalePage(params = {}, onNavigate = null) {
       } else {
         toast.show({ message: `Sale ${sale.id} updated successfully!`, type: 'success' });
       }
-      if (onNavigate) onNavigate('sales');
+      if (onNavigate) {
+        if (returnTo === 'customer' && returnCustomerId) {
+          onNavigate('customers', { action: 'edit', customerId: returnCustomerId });
+        } else {
+          onNavigate('sales');
+        }
+      }
     } catch (err) {
       toast.show({ message: err.message || 'Error updating sale.', type: 'danger' });
     }
@@ -14431,20 +14535,48 @@ function renderAddSalePage(onNavigate = null) {
   mainCard.innerHTML = `
     <!-- SECTION A: CUSTOMER -->
     <div style="display: flex; flex-direction: column; gap: 1rem;">
-      <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
-        Customer Information
-      </h3>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Customer Name <span style="color: var(--status-danger);">*</span></label>
-          <input type="text" id="sale-cust-name" class="form-input" placeholder="e.g. Sneha Patel" value="Walk-in Customer">
-          <div id="sale-cust-name-error" class="field-error" style="display: none;"></div>
-        </div>
-        <div class="form-group">
-          <label class="form-label" style="font-weight: 500;">Phone Number</label>
-          <input type="text" id="sale-cust-phone" class="form-input" placeholder="e.g. +91 98765 43210">
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="user" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+          Customer Information
+        </h3>
+        <div id="sale-cust-status-badge" style="display: none; align-items: center; gap: 0.4rem; font-size: 0.8rem; background: var(--bg-secondary); padding: 0.25rem 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <span style="width: 7px; height: 7px; border-radius: 50%; background-color: var(--status-success);"></span>
+          <span id="sale-cust-status-text" style="color: var(--text-secondary); font-weight: 500;">Existing Customer Linked</span>
+          <button type="button" id="btn-clear-selected-cust" title="Clear customer selection" style="padding: 0 0.2rem; cursor: pointer; color: var(--text-secondary); border: none; background: none; font-size: 0.85rem; line-height: 1; margin-left: 0.2rem;">&times;</button>
         </div>
       </div>
+
+      <div class="cust-info-grid">
+        <div class="form-group" style="position: relative;">
+          <label class="form-label" style="font-weight: 500;">Customer <span style="color: var(--status-danger);">*</span></label>
+          <div style="position: relative; width: 100%;">
+            <input type="text" id="sale-cust-name" class="form-input" placeholder="Search or type customer name..." value="" autocomplete="off" spellcheck="false" style="padding-right: 2rem;">
+            <div id="sale-cust-chevron" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; color: var(--text-secondary); display: flex; align-items: center; transition: transform 0.15s ease;">
+              <i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i>
+            </div>
+          </div>
+          <div id="sale-cust-dropdown" class="sale-cust-dropdown-menu" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 250px; overflow-y: auto; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-sm); box-shadow: var(--shadow-md, 0 6px 20px rgba(0,0,0,0.25)); z-index: 1050; padding: 0.25rem 0;"></div>
+          <div id="sale-cust-name-error" class="field-error" style="display: none;"></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Phone Number</label>
+          <input type="text" id="sale-cust-phone" class="form-input" placeholder="Enter phone number">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">Email Address</label>
+          <input type="email" id="sale-cust-email" class="form-input" placeholder="Enter email address">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="font-weight: 500;">City</label>
+          <input type="text" id="sale-cust-city" class="form-input" placeholder="Enter city">
+        </div>
+      </div>
+
+      <input type="hidden" id="sale-cust-id" value="">
     </div>
 
     <!-- SECTION B: PRODUCT & SIZE-WISE ITEMS (Grouped by Product) -->
@@ -14732,10 +14864,10 @@ function renderAddSalePage(onNavigate = null) {
         let sizeOptionsHtml = '';
         if (hasSizes) {
           const hasEmpty = !sz.size;
-          sizeOptionsHtml = `<option value="" ${hasEmpty ? 'selected' : ''} disabled>Select size</option>` + (selectedProd.variants || []).map(v => {
+          sizeOptionsHtml = `<option value="" ${hasEmpty ? 'selected' : ''} disabled>Select Size</option>` + (selectedProd.variants || []).map(v => {
             const isTaken = alreadyChosenInOtherRows.includes(v.size) && v.size !== sz.size;
-            const priceTag = v.sellingPrice > 0 ? ` (₹${v.sellingPrice})` : '';
-            return `<option value="${escapeHtml(v.size)}" ${v.size === sz.size ? 'selected' : ''} ${isTaken ? 'disabled' : ''}>${v.size === 'Standard' ? 'Standard' : 'Size ' + v.size}${priceTag}${isTaken ? ' (Added)' : ''}</option>`;
+            const sizeLabel = v.size === 'Standard' ? 'Standard' : (v.size.startsWith('Size ') ? v.size : 'Size ' + v.size);
+            return `<option value="${escapeHtml(v.size)}" ${v.size === sz.size ? 'selected' : ''} ${isTaken ? 'disabled' : ''}>${escapeHtml(sizeLabel)}${isTaken ? ' (Added)' : ''}</option>`;
           }).join('');
         } else if (selectedProd) {
           sizeOptionsHtml = '<option value="Standard">Standard (No sizes)</option>';
@@ -14761,7 +14893,7 @@ function renderAddSalePage(onNavigate = null) {
             </div>
 
             <div class="form-group" style="margin: 0; position: relative;">
-              <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${sz.qty !== undefined && sz.qty !== null ? sz.qty : ''}" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; text-align: center; box-sizing: border-box; ${isOverStock ? 'border-color: var(--status-danger); background: var(--status-danger-bg); color: var(--status-danger-text);' : ''}">
+              <input type="number" class="form-input sale-qty-input" min="1" step="1" value="${sz.qty !== undefined && sz.qty !== null ? sz.qty : ''}" placeholder="Enter quantity" style="height: 32px; padding: 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; text-align: center; box-sizing: border-box; ${isOverStock ? 'border-color: var(--status-danger); background: var(--status-danger-bg); color: var(--status-danger-text);' : ''}">
               <div class="sale-qty-error field-error" style="font-size: 0.7rem; text-align: center; display: ${isOverStock ? 'block' : 'none'};">
                 ${availStock === 0 ? 'Out of stock.' : `Only ${availStock} units are available.`}
               </div>
@@ -14814,7 +14946,7 @@ function renderAddSalePage(onNavigate = null) {
                 <div class="form-group" style="margin: 0;">
                   <label class="form-label" style="display: block; font-size: 0.725rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.2rem; white-space: nowrap;">Product Name <span style="color: var(--status-danger);">*</span></label>
                   <div class="sale-combobox-container" style="position: relative; width: 100%;">
-                    <input type="text" class="form-input sale-combobox-input" placeholder="Search or select product..." autocomplete="off" spellcheck="false" value="${selectedProd ? `${selectedProd.name}${selectedProd.brand ? ' [' + selectedProd.brand + ']' : ''}` : ''}" style="width: 100%; height: 32px; padding: 0.25rem 1.85rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; cursor: pointer; text-overflow: ellipsis; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);" title="Click to search or select product">
+                    <input type="text" class="form-input sale-combobox-input" placeholder="Select Product..." autocomplete="off" spellcheck="false" value="${selectedProd ? `${selectedProd.name}${selectedProd.brand ? ' [' + selectedProd.brand + ']' : ''}` : ''}" style="width: 100%; height: 32px; padding: 0.25rem 1.85rem 0.25rem 0.55rem; font-size: 0.825rem; font-weight: 600; box-sizing: border-box; cursor: pointer; text-overflow: ellipsis; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm);" title="Click to search or select product">
                     <div class="sale-combobox-chevron" style="position: absolute; right: 8px; top: 16px; transform: translateY(-50%); pointer-events: none; color: var(--text-secondary); display: flex; align-items: center;">
                       <i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i>
                     </div>
@@ -15249,9 +15381,205 @@ function renderAddSalePage(onNavigate = null) {
   renderSaleItems();
   updateSaleSummary();
 
-  // Wire top & payment controls real-time clearing
+  // Wire combined customer search/input & details controls
   const custNameInp = mainCard.querySelector('#sale-cust-name');
+  const custDropdown = mainCard.querySelector('#sale-cust-dropdown');
+  const custChevron = mainCard.querySelector('#sale-cust-chevron');
   const custNameErr = mainCard.querySelector('#sale-cust-name-error');
+  const custPhoneInp = mainCard.querySelector('#sale-cust-phone');
+  const custIdInp = mainCard.querySelector('#sale-cust-id');
+  const custEmailInp = mainCard.querySelector('#sale-cust-email');
+  const custCityInp = mainCard.querySelector('#sale-cust-city');
+  const custStatusBadge = mainCard.querySelector('#sale-cust-status-badge');
+  const custStatusText = mainCard.querySelector('#sale-cust-status-text');
+  const clearCustBtn = mainCard.querySelector('#btn-clear-selected-cust');
+
+  let isCustMenuOpen = false;
+  let activeCustHighlightIndex = -1;
+  let currentCustMenuItems = [];
+
+  function openCustDropdown() {
+    if (isCustMenuOpen) return;
+    isCustMenuOpen = true;
+    if (custDropdown) {
+      custDropdown.style.display = 'block';
+      renderCustDropdown(custNameInp ? custNameInp.value : '');
+    }
+    if (custChevron) {
+      custChevron.style.transform = 'translateY(-50%) rotate(180deg)';
+    }
+  }
+
+  function closeCustDropdown() {
+    if (!isCustMenuOpen) return;
+    isCustMenuOpen = false;
+    if (custDropdown) {
+      custDropdown.style.display = 'none';
+      custDropdown.innerHTML = '';
+    }
+    if (custChevron) {
+      custChevron.style.transform = 'translateY(-50%)';
+    }
+    activeCustHighlightIndex = -1;
+    currentCustMenuItems = [];
+  }
+
+  function updateCustHighlight(index) {
+    if (!custDropdown) return;
+    const items = custDropdown.querySelectorAll('.sale-cust-item');
+    items.forEach((el, i) => {
+      if (i === index) {
+        el.style.backgroundColor = 'var(--bg-secondary)';
+        el.scrollIntoView({ block: 'nearest' });
+      } else {
+        const itemData = currentCustMenuItems[i];
+        const isCurrentSelected = itemData && itemData.type === 'existing' && itemData.customer && itemData.customer.id === (custIdInp ? custIdInp.value : '');
+        el.style.backgroundColor = isCurrentSelected ? 'var(--bg-secondary)' : '';
+      }
+    });
+    activeCustHighlightIndex = index;
+  }
+
+  function renderCustDropdown(rawText = '') {
+    if (!custDropdown) return;
+    custDropdown.innerHTML = '';
+    currentCustMenuItems = [];
+    activeCustHighlightIndex = -1;
+
+    const query = (rawText || '').trim();
+    const queryLower = query.toLowerCase();
+    const customers = store.data.customers || [];
+    const currentId = (custIdInp ? custIdInp.value : '').trim();
+
+    // Filter existing customers
+    let filteredCustomers = [];
+    if (!query) {
+      filteredCustomers = customers;
+    } else {
+      filteredCustomers = customers.filter(c => {
+        const name = (c.name || '').toLowerCase();
+        const phone = (c.phone || '').toLowerCase();
+        const email = (c.email || '').toLowerCase();
+        const city = (c.city || '').toLowerCase();
+        const id = (c.id || '').toLowerCase();
+        return name.includes(queryLower) || phone.includes(queryLower) || email.includes(queryLower) || city.includes(queryLower) || id.includes(queryLower);
+      });
+    }
+
+    filteredCustomers.forEach(c => {
+      const isSelected = currentId === c.id;
+      const idx = currentCustMenuItems.length;
+      currentCustMenuItems.push({
+        type: 'existing',
+        customer: c,
+        name: c.name
+      });
+
+      const custEl = document.createElement('div');
+      custEl.className = 'sale-cust-item';
+      custEl.setAttribute('role', 'option');
+      custEl.style.cssText = `padding: 0.55rem 0.75rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; transition: background 0.12s ease; border-bottom: 1px solid var(--border-color); ${isSelected ? 'background: var(--bg-secondary); font-weight: 600;' : ''}`;
+
+      custEl.innerHTML = `
+        <span style="color: var(--text-primary); font-weight: ${isSelected ? '700' : '600'}; font-size: 0.85rem;">${escapeHtml(c.name)}</span>
+        ${isSelected ? '<i data-lucide="check" style="width: 14px; height: 14px; color: var(--brand-primary); flex-shrink: 0;"></i>' : ''}
+      `;
+
+      custEl.addEventListener('mouseenter', () => updateCustHighlight(idx));
+      custEl.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        applyCustomer(c);
+        closeCustDropdown();
+      });
+      custDropdown.appendChild(custEl);
+    });
+
+    // Check if user typed a name that does not match an existing customer
+    const exactMatch = customers.find(c => (c.name || '').trim().toLowerCase() === queryLower);
+    if (query && !exactMatch) {
+      const idx = currentCustMenuItems.length;
+      currentCustMenuItems.push({
+        type: 'create',
+        name: query
+      });
+
+      const createEl = document.createElement('div');
+      createEl.className = 'sale-cust-item sale-cust-create-item';
+      createEl.setAttribute('role', 'option');
+      createEl.style.cssText = `padding: 0.55rem 0.75rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; color: var(--brand-primary); font-weight: 600; font-size: 0.85rem; background: var(--bg-secondary); transition: background 0.12s ease;`;
+      createEl.innerHTML = `
+        <i data-lucide="user-plus" style="width: 15px; height: 15px; color: var(--brand-primary); flex-shrink: 0;"></i>
+        <span>+ Create &ldquo;${escapeHtml(query)}&rdquo; as new customer</span>
+      `;
+      createEl.addEventListener('mouseenter', () => updateCustHighlight(idx));
+      createEl.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        selectNewCustomer(query);
+        closeCustDropdown();
+      });
+      custDropdown.appendChild(createEl);
+    }
+
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  const selectNewCustomer = (name) => {
+    const trimmed = (name || '').trim();
+    if (custNameInp) custNameInp.value = trimmed;
+    if (custIdInp) custIdInp.value = '';
+    if (custStatusBadge && custStatusText) {
+      custStatusBadge.style.display = 'inline-flex';
+      custStatusText.textContent = `New Customer: ${trimmed}`;
+      const dot = custStatusBadge.querySelector('span');
+      if (dot) dot.style.backgroundColor = 'var(--status-info, #3b82f6)';
+    }
+    if (custNameInp) {
+      custNameInp.classList.remove('is-invalid');
+      custNameInp.style.borderColor = '';
+    }
+    if (custNameErr) { custNameErr.textContent = ''; custNameErr.style.display = 'none'; }
+    if (custPhoneInp) custPhoneInp.focus();
+  };
+
+  const applyCustomer = (c) => {
+    if (c) {
+      if (custNameInp) custNameInp.value = c.name || '';
+      if (custPhoneInp) custPhoneInp.value = (c.phone && c.phone !== '-') ? c.phone : '';
+      if (custEmailInp) custEmailInp.value = c.email || '';
+      if (custCityInp) custCityInp.value = c.city || '';
+      if (custIdInp) custIdInp.value = c.id;
+      if (custStatusBadge && custStatusText) {
+        custStatusBadge.style.display = 'inline-flex';
+        custStatusText.textContent = `Existing Customer: ${c.name} (${c.id})`;
+        const dot = custStatusBadge.querySelector('span');
+        if (dot) dot.style.backgroundColor = 'var(--status-success)';
+      }
+      if (custNameInp) {
+        custNameInp.classList.remove('is-invalid');
+        custNameInp.style.borderColor = '';
+      }
+      if (custNameErr) { custNameErr.textContent = ''; custNameErr.style.display = 'none'; }
+    } else {
+      if (custNameInp) custNameInp.value = '';
+      if (custPhoneInp) custPhoneInp.value = '';
+      if (custEmailInp) custEmailInp.value = '';
+      if (custCityInp) custCityInp.value = '';
+      if (custIdInp) custIdInp.value = '';
+      if (custStatusBadge) custStatusBadge.style.display = 'none';
+      if (custNameInp) {
+        custNameInp.classList.remove('is-invalid');
+        custNameInp.style.borderColor = '';
+      }
+      if (custNameErr) { custNameErr.textContent = ''; custNameErr.style.display = 'none'; }
+    }
+  };
+
+  if (clearCustBtn) {
+    clearCustBtn.addEventListener('click', () => {
+      applyCustomer(null);
+    });
+  }
+
   if (custNameInp) {
     const clearCustErr = () => {
       if (custNameInp.value.trim()) {
@@ -15260,9 +15588,115 @@ function renderAddSalePage(onNavigate = null) {
         if (custNameErr) { custNameErr.textContent = ''; custNameErr.style.display = 'none'; }
       }
     };
-    custNameInp.addEventListener('input', clearCustErr);
+
+    custNameInp.addEventListener('focus', () => {
+      openCustDropdown();
+    });
+
+    custNameInp.addEventListener('click', () => {
+      if (!isCustMenuOpen) {
+        openCustDropdown();
+      }
+    });
+
+    custNameInp.addEventListener('input', () => {
+      clearCustErr();
+      if (!isCustMenuOpen) {
+        openCustDropdown();
+      } else {
+        renderCustDropdown(custNameInp.value);
+      }
+
+      const val = custNameInp.value.trim();
+      if (custIdInp && custIdInp.value) {
+        const matched = (store.data.customers || []).find(c => c.id === custIdInp.value);
+        if (!matched || matched.name.toLowerCase() !== val.toLowerCase()) {
+          custIdInp.value = '';
+          if (custStatusBadge) custStatusBadge.style.display = 'none';
+        }
+      } else if (val) {
+        const match = (store.data.customers || []).find(c => (c.name || '').trim().toLowerCase() === val.toLowerCase());
+        if (match) {
+          custIdInp.value = match.id;
+          if (custStatusBadge && custStatusText) {
+            custStatusBadge.style.display = 'inline-flex';
+            custStatusText.textContent = `Existing Customer: ${match.name} (${match.id})`;
+            const dot = custStatusBadge.querySelector('span');
+            if (dot) dot.style.backgroundColor = 'var(--status-success)';
+          }
+          if (custPhoneInp && !custPhoneInp.value && match.phone && match.phone !== '-') {
+            custPhoneInp.value = match.phone;
+          }
+          if (custEmailInp && !custEmailInp.value && match.email) custEmailInp.value = match.email;
+          if (custCityInp && !custCityInp.value && match.city) custCityInp.value = match.city;
+        }
+      }
+    });
+
+    custNameInp.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!isCustMenuOpen) {
+          openCustDropdown();
+        } else if (currentCustMenuItems.length > 0) {
+          let nextIdx = activeCustHighlightIndex + 1;
+          if (nextIdx >= currentCustMenuItems.length) nextIdx = 0;
+          updateCustHighlight(nextIdx);
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (isCustMenuOpen && currentCustMenuItems.length > 0) {
+          let prevIdx = activeCustHighlightIndex - 1;
+          if (prevIdx < 0) prevIdx = currentCustMenuItems.length - 1;
+          updateCustHighlight(prevIdx);
+        }
+      } else if (e.key === 'Enter') {
+        if (isCustMenuOpen) {
+          e.preventDefault();
+          if (activeCustHighlightIndex >= 0 && activeCustHighlightIndex < currentCustMenuItems.length) {
+            const item = currentCustMenuItems[activeCustHighlightIndex];
+            if (item.type === 'existing') {
+              applyCustomer(item.customer);
+            } else if (item.type === 'create') {
+              selectNewCustomer(item.name);
+            }
+            closeCustDropdown();
+          } else {
+            const query = custNameInp.value.trim();
+            const exact = (store.data.customers || []).find(c => (c.name || '').trim().toLowerCase() === query.toLowerCase());
+            if (exact) {
+              applyCustomer(exact);
+            } else if (query) {
+              selectNewCustomer(query);
+            }
+            closeCustDropdown();
+          }
+        }
+      } else if (e.key === 'Escape') {
+        if (isCustMenuOpen) {
+          e.preventDefault();
+          closeCustDropdown();
+        }
+      }
+    });
+
+    custNameInp.addEventListener('blur', () => {
+      setTimeout(() => {
+        closeCustDropdown();
+      }, 180);
+    });
+
     custNameInp.addEventListener('change', clearCustErr);
   }
+
+  document.addEventListener('click', (e) => {
+    if (!mainCard.contains(e.target)) return;
+    if (custNameInp && custDropdown) {
+      if (!custNameInp.contains(e.target) && !custDropdown.contains(e.target)) {
+        closeCustDropdown();
+      }
+    }
+  });
 
   const amountPaidInp = mainCard.querySelector('#sale-amount-paid');
   const amountPaidErr = mainCard.querySelector('#sale-amount-paid-error');
@@ -15565,8 +15999,13 @@ function renderAddSalePage(onNavigate = null) {
     const isValid = validateAllSaleFields();
     if (!isValid) return;
 
+    const custId = (mainCard.querySelector('#sale-cust-id') ? mainCard.querySelector('#sale-cust-id').value : '').trim();
     const custName = mainCard.querySelector('#sale-cust-name').value.trim();
     const custPhone = mainCard.querySelector('#sale-cust-phone').value.trim();
+    const custEmail = (mainCard.querySelector('#sale-cust-email') ? mainCard.querySelector('#sale-cust-email').value : '').trim();
+    const custCity = (mainCard.querySelector('#sale-cust-city') ? mainCard.querySelector('#sale-cust-city').value : '').trim();
+    const custAddress = (mainCard.querySelector('#sale-cust-address') ? mainCard.querySelector('#sale-cust-address').value : '').trim();
+    const custNotes = (mainCard.querySelector('#sale-cust-notes') ? mainCard.querySelector('#sale-cust-notes').value : '').trim();
     const payMethod = mainCard.querySelector('#sale-pay-method').value;
     const payStatus = mainCard.querySelector('#sale-pay-status').value;
     const discount = parseFloat(mainCard.querySelector('#sale-discount-input').value) || 0;
@@ -15609,8 +16048,11 @@ function renderAddSalePage(onNavigate = null) {
       }
 
       store.addSale({
+        customerId: custId,
         customerName: custName,
         customerPhone: custPhone,
+        customerEmail: custEmail,
+        customerCity: custCity,
         paymentMethod: payMethod,
         paymentStatus: payStatus,
         amountPaid: payStatus === 'Partial' ? amountPaid : undefined,
@@ -15773,12 +16215,12 @@ function openEditCustomerModal(customer, onSaved = null) {
       <div style="display: flex; flex-direction: column; gap: 1rem;">
         <div class="form-group">
           <label class="form-label" style="font-weight: 500;">Customer Name <span style="color: var(--status-danger);">*</span></label>
-          <input type="text" id="edit-cust-name" class="form-input" value="${customer.name || ''}">
+          <input type="text" id="edit-cust-name" class="form-input" placeholder="Enter customer name" value="${customer.name || ''}">
         </div>
 
         <div class="form-group">
           <label class="form-label" style="font-weight: 500;">Phone Number</label>
-          <input type="text" id="edit-cust-phone" class="form-input" placeholder="e.g. +91 98765 43210" value="${customer.phone && customer.phone !== '-' ? customer.phone : ''}">
+          <input type="text" id="edit-cust-phone" class="form-input" placeholder="Enter phone number" value="${customer.phone && customer.phone !== '-' ? customer.phone : ''}">
         </div>
       </div>
 
@@ -16235,15 +16677,15 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
       </p>
     </div>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem;">
+    <div class="cust-info-grid">
       <div class="form-group">
         <label class="form-label" style="font-weight: 600;">Customer Name <span style="color: var(--status-danger);">*</span></label>
-        <input type="text" id="cust-edit-name" class="form-input" value="${escapeHtml(customer.name || '')}" placeholder="Full Customer Name">
+        <input type="text" id="cust-edit-name" class="form-input" value="${escapeHtml(customer.name || '')}" placeholder="Enter customer name">
       </div>
 
       <div class="form-group">
         <label class="form-label" style="font-weight: 600;">Phone Number</label>
-        <input type="text" id="cust-edit-phone" class="form-input" value="${escapeHtml(customer.phone && customer.phone !== '-' ? customer.phone : '')}" placeholder="+91 98765 43210">
+        <input type="text" id="cust-edit-phone" class="form-input" value="${escapeHtml(customer.phone && customer.phone !== '-' ? customer.phone : '')}" placeholder="Enter phone number">
       </div>
 
       <div class="form-group">
@@ -16255,16 +16697,6 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
         <label class="form-label" style="font-weight: 600;">City</label>
         <input type="text" id="cust-edit-city" class="form-input" value="${escapeHtml(customer.city || '')}" placeholder="e.g. Mumbai, Bangalore">
       </div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label" style="font-weight: 600;">Address</label>
-      <input type="text" id="cust-edit-address" class="form-input" value="${escapeHtml(customer.address || '')}" placeholder="Street, Flat/Building, Landmark">
-    </div>
-
-    <div class="form-group">
-      <label class="form-label" style="font-weight: 600;">Customer Notes / Preferences</label>
-      <textarea id="cust-edit-notes" class="form-input" rows="3" placeholder="Preferred fit, style choices, sizes, notes...">${escapeHtml(customer.notes || '')}</textarea>
     </div>
 
     <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
@@ -16281,7 +16713,7 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
 
   container.appendChild(mainCard);
 
-  mainCard.querySelectorAll('input, textarea').forEach(el => {
+  mainCard.querySelectorAll('input').forEach(el => {
     el.addEventListener('input', markChanged);
   });
 
@@ -16298,8 +16730,6 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
     const phone = mainCard.querySelector('#cust-edit-phone').value.trim();
     const email = mainCard.querySelector('#cust-edit-email').value.trim();
     const city = mainCard.querySelector('#cust-edit-city').value.trim();
-    const address = mainCard.querySelector('#cust-edit-address').value.trim();
-    const notes = mainCard.querySelector('#cust-edit-notes').value.trim();
 
     if (!name) {
       toast.show({ message: 'Customer Name is required.', type: 'danger' });
@@ -16312,9 +16742,7 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
         name,
         phone,
         email,
-        city,
-        address,
-        notes
+        city
       });
       hasUnsavedChanges = false;
       toast.show({ message: `Customer "${name}" updated successfully.`, type: 'success' });
@@ -16323,6 +16751,150 @@ function renderEditCustomerPage(params = {}, onNavigate = null) {
       toast.show({ message: err.message || 'Error updating customer.', type: 'danger' });
     }
   });
+
+  // 4. Customer Orders Section
+  const ordersCard = document.createElement('div');
+  ordersCard.className = 'card';
+  ordersCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.25rem; width: 100%; margin-top: 1.25rem;';
+
+  const custNameLower = (customer.name || '').trim().toLowerCase();
+  const customerOrders = (store.data.sales || []).filter(s => {
+    if (!s) return false;
+    if (s.customerId) return s.customerId === customer.id;
+    return !!custNameLower && (s.customer || s.customerName || '').trim().toLowerCase() === custNameLower;
+  });
+
+  if (customerOrders.length === 0) {
+    ordersCard.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="shopping-bag" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+            Customer Orders
+          </h3>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
+            All sales orders associated with this customer.
+          </p>
+        </div>
+        <span class="badge" style="font-size: 0.75rem; font-weight: 600; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-secondary);">0 Orders</span>
+      </div>
+
+      <div style="text-align: center; padding: 3rem 1.5rem; color: var(--text-secondary); display: flex; flex-direction: column; align-items: center; gap: 0.75rem;">
+        <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-secondary); display: flex; align-items: center; justify-content: center; color: var(--text-secondary);">
+          <i data-lucide="package-open" style="width: 24px; height: 24px;"></i>
+        </div>
+        <div style="font-size: 0.95rem; font-weight: 600; color: var(--text-primary);">No orders found for this customer.</div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary); max-width: 380px;">
+          When this customer makes a purchase, their sales orders will appear here with complete item and payment details.
+        </div>
+      </div>
+    `;
+  } else {
+    ordersCard.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 600; margin: 0; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="shopping-bag" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+            Customer Orders
+          </h3>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0.2rem 0 0 0;">
+            All sales orders associated with ${escapeHtml(customer.name)}. Click Edit to update items, quantities, or payments.
+          </p>
+        </div>
+        <span class="badge" style="font-size: 0.75rem; font-weight: 600; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">${customerOrders.length} ${customerOrders.length === 1 ? 'Order' : 'Orders'}</span>
+      </div>
+
+      <div class="table-responsive" style="border: 1px solid var(--border-color); border-radius: var(--radius-sm);">
+        <table class="admin-table" style="font-size: 0.875rem;">
+          <thead>
+            <tr>
+              <th style="width: 5%; text-align: center;">#</th>
+              <th style="width: 15%;">Sale Reference</th>
+              <th style="width: 13%;">Date</th>
+              <th style="width: 26%;">Products / Items</th>
+              <th style="width: 8%; text-align: center;">Qty</th>
+              <th style="width: 11%;">Total Amount</th>
+              <th style="width: 11%;">Payment Status</th>
+              <th style="width: 11%;">Paid / Balance</th>
+              <th style="width: 10%; text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="cust-orders-tbody"></tbody>
+        </table>
+      </div>
+    `;
+
+    const tbody = ordersCard.querySelector('#cust-orders-tbody');
+    customerOrders.forEach((s, idx) => {
+      const tr = document.createElement('tr');
+      tr.style.cssText = 'transition: background-color 0.15s ease;';
+
+      const status = s.status || 'Paid';
+      const badgeVariant = getStatusBadgeVariant(status);
+      const saleRef = s.id || s.reference || `SAL-${idx + 1}`;
+
+      const items = s.items || [];
+      const totalQty = items.reduce((sum, it) => sum + (Number(it.qty !== undefined ? it.qty : (it.quantity || 1)) || 0), 0) || s.itemCount || 0;
+
+      let itemsHtml = '—';
+      if (items.length > 0) {
+        itemsHtml = items.map(it => {
+          const pName = it.product || it.productName || 'Product';
+          const sz = (it.size && it.size !== 'Standard') ? ` (${escapeHtml(it.size)})` : '';
+          const q = it.qty !== undefined ? it.qty : (it.quantity || 1);
+          return `<span style="display: inline-block; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.1rem 0.35rem; font-size: 0.775rem; margin: 0.1rem 0.2rem 0.1rem 0;">${escapeHtml(pName)}${sz} <strong style="color: var(--text-primary);">×${q}</strong></span>`;
+        }).join(' ');
+      }
+
+      const totalAmt = Number(s.totalAmount) || 0;
+      const paid = Number(s.amountPaid !== undefined && s.amountPaid !== null ? s.amountPaid : (status === 'Paid' || status === 'Completed' ? totalAmt : 0)) || 0;
+      const due = Number(s.balanceDue !== undefined && s.balanceDue !== null ? s.balanceDue : Math.max(0, totalAmt - paid));
+
+      tr.innerHTML = `
+        <td style="font-weight: 600; color: var(--text-secondary); text-align: center;">${idx + 1}</td>
+        <td style="font-weight: 600; color: var(--text-primary); font-family: monospace;">${escapeHtml(saleRef)}</td>
+        <td style="color: var(--text-secondary); font-size: 0.825rem;">${escapeHtml(s.date || '—')}</td>
+        <td>
+          <div style="line-height: 1.4; max-width: 320px;">${itemsHtml}</div>
+        </td>
+        <td style="text-align: center; font-weight: 600; color: var(--text-primary);">${totalQty}</td>
+        <td style="font-weight: 700; color: var(--text-primary);">₹${totalAmt.toLocaleString('en-IN')}</td>
+        <td>${createBadge({ label: status, variant: badgeVariant }).outerHTML}</td>
+        <td>
+          <div style="font-weight: 600; color: var(--text-primary); font-size: 0.825rem;">Paid: ₹${paid.toLocaleString('en-IN')}</div>
+          ${due > 0 ? `<div style="font-size: 0.75rem; font-weight: 600; color: var(--status-warning-text); margin-top: 2px;">₹${due.toLocaleString('en-IN')} due</div>` : ''}
+          ${Number(s.overpaidAmount || 0) > 0 ? `<div style="font-size: 0.75rem; font-weight: 600; color: var(--status-danger); margin-top: 2px;">₹${Number(s.overpaidAmount).toLocaleString('en-IN')} overpaid</div>` : ''}
+        </td>
+        <td style="text-align: right;">
+          <div style="display: flex; gap: 0.35rem; justify-content: flex-end;" class="row-actions-box">
+            <button type="button" class="btn btn-sm btn-secondary table-action-btn edit-order-btn" data-sale-id="${s.id || ''}" title="Edit order" aria-label="Edit order">
+              <i data-lucide="pencil"></i>
+              <span class="sr-only">Edit order</span>
+            </button>
+          </div>
+        </td>
+      `;
+
+      const editBtn = tr.querySelector('.edit-order-btn');
+      if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (onNavigate) {
+            onNavigate('sales', {
+              action: 'edit',
+              saleId: s.id,
+              returnTo: 'customer',
+              returnCustomerId: customer.id
+            });
+          }
+        });
+      }
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  container.appendChild(ordersCard);
 
   if (window.lucide) window.lucide.createIcons();
   return container;
@@ -16688,50 +17260,115 @@ function renderReports(onNavigate = null) {
   ], onNavigate));
   container.appendChild(headerDiv);
 
-  // Financial KPI Summary Grid (4 Reconciled Cards)
-  const profitGrid = document.createElement('div');
-  profitGrid.className = 'kpi-grid';
-  profitGrid.appendChild(createMetricCard({
+  // Reusable helper to build a semantic reports section with clean heading and responsive grid
+  function createReportSection({ title, minColWidth = '240px' }) {
+    const section = document.createElement('section');
+    section.className = 'reports-section';
+    section.style.cssText = 'margin-bottom: 1.75rem;';
+
+    const header = document.createElement('div');
+    header.className = 'reports-section-header';
+    header.style.cssText = 'margin-bottom: 0.75rem;';
+
+    const heading = document.createElement('h2');
+    heading.style.cssText = 'font-size: 0.875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-primary); margin: 0;';
+    heading.textContent = title;
+    header.appendChild(heading);
+
+    section.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'kpi-grid';
+    grid.style.cssText = `display: grid; grid-template-columns: repeat(auto-fit, minmax(${minColWidth}, 1fr)); gap: 1.25rem;`;
+    section.appendChild(grid);
+
+    return { section, grid };
+  }
+
+  // ==========================================
+  // SECTION 1 — SALES PERFORMANCE
+  // ==========================================
+  const salesSection = createReportSection({
+    title: 'Sales Performance'
+  });
+  salesSection.grid.appendChild(createMetricCard({
     label: 'Total Revenue',
     value: `₹${totalRevenue.toLocaleString('en-IN')}`,
     subtext: `<span style="color: var(--text-secondary);">${qualifyingSalesCount} sales orders</span>`,
     icon: 'dollar-sign',
     variant: 'success'
   }));
-  profitGrid.appendChild(createMetricCard({
+  salesSection.grid.appendChild(createMetricCard({
+    label: 'Total Orders',
+    value: `${qualifyingSalesCount.toLocaleString('en-IN')}`,
+    subtext: `<span style="color: var(--text-secondary);">${totalUnitsSold.toLocaleString('en-IN')} units sold</span>`,
+    icon: 'shopping-bag'
+  }));
+  container.appendChild(salesSection.section);
+
+  // ==========================================
+  // SECTION 2 — PROFITABILITY
+  // ==========================================
+  const profitSection = createReportSection({
+    title: 'Profitability'
+  });
+  profitSection.grid.appendChild(createMetricCard({
     label: 'Cost of Goods Sold (COGS)',
     value: `₹${totalCogs.toLocaleString('en-IN')}`,
     subtext: `<span style="color: var(--text-secondary);">Direct purchase unit costs</span>`,
     icon: 'receipt'
   }));
-  profitGrid.appendChild(createMetricCard({
+  profitSection.grid.appendChild(createMetricCard({
     label: 'Gross Profit',
     value: `₹${grossProfit.toLocaleString('en-IN')}`,
-    subtext: `<span style="color: var(--status-success); font-weight: 600;">${marginPct}%</span> <span style="color: var(--text-secondary);">gross margin</span>`,
+    subtext: `<span style="color: var(--status-success); font-weight: 600;">₹${grossProfit.toLocaleString('en-IN')}</span> <span style="color: var(--text-secondary);">realized profit</span>`,
     icon: 'trending-up',
     variant: 'success'
   }));
-  profitGrid.appendChild(createMetricCard({
+  profitSection.grid.appendChild(createMetricCard({
+    label: 'Gross Margin',
+    value: `${marginPct}%`,
+    subtext: `<span style="color: var(--text-secondary);">Gross profit / Total revenue</span>`,
+    icon: 'percent',
+    variant: Number(marginPct) > 0 ? 'success' : 'default'
+  }));
+  container.appendChild(profitSection.section);
+
+  // ==========================================
+  // SECTION 3 — INVENTORY VALUE
+  // ==========================================
+  const inventorySection = createReportSection({
+    title: 'Inventory Value'
+  });
+  inventorySection.grid.appendChild(createMetricCard({
     label: 'Available Inventory Valuation',
     value: `₹${stockValue.toLocaleString('en-IN')}`,
-    subtext: `<span style="color: var(--text-secondary);">${metrics.totalStock} units across ${metrics.totalProducts} products</span>`,
+    subtext: `<span style="color: var(--text-secondary);">Valuation at purchase cost</span>`,
     icon: 'boxes'
   }));
-  container.appendChild(profitGrid);
+  inventorySection.grid.appendChild(createMetricCard({
+    label: 'Total Stock Units',
+    value: `${(metrics.totalStock || 0).toLocaleString('en-IN')}`,
+    subtext: `<span style="color: var(--text-secondary);">${metrics.totalProducts || 0} products in catalog (${metrics.activeStock || 0} active units)</span>`,
+    icon: 'package'
+  }));
+  container.appendChild(inventorySection.section);
 
-  // Cash position: revenue is what was billed, collected is what actually came in.
+  // ==========================================
+  // SECTION 4 — PAYMENTS & RECEIVABLES
+  // ==========================================
   const payTotals = store.getPaymentTotals();
-  const cashGrid = document.createElement('div');
-  cashGrid.className = 'kpi-grid';
-  cashGrid.style.marginTop = '1.25rem';
-  cashGrid.appendChild(createMetricCard({
+  const paymentSection = createReportSection({
+    title: 'Payments & Receivables'
+  });
+  paymentSection.grid.appendChild(createMetricCard({
     label: 'Cash Collected',
     value: `₹${payTotals.collected.toLocaleString('en-IN')}`,
     subtext: `<span style="color: var(--text-secondary);">Payments actually received</span>`,
     icon: 'wallet',
     variant: 'success'
   }));
-  cashGrid.appendChild(createMetricCard({
+  paymentSection.grid.appendChild(createMetricCard({
     label: 'Outstanding Receivables',
     value: `₹${payTotals.outstanding.toLocaleString('en-IN')}`,
     subtext: `<span style="color: var(--text-secondary);">${payTotals.unpaidCount} sale${payTotals.unpaidCount === 1 ? '' : 's'} awaiting payment${payTotals.unpaidCount > 0 ? ' — click to collect' : ''}</span>` +
@@ -16741,13 +17378,13 @@ function renderReports(onNavigate = null) {
     // Route straight from the figure to the sales that make it up.
     onClick: payTotals.unpaidCount > 0 && onNavigate ? () => onNavigate('sales', { filter: 'unpaid' }) : null
   }));
-  cashGrid.appendChild(createMetricCard({
+  paymentSection.grid.appendChild(createMetricCard({
     label: 'Collection Rate',
     value: `${payTotals.revenue > 0 ? Math.round((payTotals.collected / payTotals.revenue) * 1000) / 10 : 100}%`,
     subtext: `<span style="color: var(--text-secondary);">of ₹${payTotals.revenue.toLocaleString('en-IN')} billed</span>`,
     icon: 'percent'
   }));
-  container.appendChild(cashGrid);
+  container.appendChild(paymentSection.section);
 
   // Cross-Module Data Reconciliation Card
   const reconCard = document.createElement('div');
@@ -16944,7 +17581,7 @@ function renderRecordPaymentPage(params = {}, onNavigate = null) {
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
         <div class="form-group">
           <label class="form-label" for="payment-amount-input" style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">Amount (₹) *</label>
-          <input type="number" class="form-input" id="payment-amount-input" min="0" step="0.01" value="${balance}" data-max="${balance}">
+          <input type="number" class="form-input" id="payment-amount-input" min="0" step="0.01" value="${balance}" data-max="${balance}" placeholder="Enter amount">
         </div>
         <div class="form-group">
           <label class="form-label" for="payment-method-select" style="font-weight: 600; color: var(--text-primary); font-size: 0.875rem;">Payment Method</label>
@@ -17152,7 +17789,7 @@ function renderProfilePage(params = {}, onNavigate = null) {
       icon: 'user',
       title: 'Personal Information',
       description: 'Your name and role as they appear in the admin header.',
-      body: field({ id: 'store-owner-name', label: 'Owner Name', value: info.ownerName, placeholder: 'e.g. Suresh Menon', required: true })
+      body: field({ id: 'store-owner-name', label: 'Owner Name', value: info.ownerName, placeholder: 'e.g. VISHNU VIKASH', required: true })
           + field({ id: 'store-owner-role', label: 'Owner Role', value: info.ownerRole, placeholder: 'e.g. Store Owner' })
     })}
 
@@ -17160,10 +17797,10 @@ function renderProfilePage(params = {}, onNavigate = null) {
       icon: 'store',
       title: 'Store Information',
       description: 'The store identity and contact details shown in the sidebar and on reports.',
-      body: field({ id: 'store-name-input', label: 'Store Name', value: info.name, placeholder: 'e.g. Apex Fashion Store', required: true })
-          + field({ id: 'store-branch-input', label: 'Branch', value: info.branch, placeholder: 'e.g. Main Street Branch #01' })
-          + field({ id: 'store-email-input', label: 'Store Email', value: info.email, placeholder: 'e.g. manager@apexfashion.com', type: 'email' })
-          + field({ id: 'store-phone-input', label: 'Store Phone', value: info.phone, placeholder: 'e.g. +91 98765 43210', type: 'tel' })
+      body: field({ id: 'store-name-input', label: 'Store Name', value: info.name, placeholder: 'e.g. Master', required: true })
+          + field({ id: 'store-branch-input', label: 'Branch', value: info.branch, placeholder: 'e.g. Clothing Fashion' })
+          + field({ id: 'store-email-input', label: 'Store Email', value: info.email, placeholder: 'e.g. vishnu@masterclothing.com', type: 'email' })
+          + field({ id: 'store-phone-input', label: 'Store Phone', value: info.phone, placeholder: 'e.g. 9876543210', type: 'tel' })
           + `<div style="grid-column: 1 / -1;">${field({ id: 'store-address-input', label: 'Store Address', value: info.address, placeholder: 'e.g. 124 Commerce Avenue, Fashion District' })}</div>`
     })}
 
@@ -17416,7 +18053,7 @@ function renderSettings(onThemeToggle, onNavigate = null) {
         <label id="settings-categories-label" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Categories (0)</label>
         <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-categories-list"></div>
         <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
-          <input type="text" id="add-category-input" class="form-input" placeholder="New category..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
+          <input type="text" id="add-category-input" class="form-input" placeholder="Enter category name" style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
           <button type="button" class="btn btn-secondary btn-sm" id="btn-add-category">Add</button>
         </div>
       </div>
@@ -17426,7 +18063,7 @@ function renderSettings(onThemeToggle, onNavigate = null) {
         <label id="settings-brands-label" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Brands (0)</label>
         <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-brands-list"></div>
         <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
-          <input type="text" id="add-brand-input" class="form-input" placeholder="New brand..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
+          <input type="text" id="add-brand-input" class="form-input" placeholder="Enter brand name" style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
           <button type="button" class="btn btn-secondary btn-sm" id="btn-add-brand">Add</button>
         </div>
       </div>
@@ -17436,7 +18073,7 @@ function renderSettings(onThemeToggle, onNavigate = null) {
         <label id="settings-sizes-label" style="font-size: 0.85rem; font-weight: 600; color: var(--text-primary);">Sizes (0)</label>
         <div style="display: flex; flex-wrap: wrap; gap: 0.4rem;" id="settings-sizes-list"></div>
         <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
-          <input type="text" id="add-size-input" class="form-input" placeholder="e.g. XXL, 42..." style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
+          <input type="text" id="add-size-input" class="form-input" placeholder="Enter size (e.g. XXL, 42)" style="font-size: 0.8rem; padding: 0.35rem 0.65rem;">
           <button type="button" class="btn btn-secondary btn-sm" id="btn-add-size">Add</button>
         </div>
       </div>

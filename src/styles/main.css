@@ -17,6 +17,54 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* Prevent unintended typing caret across all non-input UI (display text, dropdowns, buttons, badges, labels, tables) while keeping text inputs functional */
+:root,
+body,
+button,
+label,
+select,
+.form-select,
+.badge,
+.btn,
+.nav-item,
+.card,
+.stat-card,
+.table th,
+.table td,
+[role="button"] {
+  caret-color: transparent;
+}
+
+/* Allow text editing carets ONLY on actual editable text inputs, textareas, and contenteditable elements */
+input:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="color"]):not([type="range"]),
+textarea,
+[contenteditable="true"],
+[contenteditable=""],
+.form-input,
+.form-textarea,
+.sale-combobox-input {
+  caret-color: auto;
+}
+
+/* Select dropdowns are interactive choice pickers, never text inputs */
+select,
+.form-select {
+  caret-color: transparent !important;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sale-combobox-menu,
+.sale-combobox-item,
+.sale-combobox-empty,
+.sale-cust-dropdown-menu,
+.sale-cust-item,
+.sale-cust-create-item,
+.sale-cust-empty {
+  caret-color: transparent !important;
+  user-select: none;
+}
+
 /* Layout Grid */
 .app-layout {
   display: flex;
@@ -89,6 +137,8 @@ body {
   gap: 0.75rem;
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+  cursor: default;
+  user-select: none;
 }
 
 .brand-badge {
@@ -595,6 +645,18 @@ body {
   gap: 0.4rem;
 }
 
+.cust-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .cust-info-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .form-label {
   font-size: var(--font-size-label);
   font-weight: var(--font-weight-label);
@@ -613,6 +675,11 @@ body {
   line-height: 1.4;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.form-select {
+  cursor: pointer;
+  user-select: none;
 }
 
 .form-input::placeholder, .form-textarea::placeholder {
@@ -934,7 +1001,8 @@ body {
 /* Floating chart tooltip and product search dropdown carry heavy inline
    shadows meant for dark mode; soften them to the shared shadow scale. */
 .sales-chart-tooltip,
-.sale-combobox-menu {
+.sale-combobox-menu,
+.sale-cust-dropdown-menu {
   box-shadow: var(--shadow-md) !important;
 }
 

@@ -14,7 +14,7 @@ export function createTopbar(activeTitle, onThemeToggle) {
     <div class="topbar-right">
       <div style="font-size: 0.8rem; background: var(--bg-secondary); padding: 0.35rem 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: flex; align-items: center; gap: 0.4rem;">
         <span style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--status-success);"></span>
-        <span style="font-weight: 500; color: var(--text-secondary);">Store #01 • Online</span>
+        <span style="font-weight: 500; color: var(--text-secondary);">Master Clothing Fashion • Online</span>
       </div>
       
       <button class="btn btn-secondary btn-sm theme-toggle-btn" title="Toggle Light/Dark Mode" style="padding: 0.45rem;">
@@ -23,10 +23,10 @@ export function createTopbar(activeTitle, onThemeToggle) {
 
       <div style="display: flex; align-items: center; gap: 0.6rem; padding-left: 0.5rem; border-left: 1px solid var(--border-color);">
         <div style="width: 32px; height: 32px; border-radius: 50%; background-color: var(--brand-primary); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 0.85rem;">
-          SM
+          VV
         </div>
         <div style="display: flex; flex-direction: column;">
-          <span style="font-size: 0.85rem; font-weight: 600; line-height: 1.2;">Suresh Menon</span>
+          <span style="font-size: 0.85rem; font-weight: 600; line-height: 1.2;">VISHNU VIKASH</span>
           <span style="font-size: 0.725rem; color: var(--text-secondary);">Store Owner</span>
         </div>
       </div>

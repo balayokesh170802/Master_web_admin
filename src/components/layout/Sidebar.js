@@ -22,8 +22,8 @@ export function createSidebar(activeNavId, onNavigate) {
   header.innerHTML = `
     <div class="brand-badge">M</div>
     <div>
-      <div class="brand-title">Master Admin</div>
-      <div class="brand-subtitle">Apex Store #01</div>
+      <div class="brand-title">Master</div>
+      <div class="brand-subtitle">Clothing Fashion</div>
     </div>
   `;
   

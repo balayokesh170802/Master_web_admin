@@ -5,22 +5,24 @@
 
 const initialData = {
   storeInfo: {
-    name: "Apex Fashion Store",
-    branch: "Main Street Branch #01",
+    name: "Master",
+    branch: "Clothing Fashion",
+    ownerName: "VISHNU VIKASH",
+    ownerRole: "Store Owner",
     currency: "₹",
     currencyCode: "INR",
-    phone: "+91 98765 43210",
-    email: "manager@apexfashion.com",
+    phone: "9876543210",
+    email: "vishnu@masterclothing.com",
     address: "124 Commerce Avenue, Fashion District, City",
     defaultMinStock: 10
   },
 
   categories: ["Shirts", "T-Shirts", "Jeans", "Trousers", "Hoodies"],
-  brands: ["ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
+  brands: ["Master", "ClassicFit", "UrbanWear", "DenimCo", "EssentialStudio"],
   sizes: ["S", "M", "L", "XL"],
   
   suppliers: [
-    { id: "SUP-01", name: "Apex Apparel Ltd", contact: "Rajesh Kumar (+91 98111 22334)", city: "Tirupur" },
+    { id: "SUP-01", name: "Sri Textiles", contact: "Ganesh Raman (+91 98450 12345)", city: "Tirupur" },
     { id: "SUP-02", name: "SilkRoute Fabrics", contact: "Anita Sharma (+91 98222 33445)", city: "Surat" },
     { id: "SUP-03", name: "Urban Thread Co", contact: "Vikram Singh (+91 98333 44556)", city: "Ludhiana" }
   ],
@@ -31,19 +33,18 @@ const initialData = {
       id: "PROD-101",
       name: "Classic Oxford Shirt",
       category: "Shirts",
-      brand: "ClassicFit",
+      brand: "Master",
       description: "100% Cotton button-down Oxford shirt suitable for daily formal and casual wear.",
       purchasePrice: 650,
-      sellingPrice: 1499,
+      sellingPrice: 999,
       minStock: 12,
-      supplier: "Apex Apparel Ltd",
+      supplier: "Sri Textiles",
       status: "Active",
       variants: [
-        { sku: "OXF-BLK-S", size: "S", stock: 18, damaged: 1, daysInStock: 25 },
-        { sku: "OXF-BLK-M", size: "M", stock: 4, damaged: 0, daysInStock: 40 },
-        { sku: "OXF-BLK-L", size: "L", stock: 0, damaged: 2, daysInStock: 15 },
-        { sku: "OXF-WHT-M", size: "M", stock: 22, damaged: 0, daysInStock: 12 },
-        { sku: "OXF-WHT-L", size: "L", stock: 15, damaged: 1, daysInStock: 10 }
+        { sku: "OXF-WHT-S", size: "S", stock: 15, buyingPrice: 650, sellingPrice: 999, damaged: 0, daysInStock: 25 },
+        { sku: "OXF-WHT-M", size: "M", stock: 20, buyingPrice: 650, sellingPrice: 999, damaged: 0, daysInStock: 12 },
+        { sku: "OXF-WHT-L", size: "L", stock: 12, buyingPrice: 650, sellingPrice: 999, damaged: 0, daysInStock: 10 },
+        { sku: "OXF-WHT-XL", size: "XL", stock: 8, buyingPrice: 650, sellingPrice: 999, damaged: 0, daysInStock: 15 }
       ]
     },
     {
@@ -173,17 +174,17 @@ const initialData = {
       type: "Stock In",
       quantity: 20,
       reference: "PUR-2026-095",
-      user: "Manager - Suresh"
+      user: "Manager - Vishnu"
     },
     {
       id: "MOV-5003",
       date: "2026-10-05 04:15 PM",
       product: "Classic Oxford Shirt",
-      sku: "OXF-BLK-L",
-      type: "Damage",
-      quantity: 2,
+      sku: "OXF-WHT-M",
+      type: "Stock In",
+      quantity: 20,
       reference: "PUR-2026-095",
-      user: "Manager - Suresh"
+      user: "Manager - Vishnu"
     },
     {
       id: "MOV-5004",
@@ -201,16 +202,15 @@ const initialData = {
   purchases: [
     {
       id: "PUR-2026-095",
-      supplier: "Apex Apparel Ltd",
-      invoiceNumber: "INV-APX-8842",
+      supplier: "Sri Textiles",
+      invoiceNumber: "INV-SRI-8842",
       date: "2026-10-05",
-      productCount: 2,
-      totalQuantity: 40,
-      totalAmount: 26000,
+      productCount: 1,
+      totalQuantity: 20,
+      totalAmount: 13000,
       status: "Completed",
       items: [
-        { product: "Classic Oxford Shirt", sku: "OXF-WHT-M", received: 20, good: 20, damaged: 0, price: 650 },
-        { product: "Classic Oxford Shirt", sku: "OXF-BLK-L", received: 20, good: 18, damaged: 2, price: 650 }
+        { product: "Classic Oxford Shirt", sku: "OXF-WHT-M", size: "M", received: 20, good: 20, damaged: 0, price: 650 }
       ]
     },
     {
@@ -234,14 +234,14 @@ const initialData = {
     {
       id: "BILL-2026-1004",
       date: "2026-10-06 10:30 AM",
-      customer: "Amit Verma",
-      phone: "+91 98123 45678",
+      customer: "Arun Kumar",
+      phone: "9876543210",
       itemCount: 2,
-      totalAmount: 2998,
+      totalAmount: 1998,
       paymentMethod: "UPI",
       status: "Completed",
       items: [
-        { product: "Classic Oxford Shirt", sku: "OXF-WHT-M", qty: 2, price: 1499, discount: 0, amount: 2998 }
+        { product: "Classic Oxford Shirt", sku: "OXF-WHT-M", size: "M", qty: 2, price: 999, discount: 0, amount: 1998 }
       ]
     },
     {
@@ -288,14 +288,15 @@ const initialData = {
 
   // Customers
   customers: [
-    { id: "CUST-01", name: "Amit Verma", phone: "+91 98123 45678", ordersCount: 4, lastPurchase: "2026-10-06", totalSpend: 8996 },
-    { id: "CUST-02", name: "Kavita Reddy", phone: "+91 97654 32109", ordersCount: 2, lastPurchase: "2026-10-06", totalSpend: 4498 },
-    { id: "CUST-03", name: "Rohan Gupta", phone: "+91 99887 76655", ordersCount: 3, lastPurchase: "2026-10-05", totalSpend: 5597 },
-    { id: "CUST-04", name: "Sneha Patel", phone: "+91 98765 11223", ordersCount: 5, lastPurchase: "2026-10-04", totalSpend: 11495 }
+    { id: "CUST-01", name: "Arun Kumar", phone: "9876543210", ordersCount: 1, lastPurchase: "2026-10-06", totalSpend: 1998 },
+    { id: "CUST-02", name: "Amit Verma", phone: "+91 98123 45678", ordersCount: 4, lastPurchase: "2026-10-06", totalSpend: 8996 },
+    { id: "CUST-03", name: "Kavita Reddy", phone: "+91 97654 32109", ordersCount: 2, lastPurchase: "2026-10-06", totalSpend: 4498 },
+    { id: "CUST-04", name: "Rohan Gupta", phone: "+91 99887 76655", ordersCount: 3, lastPurchase: "2026-10-05", totalSpend: 5597 },
+    { id: "CUST-05", name: "Sneha Patel", phone: "+91 98765 11223", ordersCount: 5, lastPurchase: "2026-10-04", totalSpend: 11495 }
   ],
 
   users: [
-    { id: "USR-01", name: "Suresh Menon", role: "Store Owner / Admin", email: "suresh@apexfashion.com", status: "Active" },
+    { id: "USR-01", name: "VISHNU VIKASH", role: "Store Owner / Admin", email: "vishnu@masterclothing.com", status: "Active" },
     { id: "USR-02", name: "Priya Nair", role: "Billing Staff", email: "priya@apexfashion.com", status: "Active" }
   ]
 };
