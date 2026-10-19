@@ -7509,15 +7509,20 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
     `;
     container.appendChild(summaryCard);
 
-    // 3. SECTION 01 — Basic Information
+    // 3. MAIN PRODUCT DETAILS CONTAINER (One continuous background matching Add Sale)
+    const mainCard = document.createElement('div');
+    mainCard.className = 'card product-details-main-card';
+    mainCard.style.cssText = 'display: flex; flex-direction: column; gap: 1.5rem; width: 100%; box-sizing: border-box;';
+
+    // SECTION 01 — Basic Information
     const catOptions = store.getCategories();
     const brandOptions = store.getBrands();
 
     const sec1Card = document.createElement('div');
-    sec1Card.className = 'card';
-    sec1Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); width: 100%; box-sizing: border-box;';
+    sec1Card.className = 'product-details-section';
+    sec1Card.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%; box-sizing: border-box;';
     sec1Card.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color);">
         <div style="display: flex; align-items: center; gap: 0.5rem;">
           <i data-lucide="file-text" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
           <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: var(--text-primary);">Section 01 — Basic Information</h3>
@@ -7569,50 +7574,25 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           </label>
           <textarea id="manage-prod-desc" class="form-textarea" rows="2" placeholder="Enter product description, fabric, care instructions..." style="font-size: 0.85rem; padding: 0.5rem 0.75rem; line-height: 1.4; resize: vertical;">${escapeHtml(product.description || '')}</textarea>
         </div>
-
-        <div style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--border-color); margin-top: 0.25rem;">
-          <button type="button" id="manage-save-basic-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-size: 0.85rem; font-weight: 600;">
-            <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
-            <span>Save Changes</span>
-          </button>
-        </div>
       </div>
     `;
-    container.appendChild(sec1Card);
+    mainCard.appendChild(sec1Card);
 
-    // Basic Info Save Handler
-    sec1Card.querySelector('#manage-save-basic-btn').onclick = () => {
-      const name = sec1Card.querySelector('#manage-prod-name').value.trim();
-      const category = sec1Card.querySelector('#manage-prod-cat').value;
-      const brand = sec1Card.querySelector('#manage-prod-brand').value;
-      const status = sec1Card.querySelector('#manage-prod-status').value;
-      const description = sec1Card.querySelector('#manage-prod-desc').value.trim();
-      const errEl = sec1Card.querySelector('#manage-prod-name-err');
-
-      if (!name) {
-        if (errEl) errEl.style.display = 'block';
-        toast.show({ message: 'Product Name is required.', type: 'danger' });
-        sec1Card.querySelector('#manage-prod-name').focus();
-        return;
-      }
-      if (errEl) errEl.style.display = 'none';
-
-      store.updateProduct(product.id, {
-        name,
-        category,
-        brand,
-        status,
-        description
+    // Enter key triggers page save
+    const nameInput = sec1Card.querySelector('#manage-prod-name');
+    if (nameInput) {
+      nameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleSaveAllProductDetails();
+        }
       });
-
-      toast.show({ message: 'Product basic information updated successfully.', type: 'success' });
-      renderPage();
-    };
+    }
 
     // 4. SECTION 02 — Size & Pricing
     const sec2Card = document.createElement('div');
-    sec2Card.className = 'card';
-    sec2Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); width: 100%; box-sizing: border-box;';
+    sec2Card.className = 'product-details-section';
+    sec2Card.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%; box-sizing: border-box; border-top: 1px solid var(--border-color); padding-top: 1.25rem;';
     
     let pricingBodyHtml = '';
     if (hasSizes) {
@@ -7709,40 +7689,10 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
         <div>
           ${pricingBodyHtml}
         </div>
-        <div style="display: flex; justify-content: flex-end; padding-top: 0.75rem; border-top: 1px solid var(--border-color); margin-top: 0.25rem;">
-          <button type="button" id="manage-save-pricing-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-size: 0.85rem; font-weight: 600;">
-            <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
-            <span>Save Price Changes</span>
-          </button>
-        </div>
       </div>
     `;
 
-    container.appendChild(sec2Card);
-
-    // Pricing Save Handler
-    sec2Card.querySelector('#manage-save-pricing-btn').onclick = () => {
-      const defaultPriceInput = sec2Card.querySelector('#manage-default-selling-price');
-      const defaultPriceVal = defaultPriceInput ? defaultPriceInput.value.trim() : '';
-      const sellingPrice = defaultPriceVal !== '' ? parseFloat(defaultPriceVal) : null;
-
-      const variantPrices = {};
-      sec2Card.querySelectorAll('.manage-variant-price-inp').forEach(inp => {
-        const sz = inp.getAttribute('data-size');
-        const val = inp.value.trim();
-        if (val !== '' && !isNaN(parseFloat(val))) {
-          variantPrices[sz] = parseFloat(val);
-        }
-      });
-
-      store.updateProduct(product.id, {
-        sellingPrice,
-        variantPrices
-      });
-
-      toast.show({ message: 'Size & pricing updated successfully. Inventory quantities preserved.', type: 'success' });
-      renderPage();
-    };
+    mainCard.appendChild(sec2Card);
 
     // 5. SECTION 03 — Stock Management
     const lowStockThreshold = (typeof store !== 'undefined' && typeof store.getLowStockThreshold === 'function')
@@ -7754,9 +7704,9 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
       : (variants[0] ? variants[0].size : 'Standard');
 
     const sec3Card = document.createElement('div');
-    sec3Card.className = 'card';
+    sec3Card.className = 'product-details-section';
     sec3Card.id = 'product-stock-management-section';
-    sec3Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); width: 100%; box-sizing: border-box;';
+    sec3Card.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%; box-sizing: border-box; border-top: 1px solid var(--border-color); padding-top: 1.25rem;';
 
     const ADD_STOCK_REASONS = [
       'Found Stock',
@@ -8127,13 +8077,6 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
               Total: <strong style="color: var(--text-primary);">${adjustmentEntries.length} ${adjustmentEntries.length === 1 ? 'adjustment' : 'adjustments'}</strong> queued
             </span>
           </div>
-
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <button type="button" id="manage-save-adj-btn" class="btn btn-primary" style="padding: 0.5rem 1.25rem; font-weight: 600; display: flex; align-items: center; gap: 0.45rem;">
-              <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
-              <span>Save All Adjustments</span>
-            </button>
-          </div>
         </div>
       `;
 
@@ -8231,11 +8174,6 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
           syncVariantHighlight();
         };
       }
-
-      const saveAllBtn = adjPanel.querySelector('#manage-save-adj-btn');
-      if (saveAllBtn) {
-        saveAllBtn.onclick = handleSaveAllAdjustments;
-      }
     }
 
     function addAdjustmentEntry(sz, type = 'ADD') {
@@ -8283,85 +8221,158 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
       };
     });
 
-    // Save All Adjustments handler
-    let isSavingAdj = false;
-    async function handleSaveAllAdjustments() {
-      if (isSavingAdj) return;
-      if (!adjustmentEntries || adjustmentEntries.length === 0) {
-        toast.show({ message: 'No adjustment entries to save. Please add at least one adjustment.', type: 'warning' });
-        return;
-      }
+    // Consolidated Single Save Handler for all Product Details sections
+    let isSavingProduct = false;
+    async function handleSaveAllProductDetails() {
+      if (isSavingProduct) return;
 
-      syncEntriesFromDOM();
+      // 1. Validate & Collect Section 01 (Basic Information)
+      const nameInput = sec1Card.querySelector('#manage-prod-name');
+      const name = nameInput ? nameInput.value.trim() : '';
+      const catSelect = sec1Card.querySelector('#manage-prod-cat');
+      const category = catSelect ? catSelect.value : (product.category || 'General');
+      const brandSelect = sec1Card.querySelector('#manage-prod-brand');
+      const brand = brandSelect ? brandSelect.value : (product.brand || 'Unbranded');
+      const statusSelect = sec1Card.querySelector('#manage-prod-status');
+      const status = statusSelect ? statusSelect.value : (product.status || 'Active');
+      const descTextarea = sec1Card.querySelector('#manage-prod-desc');
+      const description = descTextarea ? descTextarea.value.trim() : '';
+      const nameErrEl = sec1Card.querySelector('#manage-prod-name-err');
 
-      const cards = adjPanel.querySelectorAll('.adjustment-entry-card');
-      let hasErrors = false;
-      cards.forEach(card => {
-        const valid = validateAndCalculateEntry(card);
-        if (!valid) hasErrors = true;
-      });
-
-      if (hasErrors) {
-        toast.show({ message: 'Please fix invalid quantities or negative stock before saving.', type: 'danger' });
-        return;
-      }
-
-      // Check cumulative removals per size
-      const removalTotalsBySize = {};
-      for (const entry of adjustmentEntries) {
-        if (entry.type === 'REMOVE') {
-          removalTotalsBySize[entry.size] = (removalTotalsBySize[entry.size] || 0) + entry.qty;
+      if (!name) {
+        if (nameErrEl) nameErrEl.style.display = 'block';
+        toast.show({ message: 'Product Name is required.', type: 'danger' });
+        if (nameInput) {
+          nameInput.focus();
+          nameInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
+        return;
+      }
+      if (nameErrEl) nameErrEl.style.display = 'none';
+
+      // 2. Validate & Collect Section 02 (Size & Pricing)
+      const defaultPriceInput = sec2Card.querySelector('#manage-default-selling-price');
+      const defaultPriceVal = defaultPriceInput ? defaultPriceInput.value.trim() : '';
+      let sellingPrice = defaultPriceVal !== '' ? parseFloat(defaultPriceVal) : null;
+      if (defaultPriceVal !== '' && (isNaN(sellingPrice) || sellingPrice < 0)) {
+        toast.show({ message: 'Selling price must be a valid positive number.', type: 'danger' });
+        if (defaultPriceInput) {
+          defaultPriceInput.focus();
+          defaultPriceInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        return;
       }
 
-      for (const [sz, totalRemove] of Object.entries(removalTotalsBySize)) {
-        const v = variants.find(variant => variant.size === sz);
-        const available = v ? (Number(v.stock) || 0) : 0;
-        if (totalRemove > available) {
-          toast.show({
-            message: `Cannot remove total of ${totalRemove} units for Size ${sz}. Maximum available stock is ${available} units. (Negative stock prevented)`,
-            type: 'danger'
-          });
+      const variantPrices = {};
+      let variantPriceErr = false;
+      sec2Card.querySelectorAll('.manage-variant-price-inp').forEach(inp => {
+        if (variantPriceErr) return;
+        const sz = inp.getAttribute('data-size');
+        const val = inp.value.trim();
+        if (val !== '') {
+          const parsedVal = parseFloat(val);
+          if (isNaN(parsedVal) || parsedVal < 0) {
+            variantPriceErr = true;
+            toast.show({ message: `Selling price for Size ${sz} must be a valid positive number.`, type: 'danger' });
+            inp.focus();
+            inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+          }
+          variantPrices[sz] = parsedVal;
+        }
+      });
+      if (variantPriceErr) return;
+
+      // 3. Validate Section 03 (Stock Management Adjustments)
+      syncEntriesFromDOM();
+      if (adjustmentEntries && adjustmentEntries.length > 0) {
+        const cards = adjPanel ? adjPanel.querySelectorAll('.adjustment-entry-card') : [];
+        let hasAdjErrors = false;
+        cards.forEach(card => {
+          const valid = validateAndCalculateEntry(card);
+          if (!valid) hasAdjErrors = true;
+        });
+
+        if (hasAdjErrors) {
+          toast.show({ message: 'Please fix invalid quantities or negative stock before saving.', type: 'danger' });
+          if (sec3Card) sec3Card.scrollIntoView({ behavior: 'smooth', block: 'start' });
           return;
         }
+
+        // Check cumulative removals per size
+        const removalTotalsBySize = {};
+        for (const entry of adjustmentEntries) {
+          if (entry.type === 'REMOVE') {
+            removalTotalsBySize[entry.size] = (removalTotalsBySize[entry.size] || 0) + entry.qty;
+          }
+        }
+
+        for (const [sz, totalRemove] of Object.entries(removalTotalsBySize)) {
+          const v = variants.find(variant => variant.size === sz);
+          const available = v ? (Number(v.stock) || 0) : 0;
+          if (totalRemove > available) {
+            toast.show({
+              message: `Cannot remove total of ${totalRemove} units for Size ${sz}. Maximum available stock is ${available} units. (Negative stock prevented)`,
+              type: 'danger'
+            });
+            if (sec3Card) sec3Card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+          }
+        }
       }
 
-      isSavingAdj = true;
-      const saveBtn = adjPanel.querySelector('#manage-save-adj-btn');
+      // 4. Perform Updates Across All Sections
+      isSavingProduct = true;
+      const saveBtn = container.querySelector('#manage-save-all-btn');
       if (saveBtn) {
         saveBtn.disabled = true;
         saveBtn.style.opacity = '0.6';
       }
 
-      let appliedCount = 0;
-      const updatedSizes = [];
       try {
-        for (const entry of adjustmentEntries) {
-          const targetSz = entry.size;
-          const result = store.adjustProductStock({
-            productId: product.id,
-            size: targetSz,
-            adjustmentType: entry.type,
-            quantity: entry.qty,
-            reason: entry.reason
-          });
-          appliedCount++;
-          if (!updatedSizes.includes(targetSz)) {
-            updatedSizes.push(targetSz);
-          }
-          activeSelectedSize = targetSz;
-        }
-
-        toast.show({
-          message: `Stock adjusted successfully: ${appliedCount} adjustment${appliedCount > 1 ? 's' : ''} applied for ${escapeHtml(product.name)} (${updatedSizes.join(', ')}).`,
-          type: 'success'
+        // Save basic info & pricing
+        store.updateProduct(product.id, {
+          name,
+          category,
+          brand,
+          status,
+          description,
+          sellingPrice,
+          variantPrices
         });
 
-        adjustmentEntries = [];
+        // Apply queued stock adjustments if any
+        let adjustmentsApplied = 0;
+        if (adjustmentEntries && adjustmentEntries.length > 0) {
+          const updatedSizes = [];
+          for (const entry of adjustmentEntries) {
+            const targetSz = entry.size;
+            store.adjustProductStock({
+              productId: product.id,
+              size: targetSz,
+              adjustmentType: entry.type,
+              quantity: entry.qty,
+              reason: entry.reason
+            });
+            adjustmentsApplied++;
+            if (!updatedSizes.includes(targetSz)) {
+              updatedSizes.push(targetSz);
+            }
+            activeSelectedSize = targetSz;
+          }
+          adjustmentEntries = [];
+        }
+
+        const msg = adjustmentsApplied > 0
+          ? `Product details and ${adjustmentsApplied} stock adjustment${adjustmentsApplied > 1 ? 's' : ''} saved successfully.`
+          : 'Product details updated successfully.';
+        toast.show({ message: msg, type: 'success' });
+
         renderPage();
       } catch (err) {
-        toast.show({ message: err.message || 'Error saving stock adjustment.', type: 'danger' });
-        isSavingAdj = false;
+        console.error('Error saving product details:', err);
+        toast.show({ message: err.message || 'Error saving product details.', type: 'danger' });
+        isSavingProduct = false;
         if (saveBtn) {
           saveBtn.disabled = false;
           saveBtn.style.opacity = '';
@@ -8375,8 +8386,8 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
 
     // 6. SECTION 04 — Stock History
     const sec4Card = document.createElement('div');
-    sec4Card.className = 'card';
-    sec4Card.style.cssText = 'padding: 1.25rem 1.5rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); width: 100%; box-sizing: border-box;';
+    sec4Card.className = 'product-details-section';
+    sec4Card.style.cssText = 'display: flex; flex-direction: column; gap: 1rem; width: 100%; box-sizing: border-box; border-top: 1px solid var(--border-color); padding-top: 1.25rem;';
 
     const allMovements = store.data.stockMovements || [];
     const productMovements = allMovements.filter(m => {
@@ -8467,9 +8478,39 @@ function renderProductManagementPage(params = {}, onNavigate = null) {
       ${historyTableHtml}
     `;
 
-    // Append Section 03 and Section 04 sequentially in single-column layout
-    container.appendChild(sec3Card);
-    container.appendChild(sec4Card);
+    // Append Section 03, Section 04, and Bottom Action Bar inside mainCard
+    mainCard.appendChild(sec3Card);
+    mainCard.appendChild(sec4Card);
+
+    // 7. Page-Level Action Bar (Single Primary Save Button)
+    const bottomBar = document.createElement('div');
+    bottomBar.className = 'product-details-bottom-actions';
+    bottomBar.style.cssText = 'display: flex; justify-content: flex-end; align-items: center; gap: 0.75rem; width: 100%; border-top: 1px solid var(--border-color); padding-top: 1.25rem; box-sizing: border-box;';
+
+    const cancelBtn = createButton({
+      text: 'Cancel',
+      variant: 'secondary',
+      onClick: () => {
+        if (onNavigate) onNavigate('inventory');
+        else if (window.appInstance) window.appInstance.navigateTo('inventory');
+      }
+    });
+
+    const saveBtn = createButton({
+      text: 'Save Changes',
+      icon: 'check-circle',
+      variant: 'primary',
+      extraClass: 'product-details-save-btn',
+      onClick: handleSaveAllProductDetails
+    });
+    saveBtn.id = 'manage-save-all-btn';
+    saveBtn.style.cssText = 'padding: 0.55rem 1.5rem; font-weight: 600; font-size: 0.875rem;';
+
+    bottomBar.appendChild(cancelBtn);
+    bottomBar.appendChild(saveBtn);
+    mainCard.appendChild(bottomBar);
+
+    container.appendChild(mainCard);
 
     if (window.lucide) window.lucide.createIcons();
 
@@ -17429,7 +17470,7 @@ function renderReports(onNavigate = null) {
           </tr>
           <tr>
             <td style="font-weight: 600; color: var(--text-primary);">Physical Inventory Stock</td>
-            <td>${metrics.totalProducts} Products (${metrics.activeStock} Active · ${metrics.archivedStock} Archived)</td>
+            <td>${metrics.totalProducts} Products (${metrics.totalStock} Units)</td>
             <td style="font-weight: 700; color: var(--text-primary);">₹${stockValue.toLocaleString('en-IN')}</td>
             <td>${renderReconBadge(isStockReconciled, 'Matches Physical Stock (' + metrics.totalStock + ' Units)', 'Stock Variant Mismatch')}</td>
           </tr>
