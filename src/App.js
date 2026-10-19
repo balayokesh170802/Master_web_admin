@@ -351,6 +351,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1042",
     "date": "Oct 6, 08:15 PM",
     "customer": "Arun Kumar",
+    "customerId": "CUST-01",
     "phone": "9876543210",
     "itemCount": 2,
     "totalAmount": 1998,
@@ -372,6 +373,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1041",
     "date": "Oct 6, 06:45 PM",
     "customer": "Kavita Reddy",
+    "customerId": "CUST-02",
     "phone": "+91 97654 32109",
     "itemCount": 5,
     "totalAmount": 8195,
@@ -400,6 +402,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1040",
     "date": "Oct 6, 05:10 PM",
     "customer": "Rohan Gupta",
+    "customerId": "CUST-03",
     "phone": "+91 99887 76655",
     "itemCount": 7,
     "totalAmount": 7493,
@@ -428,6 +431,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1039",
     "date": "Oct 6, 03:30 PM",
     "customer": "Sneha Patel",
+    "customerId": "CUST-04",
     "phone": "+91 98765 11223",
     "itemCount": 5,
     "totalAmount": 8095,
@@ -456,6 +460,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1038",
     "date": "Oct 6, 01:15 PM",
     "customer": "Vikram Malhotra",
+    "customerId": "CUST-05",
     "phone": "+91 98234 56789",
     "itemCount": 4,
     "totalAmount": 5596,
@@ -476,6 +481,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1037",
     "date": "Oct 6, 11:00 AM",
     "customer": "Ananya Deshmukh",
+    "customerId": "CUST-06",
     "phone": "+91 97112 23344",
     "itemCount": 7,
     "totalAmount": 6493,
@@ -504,6 +510,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1036",
     "date": "Oct 5, 08:30 PM",
     "customer": "Rajesh Iyer",
+    "customerId": "CUST-07",
     "phone": "+91 98334 45566",
     "itemCount": 6,
     "totalAmount": 9994,
@@ -532,6 +539,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1035",
     "date": "Oct 5, 07:10 PM",
     "customer": "Meera Joshi",
+    "customerId": "CUST-08",
     "phone": "+91 99445 56677",
     "itemCount": 5,
     "totalAmount": 8195,
@@ -560,6 +568,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1034",
     "date": "Oct 5, 05:45 PM",
     "customer": "Suresh Kumar",
+    "customerId": "CUST-09",
     "phone": "+91 98556 67788",
     "itemCount": 7,
     "totalAmount": 8793,
@@ -588,6 +597,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1033",
     "date": "Oct 5, 04:20 PM",
     "customer": "Pooja Sharma",
+    "customerId": "CUST-10",
     "phone": "+91 97667 78899",
     "itemCount": 4,
     "totalAmount": 5996,
@@ -608,6 +618,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1032",
     "date": "Oct 5, 02:00 PM",
     "customer": "Arjun Nair",
+    "customerId": "CUST-11",
     "phone": "+91 98778 89900",
     "itemCount": 4,
     "totalAmount": 5596,
@@ -628,6 +639,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1031",
     "date": "Oct 5, 11:30 AM",
     "customer": "Neha Kapoor",
+    "customerId": "CUST-12",
     "phone": "+91 99889 90011",
     "itemCount": 5,
     "totalAmount": 5695,
@@ -656,6 +668,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1030",
     "date": "Oct 4, 08:10 PM",
     "customer": "Amit Verma",
+    "customerId": "CUST-13",
     "phone": "+91 98123 45678",
     "itemCount": 4,
     "totalAmount": 7996,
@@ -676,6 +689,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1029",
     "date": "Oct 4, 06:40 PM",
     "customer": "Kavita Reddy",
+    "customerId": "CUST-02",
     "phone": "+91 97654 32109",
     "itemCount": 5,
     "totalAmount": 7295,
@@ -704,6 +718,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1028",
     "date": "Oct 4, 05:00 PM",
     "customer": "Rohan Gupta",
+    "customerId": "CUST-03",
     "phone": "+91 99887 76655",
     "itemCount": 7,
     "totalAmount": 4893,
@@ -724,6 +739,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1027",
     "date": "Oct 4, 03:15 PM",
     "customer": "Sneha Patel",
+    "customerId": "CUST-04",
     "phone": "+91 98765 11223",
     "itemCount": 5,
     "totalAmount": 9395,
@@ -752,6 +768,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1026",
     "date": "Oct 4, 01:00 PM",
     "customer": "Vikram Malhotra",
+    "customerId": "CUST-05",
     "phone": "+91 98234 56789",
     "itemCount": 3,
     "totalAmount": 4497,
@@ -772,6 +789,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1025",
     "date": "Oct 4, 10:45 AM",
     "customer": "Ananya Deshmukh",
+    "customerId": "CUST-06",
     "phone": "+91 97112 23344",
     "itemCount": 3,
     "totalAmount": 4197,
@@ -792,6 +810,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1024",
     "date": "Oct 3, 08:00 PM",
     "customer": "Rajesh Iyer",
+    "customerId": "CUST-07",
     "phone": "+91 98334 45566",
     "itemCount": 6,
     "totalAmount": 9994,
@@ -820,6 +839,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1023",
     "date": "Oct 3, 06:20 PM",
     "customer": "Meera Joshi",
+    "customerId": "CUST-08",
     "phone": "+91 99445 56677",
     "itemCount": 3,
     "totalAmount": 5397,
@@ -840,6 +860,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1022",
     "date": "Oct 3, 04:30 PM",
     "customer": "Suresh Kumar",
+    "customerId": "CUST-09",
     "phone": "+91 98556 67788",
     "itemCount": 6,
     "totalAmount": 4194,
@@ -860,6 +881,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1021",
     "date": "Oct 3, 02:15 PM",
     "customer": "Pooja Sharma",
+    "customerId": "CUST-10",
     "phone": "+91 97667 78899",
     "itemCount": 3,
     "totalAmount": 4197,
@@ -880,6 +902,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1020",
     "date": "Oct 3, 11:30 AM",
     "customer": "Arjun Nair",
+    "customerId": "CUST-11",
     "phone": "+91 98778 89900",
     "itemCount": 3,
     "totalAmount": 4497,
@@ -900,6 +923,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1019",
     "date": "Oct 2, 07:45 PM",
     "customer": "Neha Kapoor",
+    "customerId": "CUST-12",
     "phone": "+91 99889 90011",
     "itemCount": 5,
     "totalAmount": 9595,
@@ -928,6 +952,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1018",
     "date": "Oct 2, 05:50 PM",
     "customer": "Amit Verma",
+    "customerId": "CUST-13",
     "phone": "+91 98123 45678",
     "itemCount": 3,
     "totalAmount": 4497,
@@ -948,6 +973,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1017",
     "date": "Oct 2, 04:10 PM",
     "customer": "Kavita Reddy",
+    "customerId": "CUST-02",
     "phone": "+91 97654 32109",
     "itemCount": 3,
     "totalAmount": 4197,
@@ -968,6 +994,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1016",
     "date": "Oct 2, 02:00 PM",
     "customer": "Rohan Gupta",
+    "customerId": "CUST-03",
     "phone": "+91 99887 76655",
     "itemCount": 5,
     "totalAmount": 3495,
@@ -988,6 +1015,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1015",
     "date": "Oct 2, 11:00 AM",
     "customer": "Sneha Patel",
+    "customerId": "CUST-04",
     "phone": "+91 98765 11223",
     "itemCount": 2,
     "totalAmount": 3598,
@@ -1008,6 +1036,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1014",
     "date": "Oct 1, 08:20 PM",
     "customer": "Vikram Malhotra",
+    "customerId": "CUST-05",
     "phone": "+91 98234 56789",
     "itemCount": 3,
     "totalAmount": 5997,
@@ -1028,6 +1057,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1013",
     "date": "Oct 1, 06:30 PM",
     "customer": "Ananya Deshmukh",
+    "customerId": "CUST-06",
     "phone": "+91 97112 23344",
     "itemCount": 3,
     "totalAmount": 4497,
@@ -1048,6 +1078,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1012",
     "date": "Oct 1, 04:45 PM",
     "customer": "Rajesh Iyer",
+    "customerId": "CUST-07",
     "phone": "+91 98334 45566",
     "itemCount": 6,
     "totalAmount": 4194,
@@ -1068,6 +1099,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1011",
     "date": "Oct 1, 02:30 PM",
     "customer": "Meera Joshi",
+    "customerId": "CUST-08",
     "phone": "+91 99445 56677",
     "itemCount": 3,
     "totalAmount": 4197,
@@ -1088,6 +1120,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1010",
     "date": "Oct 1, 11:15 AM",
     "customer": "Suresh Kumar",
+    "customerId": "CUST-09",
     "phone": "+91 98556 67788",
     "itemCount": 2,
     "totalAmount": 3598,
@@ -1108,6 +1141,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1009",
     "date": "Sep 30, 07:30 PM",
     "customer": "Pooja Sharma",
+    "customerId": "CUST-10",
     "phone": "+91 97667 78899",
     "itemCount": 6,
     "totalAmount": 9994,
@@ -1136,6 +1170,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1008",
     "date": "Sep 30, 05:00 PM",
     "customer": "Arjun Nair",
+    "customerId": "CUST-11",
     "phone": "+91 98778 89900",
     "itemCount": 3,
     "totalAmount": 5397,
@@ -1156,6 +1191,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1007",
     "date": "Sep 29, 06:15 PM",
     "customer": "Neha Kapoor",
+    "customerId": "CUST-12",
     "phone": "+91 99889 90011",
     "itemCount": 4,
     "totalAmount": 5596,
@@ -1176,6 +1212,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1006",
     "date": "Sep 29, 03:40 PM",
     "customer": "Amit Verma",
+    "customerId": "CUST-13",
     "phone": "+91 98123 45678",
     "itemCount": 7,
     "totalAmount": 4893,
@@ -1196,6 +1233,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1005",
     "date": "Sep 28, 07:00 PM",
     "customer": "Kavita Reddy",
+    "customerId": "CUST-02",
     "phone": "+91 97654 32109",
     "itemCount": 3,
     "totalAmount": 5997,
@@ -1216,6 +1254,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1004",
     "date": "Sep 28, 04:20 PM",
     "customer": "Rohan Gupta",
+    "customerId": "CUST-03",
     "phone": "+91 99887 76655",
     "itemCount": 3,
     "totalAmount": 4497,
@@ -1236,6 +1275,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1003",
     "date": "Sep 27, 06:00 PM",
     "customer": "Sneha Patel",
+    "customerId": "CUST-04",
     "phone": "+91 98765 11223",
     "itemCount": 3,
     "totalAmount": 5397,
@@ -1256,6 +1296,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1002",
     "date": "Sep 27, 02:15 PM",
     "customer": "Vikram Malhotra",
+    "customerId": "CUST-05",
     "phone": "+91 98234 56789",
     "itemCount": 3,
     "totalAmount": 4197,
@@ -1276,6 +1317,7 @@ const sampleDemoData = {
     "id": "BILL-2026-1001",
     "date": "Sep 26, 05:30 PM",
     "customer": "Ananya Deshmukh",
+    "customerId": "CUST-06",
     "phone": "+91 97112 23344",
     "itemCount": 6,
     "totalAmount": 35479,
@@ -1442,7 +1484,7 @@ const emptyInitialData = {
   ]
 };
 
-const initialData = emptyInitialData;
+const initialData = sampleDemoData;
 
 // ==========================================
 // PURCHASE LIFECYCLE
@@ -1485,27 +1527,25 @@ class StoreManager {
       localStorage.removeItem('master_web_admin_data');
       localStorage.removeItem('master_web_admin_data_v2');
       saved = localStorage.getItem('master_web_admin_data_v3');
-      this.data = saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(emptyInitialData));
+      this.data = saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(sampleDemoData));
     } catch (e) {
-      this.data = JSON.parse(JSON.stringify(emptyInitialData));
+      this.data = JSON.parse(JSON.stringify(sampleDemoData));
     }
 
     if (!this.data || typeof this.data !== 'object') {
-      this.data = JSON.parse(JSON.stringify(emptyInitialData));
+      this.data = JSON.parse(JSON.stringify(sampleDemoData));
     }
 
     if (!Array.isArray(this.data.products)) this.data.products = [];
-    if (!Array.isArray(this.data.categories)) this.data.categories = emptyInitialData.categories || [];
-    if (!Array.isArray(this.data.brands)) this.data.brands = emptyInitialData.brands || [];
+    if (!Array.isArray(this.data.categories)) this.data.categories = sampleDemoData.categories || [];
+    if (!Array.isArray(this.data.brands)) this.data.brands = sampleDemoData.brands || [];
     if (!Array.isArray(this.data.purchases)) this.data.purchases = [];
     if (!Array.isArray(this.data.sales)) this.data.sales = [];
     if (!Array.isArray(this.data.customers)) this.data.customers = [];
     if (!Array.isArray(this.data.stockMovements)) this.data.stockMovements = [];
 
     this.migrateAndRepairData();
-    if (saved) {
-      this.save();
-    }
+    this.save();
   }
 
   loadFromStorage() {
@@ -1513,6 +1553,10 @@ class StoreManager {
       const saved = localStorage.getItem('master_web_admin_data_v3');
       if (saved) {
         this.data = JSON.parse(saved);
+        this.migrateAndRepairData();
+        this.save();
+      } else {
+        this.data = JSON.parse(JSON.stringify(sampleDemoData));
         this.migrateAndRepairData();
         this.save();
       }
